@@ -1,0 +1,25 @@
+{
+  "semi": false,
+  "singleQuote": true,
+  "printWidth": 160,
+  "proseWrap": "never",
+  "trailingComma": "none",
+  "endOfLine": "lf",
+  "plugins": ["prettier-plugin-tailwindcss"],
+  "overrides": [
+    {
+      "files": ["*.html"],
+      "options": {
+        "singleQuote": false,
+        "wrapAttributes": false,
+        "sortAttributes": false
+      }
+    },
+    {
+      "files": ["./src/locales/*.json"],
+      "options": {
+        "plugins": ["prettier-plugin-sort-json"]
+      }
+    }
+  ]
+}

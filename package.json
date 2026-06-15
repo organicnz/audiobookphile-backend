@@ -1,0 +1,15 @@
+{
+  "name": "audiobookphile-backend",
+  "version": "1.0.0",
+  "description": "Supabase backend for audiobookphile",
+  "scripts": {
+    "start": "supabase start",
+    "stop": "supabase stop",
+    "status": "supabase status",
+    "deploy": "supabase link --project-ref <your-project-id> && supabase db push",
+    "gen:types": "supabase gen types typescript --linked > ../audiobookphile-web/src/types/supabase.ts"
+  },
+  "devDependencies": {
+    "supabase": "^2.98.2"
+  }
+}

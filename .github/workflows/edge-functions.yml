@@ -1,0 +1,40 @@
+name: Deploy Supabase Edge Functions
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'supabase/functions/**'
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Deploy API Function
+        run: supabase functions deploy api --project-ref $SUPABASE_PROJECT_ID
+        
+      - name: Deploy Session Sync Function
+        run: supabase functions deploy session-sync --project-ref $SUPABASE_PROJECT_ID
+        
+      - name: Deploy Session Play Function
+        run: supabase functions deploy session-play --project-ref $SUPABASE_PROJECT_ID
+
+      - name: Deploy Storage Sync Function
+        run: supabase functions deploy storage-sync --project-ref $SUPABASE_PROJECT_ID
+        
+      - name: Deploy Sync Covers Function
+        run: supabase functions deploy sync-covers --project-ref $SUPABASE_PROJECT_ID

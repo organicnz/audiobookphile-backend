@@ -1,0 +1,37 @@
+name: Automated Database Backup
+
+on:
+  schedule:
+    - cron: '0 2 * * *' # Every day at 2:00 AM UTC
+  workflow_dispatch: # Allow manual triggering
+
+jobs:
+  run-backup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Backup Edge Function
+        run: |
+          if [ -z "${{ secrets.SUPABASE_PROJECT_ID }}" ]; then
+            echo "Error: SUPABASE_PROJECT_ID secret is missing."
+            exit 1
+          fi
+          
+          if [ -z "${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}" ]; then
+            echo "Error: SUPABASE_SERVICE_ROLE_KEY secret is missing."
+            exit 1
+          fi
+
+          response=$(curl -s -w "\n%{http_code}" -X POST "https://${{ secrets.SUPABASE_PROJECT_ID }}.supabase.co/functions/v1/backup-database" \
+            -H "Authorization: Bearer ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}" \
+            -H "Content-Type: application/json")
+
+          http_code=$(echo "$response" | tail -n1)
+          body=$(echo "$response" | sed '$d')
+
+          echo "Status Code: $http_code"
+          echo "Response Body: $body"
+
+          if [ "$http_code" -ne 200 ]; then
+            echo "Backup failed!"
+            exit 1
+          fi

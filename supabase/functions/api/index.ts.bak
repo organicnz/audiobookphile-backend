@@ -1,0 +1,119 @@
+import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
+import { createClient } from "npm:@supabase/supabase-js"
+import { corsHeaders } from "../_shared/cors.ts"
+import { mapLibraryForMobile, mapBookForMobile } from "./mappers.ts"
+
+// Routes
+import { handlePlaylists } from "./routes/playlists.ts"
+import { handleCollections } from "./routes/collections.ts"
+import { handleProgress } from "./routes/progress.ts"
+import { handleItems } from "./routes/items.ts"
+import { handleUsers } from "./routes/users.ts"
+import { handlePlayback } from "./routes/playback.ts"
+import { handleLibraries } from "./routes/libraries.ts"
+import { handleDebug } from "./routes/debug.ts"
+import { handleAuthors } from "./routes/authors.ts"
+import { handleMetadata } from "./routes/metadata.ts"
+import { handleAuth } from "./routes/auth.ts"
+import { handleSettings } from "./routes/settings.ts"
+import { handleMigrateBatch } from "./routes/migrateBatch.ts"
+
+
+
+serve(async (req) => {
+  if (req.method === 'OPTIONS') {
+    return new Response('ok', { headers: corsHeaders })
+  }
+
+  const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? ''
+  const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY') ?? ''
+  const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+
+  const authHeader = req.headers.get('Authorization')
+  console.log(`[API Index] URL: ${req.url}, Method: ${req.method}`)
+  console.log(`[API Index] Auth Header Present: ${!!authHeader}`)
+  if (authHeader) {
+    console.log(`[API Index] Auth Header Prefix: ${authHeader.substring(0, 15)}...`)
+  } else {
+    console.log(`[API Index] All Headers:`, Object.fromEntries(req.headers.entries()))
+  }
+
+  const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+    global: { headers: authHeader ? { Authorization: authHeader } : {} }
+  })
+
+  const requireUser = async () => {
+    const jwt = authHeader?.replace('Bearer ', '') || ''
+    const { data: { user }, error } = await supabase.auth.getUser(jwt)
+    if (error) {
+      console.error(`[API Index] getUser Error:`, error)
+    }
+    if (!user) throw new Error('Unauthorized')
+    return user
+  }
+
+  try {
+    const url = req.url
+
+    const authResponse = await handleAuth(req, url, supabase, supabaseUrl, serviceRoleKey)
+    if (authResponse) return authResponse
+
+    const migrateResponse = await handleMigrateBatch(req, url, supabaseUrl, serviceRoleKey)
+    if (migrateResponse) return migrateResponse
+
+    // Require Auth
+    
+
+
+    let user = null;
+    const urlObj = new URL(url);
+    const isGetCover = urlObj.pathname.includes('/api/items') && urlObj.pathname.endsWith('/cover') && req.method === 'GET';
+    if (!isGetCover) {
+      user = await requireUser();
+    }
+
+    // --- DELEGATE TO MODULAR ROUTERS ---
+    const debugRes = await handleDebug(req, url, user, supabase)
+    if (debugRes) return debugRes
+
+    const usersResponse = await handleUsers(req, url, user, supabase, supabaseUrl, serviceRoleKey)
+    if (usersResponse) return usersResponse
+
+    const librariesResponse = await handleLibraries(req, url, user, supabase, supabaseUrl, serviceRoleKey)
+    if (librariesResponse) return librariesResponse
+
+    const authorsResponse = await handleAuthors(req, url, user, supabase, supabaseUrl, serviceRoleKey)
+    if (authorsResponse) return authorsResponse
+
+    const metadataResponse = await handleMetadata(req, url, user, supabase)
+    if (metadataResponse) return metadataResponse
+
+    const itemsResponse = await handleItems(req, url, user, supabase, supabaseUrl, serviceRoleKey)
+    if (itemsResponse) return itemsResponse
+
+    const playbackResponse = await handlePlayback(req, url, user, supabase)
+    if (playbackResponse) return playbackResponse
+
+    const progressResponse = await handleProgress(req, url, user, supabase)
+    if (progressResponse) return progressResponse
+
+    const collectionsResponse = await handleCollections(req, url, user, supabase)
+    if (collectionsResponse) return collectionsResponse
+
+    const playlistsResponse = await handlePlaylists(req, url, user, supabase)
+    if (playlistsResponse) return playlistsResponse
+
+    const settingsResponse = await handleSettings(req, url)
+    if (settingsResponse) return settingsResponse
+
+    return new Response(JSON.stringify({ error: 'Endpoint not found or method not supported' }), { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
+
+  } catch (e: unknown) {
+    const err = e as Error;
+    if (err.message === 'Unauthorized') {
+      return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
+    }
+    console.error(`[API Index] Fatal Error:`, err.message)
+    return new Response(JSON.stringify({ error: 'Internal Server Error' }), { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
+  }
+})

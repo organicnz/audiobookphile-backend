@@ -1,0 +1,11 @@
+# Environment variables
+.env
+.env.*
+!.env.example
+
+# Supabase
+supabase/.branches
+supabase/.temp
+
+# Node
+node_modules/
