@@ -3,6 +3,7 @@ import { cors } from "npm:hono/cors"
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from "npm:@supabase/supabase-js"
 import { corsHeaders } from "../_shared/cors.ts"
+import { Sentry } from "../_shared/sentry.ts"
 
 // Native Hono Routers
 import { settingsRouter } from "./routes/settings.ts"
@@ -75,6 +76,10 @@ app.use('*', async (c, next) => {
     if ((e as Error).message === 'Unauthorized') {
       return c.json({ error: 'Unauthorized' }, 401)
     }
+    
+    // Capture unhandled exceptions in Sentry
+    Sentry.captureException(e);
+    
     console.error(`[API Index] Fatal Error:`, (e as Error).message)
     return c.json({ error: 'Internal Server Error' }, 500)
   }
