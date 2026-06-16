@@ -104,6 +104,10 @@ export async function fetchBookMetadata(
   title: string,
   author?: string,
 ): Promise<FetchResult> {
+  // Add a random jitter (0-2.5 seconds) to stagger concurrent requests from the iOS app
+  // and prevent instantly hitting provider rate limits (thundering herd).
+  await new Promise((r) => setTimeout(r, Math.random() * 2500));
+
   const { cleanTitle, extractedAuthor } = parseRawTitle(title);
   const cleanAuthor = author ? normalizeString(author) : extractedAuthor;
 
@@ -135,6 +139,9 @@ export async function fetchBookMetadata(
           `[coverFetch] Provider failed for "${strategy.title}":`,
           err,
         );
+        if (err instanceof Error && err.message === "RateLimitExceeded") {
+          throw err;
+        }
       }
     }
   }

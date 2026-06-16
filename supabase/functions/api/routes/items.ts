@@ -129,6 +129,16 @@ itemsRouter.get("/:id/cover", async (c) => {
 
   let coverPath = item?.cover_path;
 
+  // Self-healing: if it was previously cached as "missing" due to rate-limit swallowing,
+  // reset it so we can retry the fetch now that the bug is fixed.
+  if (coverPath === "missing") {
+    coverPath = null;
+    await adminClient.from("library_items").update({ cover_path: null }).eq(
+      "id",
+      itemId,
+    );
+  }
+
   // If missing or legacy invalid, fetch dynamically
   if (!coverPath || coverPath === "missing" || coverPath.startsWith("/")) {
     const book = Array.isArray(item?.books) ? item?.books[0] : item?.books;
@@ -154,11 +164,21 @@ itemsRouter.get("/:id/cover", async (c) => {
           coverPath = `${itemId}/cover.${ext}`;
           const contentType = `image/${ext === "png" ? "png" : "jpeg"}`;
 
-          await adminClient.storage.from("covers").upload(
+          const { error: uploadError } = await adminClient.storage.from(
+            "covers",
+          ).upload(
             coverPath,
-            fileData.buffer,
+            fileData,
             { upsert: true, contentType },
           );
+          if (uploadError) {
+            console.error(
+              `[items] Cover upload failed for ${itemId}:`,
+              uploadError,
+            );
+            throw new Error("UploadFailed");
+          }
+
           await adminClient.from("library_items").update({
             cover_path: coverPath,
           }).eq("id", itemId);
@@ -172,7 +192,10 @@ itemsRouter.get("/:id/cover", async (c) => {
         console.error(`[items] Dynamic cover fetch failed for ${title}:`, e);
         if (e instanceof Error && e.message === "RateLimitExceeded") {
           // Do NOT cache 'missing' if we hit a rate limit, so we can retry later.
-          // We still need to return a 404 for this specific request.
+          // Tell the client to back off.
+          return new Response("Rate limit exceeded while fetching cover", {
+            status: 429,
+          });
         } else {
           coverPath = "missing";
           await adminClient.from("library_items").update({
