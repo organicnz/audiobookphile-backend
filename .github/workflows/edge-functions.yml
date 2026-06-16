@@ -5,11 +5,42 @@ on:
     branches:
       - main
     paths:
-      - 'supabase/functions/**'
+      - 'supabase/**'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'supabase/**'
   workflow_dispatch:
 
 jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Deno
+        uses: denoland/setup-deno@v1
+        with:
+          deno-version: v1.x
+
+      - name: Setup Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Lint Deno Code
+        run: |
+          cd supabase/functions
+          deno lint
+          deno fmt --check
+
+      - name: Lint Database Migrations
+        run: supabase db lint
+
   deploy:
+    needs: lint
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     
     env:
@@ -24,17 +55,16 @@ jobs:
         with:
           version: latest
 
-      - name: Deploy API Function
-        run: supabase functions deploy api --project-ref $SUPABASE_PROJECT_ID
-        
-      - name: Deploy Session Sync Function
-        run: supabase functions deploy session-sync --project-ref $SUPABASE_PROJECT_ID
-        
-      - name: Deploy Session Play Function
-        run: supabase functions deploy session-play --project-ref $SUPABASE_PROJECT_ID
-
-      - name: Deploy Storage Sync Function
-        run: supabase functions deploy storage-sync --project-ref $SUPABASE_PROJECT_ID
-        
-      - name: Deploy Sync Covers Function
-        run: supabase functions deploy sync-covers --project-ref $SUPABASE_PROJECT_ID
+      - name: Dynamically Deploy Edge Functions
+        run: |
+          # Iterate over all directories in supabase/functions
+          for dir in supabase/functions/*/; do
+            # Remove trailing slash and 'supabase/functions/' prefix
+            func_name=$(basename "$dir")
+            
+            # Skip the _shared directory
+            if [ "$func_name" != "_shared" ]; then
+              echo "🚀 Deploying function: $func_name"
+              supabase functions deploy "$func_name" --project-ref $SUPABASE_PROJECT_ID
+            fi
+          done
