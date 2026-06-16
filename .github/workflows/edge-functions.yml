@@ -36,7 +36,9 @@ jobs:
           deno fmt --check
 
       - name: Lint Database Migrations
-        run: supabase db lint
+        run: |
+          supabase db lint
+          supabase test db
 
   deploy:
     needs: lint
