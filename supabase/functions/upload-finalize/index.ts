@@ -1,111 +1,160 @@
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
-import { createClient } from "npm:@supabase/supabase-js"
-import { S3Client, HeadObjectCommand } from "npm:@aws-sdk/client-s3"
-import * as mm from "https://esm.sh/music-metadata"
-import { corsHeaders } from "../_shared/cors.ts"
-import { StorageRouter } from "../_shared/storage-router.ts"
+import { serve } from "std/http/server.ts";
+import { createClient } from "@supabase/supabase-js";
+import { HeadObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import * as mm from "music-metadata";
+import { corsHeaders } from "../_shared/cors.ts";
+import { StorageRouter } from "../_shared/storage-router.ts";
 
 serve(async (req) => {
-  if (req.method === 'OPTIONS') {
-    return new Response('ok', { headers: corsHeaders })
+  if (req.method === "OPTIONS") {
+    return new Response("ok", { headers: corsHeaders });
   }
 
   try {
-    const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? ''
-    const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY') ?? ''
-    const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+    const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
+    const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
+    const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
 
     const supabase = createClient(supabaseUrl, supabaseAnonKey, {
-      global: { headers: { Authorization: req.headers.get('Authorization')! } }
-    })
-    const db = createClient(supabaseUrl, serviceRoleKey)
+      global: { headers: { Authorization: req.headers.get("Authorization")! } },
+    });
+    const db = createClient(supabaseUrl, serviceRoleKey);
 
-    const { data: { user } } = await supabase.auth.getUser()
+    const { data: { user } } = await supabase.auth.getUser();
     if (!user) {
-      return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
+      return new Response(JSON.stringify({ error: "Unauthorized" }), {
+        status: 401,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
 
-    const { data: profile } = await db.from('profiles').select('user_type').eq('id', user.id).single()
-    if (!profile || !['admin', 'root'].includes(profile.user_type ?? '')) {
-      return new Response(JSON.stringify({ error: 'Forbidden' }), { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
+    const { data: profile } = await db.from("profiles").select("user_type").eq(
+      "id",
+      user.id,
+    ).single();
+    if (!profile || !["admin", "root"].includes(profile.user_type ?? "")) {
+      return new Response(JSON.stringify({ error: "Forbidden" }), {
+        status: 403,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
 
-    const body = await req.json()
-    const { bookId, title, author = '', series = '', library: libraryId, mediaType = 'book', files } = body
+    const body = await req.json();
+    const {
+      bookId,
+      title,
+      author = "",
+      series = "",
+      library: libraryId,
+      mediaType = "book",
+      files,
+    } = body;
 
     if (!bookId || !title || !libraryId || !files?.length) {
-      return new Response(JSON.stringify({ error: 'Missing fields' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
+      return new Response(JSON.stringify({ error: "Missing fields" }), {
+        status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
 
-    const missingFiles: string[] = []
-    
-    let s3Client: S3Client | null = null
-    if (Deno.env.get('B2_ENDPOINT') && Deno.env.get('B2_BUCKET_NAME')) {
+    const missingFiles: string[] = [];
+
+    let s3Client: S3Client | null = null;
+    if (Deno.env.get("B2_ENDPOINT") && Deno.env.get("B2_BUCKET_NAME")) {
       s3Client = new S3Client({
-        endpoint: Deno.env.get('B2_ENDPOINT')!,
-        region: Deno.env.get('B2_REGION') || 'us-west-004',
+        endpoint: Deno.env.get("B2_ENDPOINT")!,
+        region: Deno.env.get("B2_REGION") || "us-west-004",
         credentials: {
-          accessKeyId: Deno.env.get('B2_KEY_ID')!,
-          secretAccessKey: Deno.env.get('B2_APP_KEY')!,
+          accessKeyId: Deno.env.get("B2_KEY_ID")!,
+          secretAccessKey: Deno.env.get("B2_APP_KEY")!,
         },
         forcePathStyle: true,
-      })
+      });
     }
 
     const fileCheckPromises = files.map(async (file: any) => {
-      if (file.storagePath.startsWith('b2://')) {
-        const actualPath = file.storagePath.substring('b2://'.length)
-        let exists = false
+      if (file.storagePath.startsWith("b2://")) {
+        const actualPath = file.storagePath.substring("b2://".length);
+        let exists = false;
         if (s3Client) {
           try {
-            await s3Client.send(new HeadObjectCommand({ Bucket: Deno.env.get('B2_BUCKET_NAME')!, Key: actualPath }))
-            exists = true
-          } catch { exists = false }
+            await s3Client.send(
+              new HeadObjectCommand({
+                Bucket: Deno.env.get("B2_BUCKET_NAME")!,
+                Key: actualPath,
+              }),
+            );
+            exists = true;
+          } catch {
+            exists = false;
+          }
         }
-        return exists ? null : file.storagePath
-      } else if (file.storagePath.startsWith('supabase://')) {
-        const actualPath = file.storagePath.substring('supabase://'.length)
-        const folder = actualPath.split('/').slice(0, -1).join('/')
-        const filename = actualPath.split('/').pop()
-        const { data } = await db.storage.from('audio-files').list(folder, { search: filename })
-        const exists = data && data.length > 0 && data[0].name === filename
-        return exists ? null : file.storagePath
+        return exists ? null : file.storagePath;
+      } else if (file.storagePath.startsWith("supabase://")) {
+        const actualPath = file.storagePath.substring("supabase://".length);
+        const folder = actualPath.split("/").slice(0, -1).join("/");
+        const filename = actualPath.split("/").pop();
+        const { data } = await db.storage.from("audio-files").list(folder, {
+          search: filename,
+        });
+        const exists = data && data.length > 0 && data[0].name === filename;
+        return exists ? null : file.storagePath;
       } else {
-        let exists = false
+        let exists = false;
         if (s3Client) {
           try {
-            await s3Client.send(new HeadObjectCommand({ Bucket: Deno.env.get('B2_BUCKET_NAME')!, Key: file.storagePath }))
-            exists = true
-          } catch { exists = false }
+            await s3Client.send(
+              new HeadObjectCommand({
+                Bucket: Deno.env.get("B2_BUCKET_NAME")!,
+                Key: file.storagePath,
+              }),
+            );
+            exists = true;
+          } catch {
+            exists = false;
+          }
         } else {
-          const folder = file.storagePath.split('/').slice(0, -1).join('/')
-          const filename = file.storagePath.split('/').pop()
-          const { data } = await db.storage.from('audio-files').list(folder, { search: filename })
-          exists = !!(data && data.length > 0 && data[0].name === filename)
+          const folder = file.storagePath.split("/").slice(0, -1).join("/");
+          const filename = file.storagePath.split("/").pop();
+          const { data } = await db.storage.from("audio-files").list(folder, {
+            search: filename,
+          });
+          exists = !!(data && data.length > 0 && data[0].name === filename);
         }
-        return exists ? null : file.storagePath
+        return exists ? null : file.storagePath;
       }
-    })
+    });
 
-    const checkResults = await Promise.all(fileCheckPromises)
-    missingFiles.push(...checkResults.filter((r): r is string => r !== null))
+    const checkResults = await Promise.all(fileCheckPromises);
+    missingFiles.push(...checkResults.filter((r): r is string => r !== null));
 
     if (missingFiles.length > 0) {
-      return new Response(JSON.stringify({ error: 'Files missing in storage', missingFiles }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
+      return new Response(
+        JSON.stringify({ error: "Files missing in storage", missingFiles }),
+        {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        },
+      );
     }
 
-    const totalSize = files.reduce((sum: number, f: any) => sum + f.size, 0)
-    
+    const totalSize = files.reduce((sum: number, f: any) => sum + f.size, 0);
+
     // Fetch existing book to merge files if it already exists
-    const { data: existingBook } = await db.from('books').select('audio_files, duration').eq('id', bookId).maybeSingle()
-    
-    let baseIndex = 0
-    let finalAudioFiles: any[] = []
-    let currentDuration = 0
+    const { data: existingBook } = await db.from("books").select(
+      "audio_files, duration",
+    ).eq("id", bookId).maybeSingle();
+
+    let baseIndex = 0;
+    let finalAudioFiles: any[] = [];
+    let currentDuration = 0;
     if (existingBook) {
-      finalAudioFiles = existingBook.audio_files || []
-      baseIndex = finalAudioFiles.reduce((max: number, af: any) => Math.max(max, af.index || 0), 0)
-      currentDuration = existingBook.duration || 0
+      finalAudioFiles = existingBook.audio_files || [];
+      baseIndex = finalAudioFiles.reduce(
+        (max: number, af: any) => Math.max(max, af.index || 0),
+        0,
+      );
+      currentDuration = existingBook.duration || 0;
     }
 
     const audioFilesJson = files.map((file: any, i: number) => ({
@@ -114,7 +163,7 @@ serve(async (req) => {
       duration: 0,
       metadata: {
         filename: file.name,
-        ext: '.' + (file.name.split('.').pop()?.toLowerCase() ?? ''),
+        ext: "." + (file.name.split(".").pop()?.toLowerCase() ?? ""),
         path: file.storagePath,
         relPath: file.name,
         size: file.size,
@@ -125,67 +174,80 @@ serve(async (req) => {
       },
       addedAt: Date.now(),
       updatedAt: Date.now(),
-      mimeType: file.type || 'audio/mpeg',
-    }))
+      mimeType: file.type || "audio/mpeg",
+    }));
 
-    finalAudioFiles = [...finalAudioFiles, ...audioFilesJson]
+    finalAudioFiles = [...finalAudioFiles, ...audioFilesJson];
 
     let bookError = null;
     if (existingBook) {
       // Deduplicate files by filename so re-uploading doesn't create duplicate chapters
-      const uniqueFilesMap = new Map<string, any>()
+      const uniqueFilesMap = new Map<string, any>();
       for (const af of finalAudioFiles) {
         if (af.metadata?.filename) {
-          uniqueFilesMap.set(af.metadata.filename, af)
+          uniqueFilesMap.set(af.metadata.filename, af);
         }
       }
-      const deduplicatedFiles = Array.from(uniqueFilesMap.values())
+      const deduplicatedFiles = Array.from(uniqueFilesMap.values());
       // Re-index the files nicely
-      deduplicatedFiles.forEach((af, idx) => af.index = idx + 1)
-      
-      const res = await db.from('books').update({ audio_files: deduplicatedFiles, duration: currentDuration }).eq('id', bookId)
-      bookError = res.error
-    } else {
-      const res = await db.from('books').insert({ id: bookId, title, audio_files: finalAudioFiles, duration: currentDuration })
-      bookError = res.error
-    }
-    if (bookError) throw bookError
+      deduplicatedFiles.forEach((af, idx) => af.index = idx + 1);
 
-    const { data: existingItem } = await db.from('library_items').select('id, size, library_files').eq('media_id', bookId).maybeSingle()
-    
-    let libraryItemId = crypto.randomUUID()
-    
+      const res = await db.from("books").update({
+        audio_files: deduplicatedFiles,
+        duration: currentDuration,
+      }).eq("id", bookId);
+      bookError = res.error;
+    } else {
+      const res = await db.from("books").insert({
+        id: bookId,
+        title,
+        audio_files: finalAudioFiles,
+        duration: currentDuration,
+      });
+      bookError = res.error;
+    }
+    if (bookError) throw bookError;
+
+    const { data: existingItem } = await db.from("library_items").select(
+      "id, size, library_files",
+    ).eq("media_id", bookId).maybeSingle();
+
+    let libraryItemId = crypto.randomUUID();
+
     const newLibraryFiles = audioFilesJson.map((af: any) => ({
       ino: af.ino,
       metadata: af.metadata,
       addedAt: af.addedAt,
       updatedAt: af.updatedAt,
       isSupplementary: false,
-    }))
+    }));
 
-    let finalLibraryFiles = newLibraryFiles
+    let finalLibraryFiles = newLibraryFiles;
     if (existingItem) {
-      libraryItemId = existingItem.id
-      const allLibFiles = [...(existingItem.library_files || []), ...newLibraryFiles]
-      const uniqueLibMap = new Map<string, any>()
+      libraryItemId = existingItem.id;
+      const allLibFiles = [
+        ...(existingItem.library_files || []),
+        ...newLibraryFiles,
+      ];
+      const uniqueLibMap = new Map<string, any>();
       for (const lf of allLibFiles) {
         if (lf.metadata?.filename) {
-          uniqueLibMap.set(lf.metadata.filename, lf)
+          uniqueLibMap.set(lf.metadata.filename, lf);
         }
       }
-      finalLibraryFiles = Array.from(uniqueLibMap.values())
+      finalLibraryFiles = Array.from(uniqueLibMap.values());
     }
-    const finalSize = (existingItem?.size || 0) + totalSize
-    
+    const finalSize = (existingItem?.size || 0) + totalSize;
+
     if (existingItem) {
-      const { error: itemError } = await db.from('library_items').update({
+      const { error: itemError } = await db.from("library_items").update({
         size: finalSize,
         library_files: finalLibraryFiles,
         last_storage_check: new Date().toISOString(),
-      }).eq('id', libraryItemId)
-      if (itemError) throw itemError
+      }).eq("id", libraryItemId);
+      if (itemError) throw itemError;
     } else {
-      const { error: itemError } = await db.from('library_items').insert({
+      const { error: itemError } = await db.from("library_items").insert({
         id: libraryItemId,
         library_id: libraryId,
         media_type: mediaType,
@@ -197,39 +259,47 @@ serve(async (req) => {
         is_missing: false,
         last_storage_check: new Date().toISOString(),
         library_files: newLibraryFiles,
-      })
+      });
       if (itemError) {
-        if (!existingBook) await db.from('books').delete().eq('id', bookId)
-        throw itemError
+        if (!existingBook) await db.from("books").delete().eq("id", bookId);
+        throw itemError;
       }
     }
 
     // --- BACKGROUND TASK: Extract Audio Duration ---
     const processDurationsAsync = async () => {
       try {
-        const storageRouter = new StorageRouter(db)
-        
+        const storageRouter = new StorageRouter(db);
+
         const metadataPromises = files.map(async (file: any, i: number) => {
-          const existingAf = audioFilesJson[i]
-          let duration = 0
+          const existingAf = audioFilesJson[i];
+          let duration = 0;
           try {
-            const signedUrl = await storageRouter.getSignedUrl(file.storagePath, 60)
+            const signedUrl = await storageRouter.getSignedUrl(
+              file.storagePath,
+              60,
+            );
             if (signedUrl) {
-              const res = await fetch(signedUrl)
+              const res = await fetch(signedUrl);
               if (res.body) {
                 const metadata = await mm.parseWebStream(
-                  res.body, 
-                  { mimeType: file.type, size: file.size }, 
-                  { duration: true, skipCovers: true, skipPostHeaders: true }
-                )
-                duration = metadata.format.duration || 0
-                
+                  res.body,
+                  { mimeType: file.type, size: file.size },
+                  { duration: true, skipCovers: true, skipPostHeaders: true },
+                );
+                duration = metadata.format.duration || 0;
+
                 // Immediately cancel the stream to save bandwidth and memory!
-                try { res.body.cancel(); } catch (e) {}
+                try {
+                  res.body.cancel();
+                } catch (e) {}
               }
             }
           } catch (err) {
-            console.warn(`[upload-finalize] Background duration parse failed for ${file.name}:`, err)
+            console.warn(
+              `[upload-finalize] Background duration parse failed for ${file.name}:`,
+              err,
+            );
           }
 
           return {
@@ -237,63 +307,111 @@ serve(async (req) => {
             duration,
             metadata: {
               ...existingAf.metadata,
-              duration
-            }
-          }
-        })
+              duration,
+            },
+          };
+        });
 
-        const updatedAudioFilesJson = await Promise.all(metadataPromises)
+        const updatedAudioFilesJson = await Promise.all(metadataPromises);
 
         // Merge the fully parsed new files back into the overall book audio_files array
-        const finalMergedAudioFiles = [...(existingBook?.audio_files || []), ...updatedAudioFilesJson]
-        const totalDuration = finalMergedAudioFiles.reduce((sum: number, af: any) => sum + (af.duration || 0), 0)
+        const finalMergedAudioFiles = [
+          ...(existingBook?.audio_files || []),
+          ...updatedAudioFilesJson,
+        ];
+        const totalDuration = finalMergedAudioFiles.reduce(
+          (sum: number, af: any) => sum + (af.duration || 0),
+          0,
+        );
 
         // Update database with new durations
-        await db.from('books').update({ audio_files: finalMergedAudioFiles, duration: totalDuration }).eq('id', bookId)
-        console.log(`[upload-finalize] Successfully updated duration for book ${bookId} to ${totalDuration}s`)
+        await db.from("books").update({
+          audio_files: finalMergedAudioFiles,
+          duration: totalDuration,
+        }).eq("id", bookId);
+        console.log(
+          `[upload-finalize] Successfully updated duration for book ${bookId} to ${totalDuration}s`,
+        );
       } catch (err) {
-        console.error(`[upload-finalize] Background duration extraction failed for book ${bookId}:`, err)
+        console.error(
+          `[upload-finalize] Background duration extraction failed for book ${bookId}:`,
+          err,
+        );
       }
-    }
+    };
 
     // Spawn detached task depending on environment
     // @ts-ignore
-    if (typeof EdgeRuntime !== 'undefined' && typeof EdgeRuntime.waitUntil === 'function') {
+    if (
+      typeof EdgeRuntime !== "undefined" &&
+      typeof EdgeRuntime.waitUntil === "function"
+    ) {
       // @ts-ignore
-      EdgeRuntime.waitUntil(processDurationsAsync())
+      EdgeRuntime.waitUntil(processDurationsAsync());
     } else {
-      processDurationsAsync().catch(() => {})
+      processDurationsAsync().catch(() => {});
     }
     // ------------------------------------------------
 
     if (author) {
-      const { data: existingAuthor } = await db.from('authors').select('id').eq('name', author).eq('library_id', libraryId).maybeSingle()
-      let authorId = existingAuthor?.id
+      const { data: existingAuthor } = await db.from("authors").select("id").eq(
+        "name",
+        author,
+      ).eq("library_id", libraryId).maybeSingle();
+      let authorId = existingAuthor?.id;
       if (!authorId) {
-        authorId = crypto.randomUUID()
-        await db.from('authors').insert({ id: authorId, name: author, library_id: libraryId })
+        authorId = crypto.randomUUID();
+        await db.from("authors").insert({
+          id: authorId,
+          name: author,
+          library_id: libraryId,
+        });
       }
       if (authorId) {
-        await db.from('book_authors').insert({ book_id: bookId, author_id: authorId })
-        await db.from('library_items').update({ author_names_first_last: author }).eq('id', libraryItemId)
+        await db.from("book_authors").insert({
+          book_id: bookId,
+          author_id: authorId,
+        });
+        await db.from("library_items").update({
+          author_names_first_last: author,
+        }).eq("id", libraryItemId);
       }
     }
 
     if (series) {
-      const { data: existingSeries } = await db.from('series').select('id').eq('name', series).eq('library_id', libraryId).maybeSingle()
-      let seriesId = existingSeries?.id
+      const { data: existingSeries } = await db.from("series").select("id").eq(
+        "name",
+        series,
+      ).eq("library_id", libraryId).maybeSingle();
+      let seriesId = existingSeries?.id;
       if (!seriesId) {
-        seriesId = crypto.randomUUID()
-        await db.from('series').insert({ id: seriesId, name: series, library_id: libraryId })
+        seriesId = crypto.randomUUID();
+        await db.from("series").insert({
+          id: seriesId,
+          name: series,
+          library_id: libraryId,
+        });
       }
       if (seriesId) {
-        await db.from('book_series').insert({ book_id: bookId, series_id: seriesId })
+        await db.from("book_series").insert({
+          book_id: bookId,
+          series_id: seriesId,
+        });
       }
     }
 
-    return new Response(JSON.stringify({ success: true, libraryItemId, bookId }), { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
+    return new Response(
+      JSON.stringify({ success: true, libraryItemId, bookId }),
+      {
+        status: 200,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      },
+    );
   } catch (e: unknown) {
     const err = e as Error;
-    return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
+    return new Response(JSON.stringify({ error: err.message }), {
+      status: 500,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
   }
-})
+});

@@ -1,113 +1,138 @@
-import { Hono } from "npm:hono"
-import { createClient } from "npm:@supabase/supabase-js"
-import { Variables } from "../_shared/types.ts"
+import { Hono } from "hono";
+import { createClient } from "@supabase/supabase-js";
+import { Variables } from "../_shared/types.ts";
 
-export const authorsRouter = new Hono<{ Variables: Variables }>()
+export const authorsRouter = new Hono<{ Variables: Variables }>();
 
-authorsRouter.patch('/:id', async (c) => {
-  const supabase = c.get('supabase')
-  const authorId = c.req.param('id')
-  const body = await c.req.json()
-  
-  const { data, error } = await supabase.from('authors').update({
-    name: body.name, description: body.description, image_path: body.imagePath
-  }).eq('id', authorId).select().single()
-  
-  if (error) throw error
-  return c.json({ updated: true, author: data })
-})
+authorsRouter.patch("/:id", async (c) => {
+  const supabase = c.get("supabase");
+  const authorId = c.req.param("id");
+  const body = await c.req.json();
 
-authorsRouter.delete('/:id', async (c) => {
-  const supabase = c.get('supabase')
-  const authorId = c.req.param('id')
-  
-  const { error } = await supabase.from('authors').delete().eq('id', authorId)
-  if (error) throw error
-  return c.json({ success: true })
-})
+  const { data, error } = await supabase.from("authors").update({
+    name: body.name,
+    description: body.description,
+    image_path: body.imagePath,
+  }).eq("id", authorId).select().single();
 
-authorsRouter.post('/:id/match', async (c) => {
-  const supabase = c.get('supabase')
-  const supabaseUrl = c.get('supabaseUrl')
-  const serviceRoleKey = c.get('serviceRoleKey')
-  const authorId = c.req.param('id')
-  const payload = await c.req.json()
-  const authorName = payload.q || payload.author || ''
-  
-  if (!authorName) return c.json({ error: 'Author name required' }, 400)
+  if (error) throw error;
+  return c.json({ updated: true, author: data });
+});
+
+authorsRouter.delete("/:id", async (c) => {
+  const supabase = c.get("supabase");
+  const authorId = c.req.param("id");
+
+  const { error } = await supabase.from("authors").delete().eq("id", authorId);
+  if (error) throw error;
+  return c.json({ success: true });
+});
+
+authorsRouter.post("/:id/match", async (c) => {
+  const supabase = c.get("supabase");
+  const supabaseUrl = c.get("supabaseUrl");
+  const serviceRoleKey = c.get("serviceRoleKey");
+  const authorId = c.req.param("id");
+  const payload = await c.req.json();
+  const authorName = payload.q || payload.author || "";
+
+  if (!authorName) return c.json({ error: "Author name required" }, 400);
 
   try {
-    const res = await fetch(`https://openlibrary.org/search/authors.json?q=${encodeURIComponent(authorName)}&limit=1`)
-    if (!res.ok) return c.json({ error: 'Open Library search failed' }, 500)
+    const res = await fetch(
+      `https://openlibrary.org/search/authors.json?q=${
+        encodeURIComponent(authorName)
+      }&limit=1`,
+    );
+    if (!res.ok) return c.json({ error: "Open Library search failed" }, 500);
 
-    const data = await res.json()
-    const doc = data?.docs?.[0]
-    if (!doc) return c.json({ error: 'Author not found' }, 404)
+    const data = await res.json();
+    const doc = data?.docs?.[0];
+    if (!doc) return c.json({ error: "Author not found" }, 404);
 
-    const updates: any = {}
+    const updates: any = {};
 
     if (doc.key) {
       try {
-        const authorRes = await fetch(`https://openlibrary.org${doc.key}.json`)
+        const authorRes = await fetch(`https://openlibrary.org${doc.key}.json`);
         if (authorRes.ok) {
-          const authorData = await authorRes.json()
-          const bio = authorData.bio?.value || authorData.bio
-          if (typeof bio === 'string' && bio.length > 10) updates.description = bio.slice(0, 2000)
-        }
-      } catch { /* ignore */ }
-    }
-
-    if (doc.photos?.[0]) {
-      const photoId = doc.photos[0]
-      const photoUrl = `https://covers.openlibrary.org/a/id/${photoId}-L.jpg`
-      try {
-        const imgRes = await fetch(photoUrl)
-        if (imgRes.ok) {
-          const buf = await imgRes.arrayBuffer()
-          if (buf.byteLength > 5000) {
-            const db = createClient(supabaseUrl, serviceRoleKey)
-            const storagePath = `authors/${authorId}/photo.jpg`
-            const { error: uploadErr } = await db.storage.from('covers').upload(storagePath, buf, { upsert: true, contentType: 'image/jpeg' })
-            if (!uploadErr) updates.image_path = storagePath
+          const authorData = await authorRes.json();
+          const bio = authorData.bio?.value || authorData.bio;
+          if (typeof bio === "string" && bio.length > 10) {
+            updates.description = bio.slice(0, 2000);
           }
         }
       } catch { /* ignore */ }
     }
 
-    if (Object.keys(updates).length === 0) return c.json({ error: 'No updates found' }, 404)
+    if (doc.photos?.[0]) {
+      const photoId = doc.photos[0];
+      const photoUrl = `https://covers.openlibrary.org/a/id/${photoId}-L.jpg`;
+      try {
+        const imgRes = await fetch(photoUrl);
+        if (imgRes.ok) {
+          const buf = await imgRes.arrayBuffer();
+          if (buf.byteLength > 5000) {
+            const db = createClient(supabaseUrl, serviceRoleKey);
+            const storagePath = `authors/${authorId}/photo.jpg`;
+            const { error: uploadErr } = await db.storage.from("covers").upload(
+              storagePath,
+              buf,
+              { upsert: true, contentType: "image/jpeg" },
+            );
+            if (!uploadErr) updates.image_path = storagePath;
+          }
+        }
+      } catch { /* ignore */ }
+    }
 
-    const { data: updated, error } = await supabase.from('authors').update(updates).eq('id', authorId).select().single()
-    if (error) throw error
-    return c.json({ updated: true, author: updated })
+    if (Object.keys(updates).length === 0) {
+      return c.json({ error: "No updates found" }, 404);
+    }
+
+    const { data: updated, error } = await supabase.from("authors").update(
+      updates,
+    ).eq("id", authorId).select().single();
+    if (error) throw error;
+    return c.json({ updated: true, author: updated });
   } catch (e: unknown) {
     const err = e as Error;
-    return c.json({ error: err.message }, 500)
+    return c.json({ error: err.message }, 500);
   }
-})
+});
 
-authorsRouter.post('/:id/image', async (c) => {
-  const supabase = c.get('supabase')
-  const supabaseUrl = c.get('supabaseUrl')
-  const serviceRoleKey = c.get('serviceRoleKey')
-  const authorId = c.req.param('id')
-  
-  const { url: imgUrl } = await c.req.json()
-  const imgRes = await fetch(imgUrl)
-  if (!imgRes.ok) return c.json({ error: 'Failed to fetch image' }, 500)
-  const buf = await imgRes.arrayBuffer()
-  
-  const db = createClient(supabaseUrl, serviceRoleKey)
-  const storagePath = `authors/${authorId}/photo.jpg`
-  await db.storage.from('covers').upload(storagePath, buf, { upsert: true, contentType: 'image/jpeg' })
-  
-  await supabase.from('authors').update({ image_path: storagePath }).eq('id', authorId)
-  return c.json({ imagePath: storagePath })
-})
+authorsRouter.post("/:id/image", async (c) => {
+  const supabase = c.get("supabase");
+  const supabaseUrl = c.get("supabaseUrl");
+  const serviceRoleKey = c.get("serviceRoleKey");
+  const authorId = c.req.param("id");
 
-authorsRouter.delete('/:id/image', async (c) => {
-  const supabase = c.get('supabase')
-  const authorId = c.req.param('id')
-  
-  await supabase.from('authors').update({ image_path: null }).eq('id', authorId)
-  return c.json({ success: true })
-})
+  const { url: imgUrl } = await c.req.json();
+  const imgRes = await fetch(imgUrl);
+  if (!imgRes.ok) return c.json({ error: "Failed to fetch image" }, 500);
+  const buf = await imgRes.arrayBuffer();
+
+  const db = createClient(supabaseUrl, serviceRoleKey);
+  const storagePath = `authors/${authorId}/photo.jpg`;
+  await db.storage.from("covers").upload(storagePath, buf, {
+    upsert: true,
+    contentType: "image/jpeg",
+  });
+
+  await supabase.from("authors").update({ image_path: storagePath }).eq(
+    "id",
+    authorId,
+  );
+  return c.json({ imagePath: storagePath });
+});
+
+authorsRouter.delete("/:id/image", async (c) => {
+  const supabase = c.get("supabase");
+  const authorId = c.req.param("id");
+
+  await supabase.from("authors").update({ image_path: null }).eq(
+    "id",
+    authorId,
+  );
+  return c.json({ success: true });
+});

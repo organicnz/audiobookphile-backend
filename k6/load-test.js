@@ -23,7 +23,7 @@ export default function () {
     },
   };
 
-  const res = http.get(`${url}/health`, params);
+  const res = http.get(`${url}/check-existing?title=TestBook&author=TestAuthor&libraryId=lib_test123`, params);
   
   check(res, {
     'is status 200': (r) => r.status === 200,
