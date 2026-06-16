@@ -148,6 +148,16 @@ itemsRouter.get('/:id/cover', async (c) => {
   }
   
   if (!coverPath || coverPath === 'missing' || coverPath.startsWith('/')) {
+    // Intercept missing covers for mobile clients (which request a specific format)
+    // and serve a fallback image so older TestFlight builds don't show a blurred empty box.
+    // We leave the 404 intact for the web client so it can render its text-based UI placeholder.
+    if (c.req.query('format')) {
+      const host = c.req.header('host') || 'audiobookphile-server.vercel.app'
+      const protocol = c.req.header('x-forwarded-proto') || 'https'
+      const fallbackUrl = `${protocol}://${host}/images/book_placeholder.jpg`
+      return c.redirect(fallbackUrl, 302)
+    }
+    
     return new Response('Not found', { status: 404 })
   }
   
