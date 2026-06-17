@@ -17,17 +17,20 @@ async function sync() {
   }
 
   for (const item of items) {
-    if (!item.cover_path || item.cover_path === "missing" || item.cover_path.startsWith("/")) {
+    if (
+      !item.cover_path || item.cover_path === "missing" ||
+      item.cover_path.startsWith("/")
+    ) {
       const book = Array.isArray(item.books) ? item.books[0] : item.books;
       if (!book) continue;
-      
+
       const title = book.title;
       const authors = book.book_authors || [];
       const authorList = Array.isArray(authors) ? authors : [authors];
       const authorName = authorList[0]?.authors?.name || "";
 
       console.log(`Fetching cover for: ${title} - ${authorName}`);
-      
+
       try {
         const res = await fetchBookMetadata(title, authorName);
         if (res.cover) {
@@ -37,36 +40,39 @@ async function sync() {
           const contentType = `image/${ext === "png" ? "png" : "jpeg"}`;
 
           console.log(`Uploading ${coverPath}...`);
-          const { error: uploadError } = await supabase.storage.from("covers").upload(
-            coverPath,
-            fileData,
-            { upsert: true, contentType }
-          );
+          const { error: uploadError } = await supabase.storage.from("covers")
+            .upload(
+              coverPath,
+              fileData,
+              { upsert: true, contentType },
+            );
 
           if (uploadError) {
             console.error(`Upload error for ${title}:`, uploadError);
             continue;
           }
 
-          const { error: updateError } = await supabase.from("library_items").update({
-            cover_path: coverPath
-          }).eq("id", item.id);
-          
+          const { error: updateError } = await supabase.from("library_items")
+            .update({
+              cover_path: coverPath,
+            }).eq("id", item.id);
+
           if (updateError) {
-             console.error(`Update error for ${title}:`, updateError);
+            console.error(`Update error for ${title}:`, updateError);
           } else {
-             console.log(`Successfully updated ${title}`);
+            console.log(`Successfully updated ${title}`);
           }
         } else {
           console.log(`No cover found for ${title}. Marking as missing.`);
-          await supabase.from("library_items").update({ cover_path: "missing" }).eq("id", item.id);
+          await supabase.from("library_items").update({ cover_path: "missing" })
+            .eq("id", item.id);
         }
       } catch (err) {
         console.error(`Failed to fetch for ${title}:`, err);
       }
-      
+
       // Delay to avoid rate limits
-      await new Promise(r => setTimeout(r, 2000));
+      await new Promise((r) => setTimeout(r, 2000));
     }
   }
 }
