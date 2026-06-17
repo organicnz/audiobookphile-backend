@@ -40,6 +40,7 @@
   "workspace": {
     "packageJson": {
       "dependencies": [
+        "npm:@evilmartians/lefthook@^2.1.9",
         "npm:supabase@^2.98.2"
       ]
     }
