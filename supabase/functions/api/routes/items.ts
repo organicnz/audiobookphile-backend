@@ -199,7 +199,12 @@ itemsRouter.get("/:id/cover", async (c) => {
   }
 
   if (!coverPath || coverPath === "missing" || coverPath.startsWith("/")) {
-    return new Response("Not found", { status: 404 });
+    return new Response("Not found", {
+      status: 404,
+      headers: {
+        "Cache-Control": "public, max-age=31536000, immutable",
+      },
+    });
   }
 
   const { data } = adminClient.storage.from("covers").getPublicUrl(coverPath);
@@ -218,6 +223,7 @@ itemsRouter.get("/:id/cover", async (c) => {
     }
   }
 
+  c.header("Cache-Control", "public, max-age=31536000, immutable");
   return c.redirect(publicUrl, 302);
 });
 
