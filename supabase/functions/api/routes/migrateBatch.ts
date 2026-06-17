@@ -5,6 +5,15 @@ import { Variables } from "../_shared/types.ts";
 export const migrateBatchRouter = new Hono<{ Variables: Variables }>();
 
 migrateBatchRouter.post("/", async (c) => {
+  const user = c.get("user")!;
+  const supabase = c.get("supabase");
+
+  const { data: profile } = await supabase.from("profiles").select("user_type")
+    .eq("id", user.id).single();
+  if (profile?.user_type !== "admin") {
+    return c.json({ error: "Forbidden" }, 403);
+  }
+
   const supabaseUrl = c.get("supabaseUrl");
   const serviceRoleKey = c.get("serviceRoleKey");
   const adminClient = createClient(supabaseUrl, serviceRoleKey);

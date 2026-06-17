@@ -135,8 +135,6 @@ librariesRouter.delete("/:id", async (c) => {
 });
 
 librariesRouter.get("/:id/items", async (c) => {
-  const supabaseUrl = c.get("supabaseUrl");
-  const serviceRoleKey = c.get("serviceRoleKey");
   const user = c.get("user")!;
   const supabase = c.get("supabase");
   const libraryId = c.req.param("id");
@@ -152,9 +150,8 @@ librariesRouter.get("/:id/items", async (c) => {
     ? "created_at"
     : (sort === "media.metadata.title" ? "title" : "created_at");
 
-  const adminClient = createClient(supabaseUrl, serviceRoleKey);
   try {
-    const { data: items, error, count } = await adminClient
+    const { data: items, error, count } = await supabase
       .from("library_items")
       .select("*, books(*, book_authors(authors(*)), book_series(series(*)))", {
         count: "exact",

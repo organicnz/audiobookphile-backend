@@ -80,15 +80,12 @@ itemsRouter.get("/check-existing", async (c) => {
 });
 
 itemsRouter.get("/:id", async (c) => {
-  const supabaseUrl = c.get("supabaseUrl");
-  const serviceRoleKey = c.get("serviceRoleKey");
   const user = c.get("user")!;
   const supabase = c.get("supabase");
   const itemId = c.req.param("id");
 
   console.log(`[handleItems] Fetching item ${itemId} for user ${user?.id}`);
-  const adminClient = createClient(supabaseUrl, serviceRoleKey);
-  const { data: item, error } = await adminClient
+  const { data: item, error } = await supabase
     .from("library_items")
     .select("*, books(*, book_authors(authors(*)), book_series(series(*)))")
     .eq("id", itemId)
@@ -246,6 +243,14 @@ itemsRouter.get("/:id/cover", async (c) => {
 itemsRouter.delete("/:id/cover", async (c) => {
   const user = c.get("user")!;
   if (!user) return new Response("Unauthorized", { status: 401 });
+
+  const supabase = c.get("supabase");
+  const { data: profile } = await supabase.from("profiles").select("user_type")
+    .eq("id", user.id).single();
+  if (profile?.user_type !== "admin") {
+    return new Response("Forbidden", { status: 403 });
+  }
+
   const supabaseUrl = c.get("supabaseUrl");
   const serviceRoleKey = c.get("serviceRoleKey");
   const itemId = c.req.param("id");
@@ -267,6 +272,14 @@ itemsRouter.delete("/:id/cover", async (c) => {
 const handleCoverUpload = async (c: Context) => {
   const user = c.get("user")!;
   if (!user) return new Response("Unauthorized", { status: 401 });
+
+  const supabase = c.get("supabase");
+  const { data: profile } = await supabase.from("profiles").select("user_type")
+    .eq("id", user.id).single();
+  if (profile?.user_type !== "admin") {
+    return new Response("Forbidden", { status: 403 });
+  }
+
   const supabaseUrl = c.get("supabaseUrl");
   const serviceRoleKey = c.get("serviceRoleKey");
   const itemId = c.req.param("id");

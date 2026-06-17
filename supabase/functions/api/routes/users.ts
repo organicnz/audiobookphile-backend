@@ -5,8 +5,18 @@ import { Variables } from "../_shared/types.ts";
 export const usersRouter = new Hono<{ Variables: Variables }>();
 
 usersRouter.get("/", async (c) => {
+  const user = c.get("user")!;
   const supabaseUrl = c.get("supabaseUrl");
   const serviceRoleKey = c.get("serviceRoleKey");
+  const supabase = c.get("supabase");
+
+  // Verify admin
+  const { data: profile } = await supabase.from("profiles").select("user_type")
+    .eq("id", user.id).single();
+  if (profile?.user_type !== "admin") {
+    return c.json({ error: "Forbidden" }, 403);
+  }
+
   const adminSupabase = createClient(supabaseUrl, serviceRoleKey);
 
   const { data: users, error } = await adminSupabase.from("profiles").select(
@@ -49,8 +59,18 @@ usersRouter.get("/", async (c) => {
 });
 
 usersRouter.post("/", async (c) => {
+  const user = c.get("user")!;
   const supabaseUrl = c.get("supabaseUrl");
   const serviceRoleKey = c.get("serviceRoleKey");
+  const supabase = c.get("supabase");
+
+  // Verify admin
+  const { data: profile } = await supabase.from("profiles").select("user_type")
+    .eq("id", user.id).single();
+  if (profile?.user_type !== "admin") {
+    return c.json({ error: "Forbidden" }, 403);
+  }
+
   const adminSupabase = createClient(supabaseUrl, serviceRoleKey);
   const body = await c.req.json();
   const emailToUse = body.username.includes("@")
@@ -76,8 +96,18 @@ usersRouter.post("/", async (c) => {
 });
 
 usersRouter.delete("/:id", async (c) => {
+  const user = c.get("user")!;
   const supabaseUrl = c.get("supabaseUrl");
   const serviceRoleKey = c.get("serviceRoleKey");
+  const supabase = c.get("supabase");
+
+  // Verify admin
+  const { data: profile } = await supabase.from("profiles").select("user_type")
+    .eq("id", user.id).single();
+  if (profile?.user_type !== "admin") {
+    return c.json({ error: "Forbidden" }, 403);
+  }
+
   const adminSupabase = createClient(supabaseUrl, serviceRoleKey);
   const userId = c.req.param("id");
 
@@ -87,10 +117,24 @@ usersRouter.delete("/:id", async (c) => {
 });
 
 usersRouter.patch("/:id", async (c) => {
+  const user = c.get("user")!;
   const supabaseUrl = c.get("supabaseUrl");
   const serviceRoleKey = c.get("serviceRoleKey");
-  const adminSupabase = createClient(supabaseUrl, serviceRoleKey);
+  const supabase = c.get("supabase");
+
   const userId = c.req.param("id");
+
+  // Verify admin or self
+  if (user.id !== userId) {
+    const { data: profile } = await supabase.from("profiles").select(
+      "user_type",
+    ).eq("id", user.id).single();
+    if (profile?.user_type !== "admin") {
+      return c.json({ error: "Forbidden" }, 403);
+    }
+  }
+
+  const adminSupabase = createClient(supabaseUrl, serviceRoleKey);
   const body = await c.req.json();
 
   if (body.password) {

@@ -29,7 +29,15 @@ authorsRouter.delete("/:id", async (c) => {
 });
 
 authorsRouter.post("/:id/match", async (c) => {
+  const user = c.get("user")!;
   const supabase = c.get("supabase");
+
+  const { data: profile } = await supabase.from("profiles").select("user_type")
+    .eq("id", user.id).single();
+  if (profile?.user_type !== "admin") {
+    return c.json({ error: "Forbidden" }, 403);
+  }
+
   const supabaseUrl = c.get("supabaseUrl");
   const serviceRoleKey = c.get("serviceRoleKey");
   const authorId = c.req.param("id");
@@ -102,7 +110,15 @@ authorsRouter.post("/:id/match", async (c) => {
 });
 
 authorsRouter.post("/:id/image", async (c) => {
+  const user = c.get("user")!;
   const supabase = c.get("supabase");
+
+  const { data: profile } = await supabase.from("profiles").select("user_type")
+    .eq("id", user.id).single();
+  if (profile?.user_type !== "admin") {
+    return c.json({ error: "Forbidden" }, 403);
+  }
+
   const supabaseUrl = c.get("supabaseUrl");
   const serviceRoleKey = c.get("serviceRoleKey");
   const authorId = c.req.param("id");
@@ -127,7 +143,15 @@ authorsRouter.post("/:id/image", async (c) => {
 });
 
 authorsRouter.delete("/:id/image", async (c) => {
+  const user = c.get("user")!;
   const supabase = c.get("supabase");
+
+  const { data: profile } = await supabase.from("profiles").select("user_type")
+    .eq("id", user.id).single();
+  if (profile?.user_type !== "admin") {
+    return c.json({ error: "Forbidden" }, 403);
+  }
+
   const authorId = c.req.param("id");
 
   await supabase.from("authors").update({ image_path: null }).eq(
