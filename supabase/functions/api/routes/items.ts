@@ -207,22 +207,7 @@ itemsRouter.get("/:id/cover", async (c) => {
     });
   }
 
-  const widthStr = c.req.query("width");
-  const formatStr = c.req.query("format");
-
-  const transform: { width?: number; format?: string } = {};
-  if (widthStr) {
-    const width = parseInt(widthStr, 10);
-    if (!isNaN(width) && width > 0) transform.width = width;
-  }
-  if (formatStr && (formatStr === "jpeg" || formatStr === "webp")) {
-    transform.format = formatStr;
-  }
-
-  const { data } = adminClient.storage.from("covers").getPublicUrl(
-    coverPath,
-    Object.keys(transform).length > 0 ? { transform } : undefined,
-  );
+  const { data } = adminClient.storage.from("covers").getPublicUrl(coverPath);
   let publicUrl = data.publicUrl;
 
   if (
