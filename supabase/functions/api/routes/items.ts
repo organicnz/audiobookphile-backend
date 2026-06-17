@@ -127,18 +127,8 @@ itemsRouter.get("/:id/cover", async (c) => {
 
   let coverPath = item?.cover_path;
 
-  // Self-healing: if it was previously cached as "missing" due to rate-limit swallowing,
-  // reset it so we can retry the fetch now that the bug is fixed.
-  if (coverPath === "missing") {
-    coverPath = null;
-    await adminClient.from("library_items").update({ cover_path: null }).eq(
-      "id",
-      itemId,
-    );
-  }
-
-  // If missing or legacy invalid, fetch dynamically
-  if (!coverPath || coverPath === "missing" || coverPath.startsWith("/")) {
+  // If cover is null or legacy invalid, fetch dynamically
+  if (!coverPath || coverPath.startsWith("/")) {
     const book = Array.isArray(item?.books) ? item?.books[0] : item?.books;
     const title = book?.title;
     const bookAuthors = book?.book_authors || [];
