@@ -1,0 +1,6 @@
+pre-commit:
+  parallel: false
+  commands:
+    lint-and-format:
+      glob: "*.ts"
+      run: ./scripts/pre-commit.sh {staged_files}

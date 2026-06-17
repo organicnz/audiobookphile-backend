@@ -7,9 +7,11 @@
     "stop": "supabase stop",
     "status": "supabase status",
     "deploy": "supabase link --project-ref <your-project-id> && supabase db push",
-    "gen:types": "supabase gen types typescript --linked > ../audiobookphile-web/src/types/supabase.ts"
+    "gen:types": "supabase gen types typescript --linked > ../audiobookphile-web/src/types/supabase.ts",
+    "prepare": "lefthook install"
   },
   "devDependencies": {
+    "@evilmartians/lefthook": "^2.1.9",
     "supabase": "^2.98.2"
   }
 }

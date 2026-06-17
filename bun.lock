@@ -5,11 +5,14 @@
     "": {
       "name": "audiobookphile-backend",
       "devDependencies": {
+        "@evilmartians/lefthook": "^2.1.9",
         "supabase": "^2.98.2",
       },
     },
   },
   "packages": {
+    "@evilmartians/lefthook": ["@evilmartians/lefthook@2.1.9", "", { "os": [ "linux", "win32", "darwin", ], "cpu": [ "x64", "ia32", "arm64", ], "bin": { "lefthook": "bin/index.js" } }, "sha512-+odrq63LQ5kbkmMocXyciavBpvmubPyrrYY3GTgPN5wIi0cIxsDF26ZrozNfGXILbQiM6F6KRHXJZu6Bz9U95A=="],
+
     "@supabase/cli-darwin-arm64": ["@supabase/cli-darwin-arm64@2.106.0", "", { "os": "darwin", "cpu": "arm64" }, "sha512-xi/IAjjbebh6xA9Nkkb7ZwC5ACKJ38OqMoYk1y20ScW5Wt+pxTCcOcaWDWu+2u2Pwc3vTYnXhbknVcQt9UcChQ=="],
 
     "@supabase/cli-darwin-x64": ["@supabase/cli-darwin-x64@2.106.0", "", { "os": "darwin", "cpu": "x64" }, "sha512-AT2s/8/3Ffb7IkcUXK6sA/iPCzJhh4Fh/XqzAGNGsVd1xCA/ZGniqU8BL03TqPkN1sR0iDaShjMLLIlHEflyPQ=="],
