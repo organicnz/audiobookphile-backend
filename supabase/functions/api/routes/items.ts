@@ -2,6 +2,7 @@ import { Context, Hono } from "hono";
 import { createClient } from "@supabase/supabase-js";
 import { mapBookForMobile } from "../mappers.ts";
 import { Variables } from "../_shared/types.ts";
+import { getProxyOrigin } from "../_shared/proxy.ts";
 
 export const itemsRouter = new Hono<{ Variables: Variables }>();
 
@@ -215,10 +216,8 @@ itemsRouter.get("/:id/cover", async (c) => {
     // and serve a fallback image so older TestFlight builds don't show a blurred empty box.
     // We leave the 404 intact for the web client so it can render its text-based UI placeholder.
     if (c.req.query("format")) {
-      const host = c.req.header("x-forwarded-host") || c.req.header("host") ||
-        "audiobookphile-server.vercel.app";
-      const protocol = c.req.header("x-forwarded-proto") || "https";
-      const fallbackUrl = `${protocol}://${host}/images/book_placeholder.jpg`;
+      const origin = getProxyOrigin(c);
+      const fallbackUrl = `${origin}/images/book_placeholder.jpg`;
       return c.redirect(fallbackUrl, 302);
     }
 
@@ -228,20 +227,16 @@ itemsRouter.get("/:id/cover", async (c) => {
   const { data } = adminClient.storage.from("covers").getPublicUrl(coverPath);
   let publicUrl = data.publicUrl;
 
-  // Fix local development redirect issue where the mobile device can't reach 127.0.0.1
   if (
     publicUrl.includes("127.0.0.1") || publicUrl.includes("localhost") ||
     publicUrl.includes("host.docker.internal")
   ) {
-    const host = c.req.header("x-forwarded-host") || c.req.header("host");
-    const protocol = c.req.header("x-forwarded-proto") || "http";
-    if (host) {
-      try {
-        const urlObj = new URL(publicUrl);
-        publicUrl = `${protocol}://${host}${urlObj.pathname}`;
-      } catch (_e) {
-        // Ignore URL parse errors
-      }
+    const origin = getProxyOrigin(c);
+    try {
+      const urlObj = new URL(publicUrl);
+      publicUrl = `${origin}${urlObj.pathname}`;
+    } catch (_e) {
+      // Ignore URL parse errors
     }
   }
 

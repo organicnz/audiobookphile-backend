@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { createClient } from "@supabase/supabase-js";
 import { Variables } from "../_shared/types.ts";
+import { getProxyOrigin } from "../_shared/proxy.ts";
 
 export const authRouter = new Hono<{ Variables: Variables }>();
 
@@ -111,8 +112,7 @@ authRouter.post("/auth/forgot-password", async (c) => {
   const supabase = c.get("supabase");
   const body = await c.req.json();
   const { email } = body;
-  const siteUrl = c.req.header("origin") ||
-    Deno.env.get("NEXT_PUBLIC_SITE_URL") || "http://localhost:3000";
+  const siteUrl = getProxyOrigin(c);
   const { error } = await supabase.auth.resetPasswordForEmail(email, {
     redirectTo: `${siteUrl}/auth/callback?next=/reset-password`,
   });
