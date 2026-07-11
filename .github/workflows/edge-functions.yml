@@ -62,6 +62,10 @@ jobs:
         with:
           version: latest
 
+      - name: Push Database Migrations
+        run: |
+          supabase db push --project-ref $SUPABASE_PROJECT_ID
+
       - name: Dynamically Deploy Edge Functions
         run: |
           # Iterate over all directories in supabase/functions
