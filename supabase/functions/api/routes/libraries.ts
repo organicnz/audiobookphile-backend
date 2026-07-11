@@ -222,8 +222,22 @@ librariesRouter.get("/:id/search", async (c) => {
 
   if (error) throw error;
 
+  const user = c.get("user");
+  const itemIds = (items || []).map((i) => i.id);
+  let progressMap = new Map();
+  if (user && itemIds.length > 0) {
+    const { data: progressData } = await supabase.from("media_progress")
+      .select("*")
+      .eq("user_id", user.id)
+      .in("library_item_id", itemIds)
+      .is("episode_id", null);
+    progressMap = new Map(
+      (progressData || []).map((p: any) => [p.library_item_id, p]),
+    );
+  }
+
   const results = items.map((item: any) => ({
-    libraryItem: mapBookForMobile(item, null),
+    libraryItem: mapBookForMobile(item, progressMap.get(item.id) as any),
     matchKey: "title",
     matchText: item.title || "",
   }));
