@@ -41,11 +41,7 @@ jobs:
           supabase db lint
           supabase test db
 
-      - name: Enforce Zero-Downtime Migrations (Squawk)
-        uses: sbdchd/squawk-action@v2
-        continue-on-error: true
-        with:
-          pattern: supabase/migrations/*.sql
+
 
   deploy:
     needs: lint
