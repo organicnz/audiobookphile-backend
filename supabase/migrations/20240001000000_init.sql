@@ -408,15 +408,17 @@ CREATE TABLE public.chapters (
 -- ============================================================
 
 CREATE TABLE public.media_progress (
-  id               uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id          uuid        NOT NULL REFERENCES auth.users(id)            ON DELETE CASCADE,
-  library_item_id  uuid        NOT NULL REFERENCES public.library_items(id)  ON DELETE CASCADE,
-  episode_id       uuid                 REFERENCES public.podcast_episodes(id) ON DELETE CASCADE,
-  current_time_pos numeric     NOT NULL DEFAULT 0,  -- seconds
-  duration         numeric,                          -- total duration in seconds
-  progress         numeric,                          -- 0.0 to 1.0
-  is_finished      boolean     NOT NULL DEFAULT false,
-  last_update      timestamptz DEFAULT now(),
+  id                           uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id                      uuid        NOT NULL REFERENCES auth.users(id)            ON DELETE CASCADE,
+  library_item_id              uuid        NOT NULL REFERENCES public.library_items(id)  ON DELETE CASCADE,
+  episode_id                   uuid                 REFERENCES public.podcast_episodes(id) ON DELETE CASCADE,
+  current_time_pos             numeric     NOT NULL DEFAULT 0,  -- seconds
+  duration                     numeric,                          -- total duration in seconds
+  progress                     numeric,                          -- 0.0 to 1.0
+  is_finished                  boolean     NOT NULL DEFAULT false,
+  hide_from_continue_listening boolean     NOT NULL DEFAULT false,
+  finished_at                  timestamptz,
+  last_update                  timestamptz DEFAULT now(),
   UNIQUE NULLS NOT DISTINCT (user_id, library_item_id, episode_id)
 );
 
