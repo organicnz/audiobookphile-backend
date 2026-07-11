@@ -11,12 +11,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
       - name: TruffleHog OSS
-        uses: trufflesecurity/trufflehog@main
+        uses: trufflesecurity/trufflehog@v3
         with:
           path: ./
-          extra_args: --debug --only-verified
+          extra_args: --only-verified

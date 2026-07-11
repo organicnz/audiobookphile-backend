@@ -16,13 +16,18 @@ jobs:
             exit 1
           fi
 
-          if [ -z "${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}" ]; then
-            echo "Error: SUPABASE_SERVICE_ROLE_KEY secret is missing."
+          if [ -z "${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}" ] && [ -z "${{ secrets.SUPABASE_SERVICE_KEY }}" ]; then
+            echo "Error: Neither SUPABASE_SERVICE_ROLE_KEY nor SUPABASE_SERVICE_KEY secret is set."
             exit 1
           fi
 
+          SERVICE_KEY="${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}"
+          if [ -z "$SERVICE_KEY" ]; then
+            SERVICE_KEY="${{ secrets.SUPABASE_SERVICE_KEY }}"
+          fi
+
           response=$(curl -s -w "\n%{http_code}" -X POST "https://${{ secrets.SUPABASE_PROJECT_ID }}.supabase.co/functions/v1/backup-database" \
-            -H "Authorization: Bearer ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}" \
+            -H "Authorization: Bearer $SERVICE_KEY" \
             -H "Content-Type: application/json")
 
           http_code=$(echo "$response" | tail -n1)

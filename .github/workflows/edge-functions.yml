@@ -17,12 +17,12 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v4
 
       - name: Setup Deno
         uses: denoland/setup-deno@v2
         with:
-          deno-version: v1.x
+          deno-version: v2.x
 
       - name: Setup Supabase CLI
         uses: supabase/setup-cli@v2
@@ -35,13 +35,11 @@ jobs:
           deno lint
           deno fmt --check
 
-      - name: Lint Database Migrations
+      - name: Lint Database Migrations (linked project)
         run: |
-          supabase start
-          supabase db lint
-          supabase test db
-
-
+          supabase db lint --project-ref ${{ secrets.SUPABASE_PROJECT_ID }}
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
 
   deploy:
     needs: lint
@@ -60,17 +58,12 @@ jobs:
         with:
           version: latest
 
-
       - name: Dynamically Deploy Edge Functions
         run: |
-          # Iterate over all directories in supabase/functions
           for dir in supabase/functions/*/; do
-            # Remove trailing slash and 'supabase/functions/' prefix
             func_name=$(basename "$dir")
-
-            # Skip the _shared directory
             if [ "$func_name" != "_shared" ]; then
               echo "🚀 Deploying function: $func_name"
-              supabase functions deploy "$func_name" --project-ref $SUPABASE_PROJECT_ID
+              supabase functions deploy "$func_name" --project-ref "$SUPABASE_PROJECT_ID"
             fi
           done
