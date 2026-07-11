@@ -1,4 +1,3 @@
-// deno-lint-ignore no-import-prefix
 import * as Sentry from "npm:@sentry/deno@8.32.0";
 
 Sentry.init({
