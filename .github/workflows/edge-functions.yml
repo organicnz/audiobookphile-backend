@@ -37,6 +37,7 @@ jobs:
 
       - name: Lint Database Migrations
         run: |
+          supabase start
           supabase db lint
           supabase test db
 
