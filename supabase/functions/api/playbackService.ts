@@ -492,13 +492,16 @@ export class PlaybackService {
 
     if (sessionUuid && timeListened !== undefined) {
       const { data: session } = await supabase.from("playback_sessions").select(
-        "time_listening",
+        "time_listening, current_time_pos",
       ).eq("id", sessionUuid).single();
       const existingTime = session?.time_listening || 0;
+      const existingPos = session?.current_time_pos || 0;
 
       await supabase.from("playback_sessions")
         .update({
-          current_time_pos: currentTime ?? 0,
+          current_time_pos: currentTime !== undefined
+            ? currentTime
+            : existingPos,
           time_listening: existingTime + (timeListened || 0),
           updated_at: new Date().toISOString(),
         })
