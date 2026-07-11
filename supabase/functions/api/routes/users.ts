@@ -75,7 +75,7 @@ usersRouter.post("/", async (c) => {
   const body = await c.req.json();
   const emailToUse = body.username.includes("@")
     ? body.username
-    : `${body.username}@local.abs`;
+    : `${body.username}@local.abp`;
 
   const { data: authData, error: authError } = await adminSupabase.auth.admin
     .createUser({
