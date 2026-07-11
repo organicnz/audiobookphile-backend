@@ -346,6 +346,7 @@ librariesRouter.post("/:id/scan", (c) => {
 
 librariesRouter.get("/:id/personalized", async (c) => {
   const supabase = c.get("supabase");
+  const user = c.get("user")!;
   const libraryId = c.req.param("id");
 
   // Fetch recently added items
@@ -356,8 +357,21 @@ librariesRouter.get("/:id/personalized", async (c) => {
     .order("created_at", { ascending: false })
     .limit(10);
 
+  const itemIds = (recentItems || []).map((i) => i.id);
+  let progressMap = new Map();
+  if (user && itemIds.length > 0) {
+    const { data: progressData } = await supabase.from("media_progress")
+      .select("*")
+      .eq("user_id", user.id)
+      .in("library_item_id", itemIds)
+      .is("episode_id", null);
+    progressMap = new Map(
+      (progressData || []).map((p: any) => [p.library_item_id, p]),
+    );
+  }
+
   const formattedRecent = (recentItems || []).map((item: any) =>
-    mapBookForMobile(item, null)
+    mapBookForMobile(item, progressMap.get(item.id) as any)
   );
 
   const shelves = [
