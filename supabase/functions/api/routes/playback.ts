@@ -86,15 +86,18 @@ playbackRouter.post("/session/bulk-sync", async (c) => {
   const supabase = c.get("supabase");
   const user = c.get("user")!;
   const body = await c.req.json();
-  
+
   if (!Array.isArray(body)) {
-    return c.json({ success: false, error: "Expected an array of sync payloads" }, 400);
+    return c.json({
+      success: false,
+      error: "Expected an array of sync payloads",
+    }, 400);
   }
 
   const result = await PlaybackService.bulkSyncSessions(
     supabase,
     user.id,
-    body
+    body,
   );
 
   if (!result.success) {

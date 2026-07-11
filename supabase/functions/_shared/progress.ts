@@ -63,7 +63,7 @@ export async function bulkUpsertMediaProgress(
     currentTime?: number;
     isFinished?: boolean;
     hideFromContinueListening?: boolean;
-  }>
+  }>,
 ) {
   const dataToUpsert = progressItems.map((item) => {
     const finalDuration = item.duration || 0;

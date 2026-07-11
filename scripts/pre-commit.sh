@@ -10,14 +10,14 @@ if ! which deno >/dev/null; then
 fi
 
 echo "Running Deno Lint on staged files..."
-deno lint "$@"
+deno lint --config supabase/functions/deno.json "$@"
 if [ $? -ne 0 ]; then
     echo "❌ Deno Lint failed. Please fix the errors before committing."
     exit 1
 fi
 
 echo "Running Deno Fmt..."
-deno fmt --check "$@"
+deno fmt --check --config supabase/functions/deno.json "$@"
 if [ $? -ne 0 ]; then
     echo "❌ Deno Fmt failed. Please format before committing."
     exit 1

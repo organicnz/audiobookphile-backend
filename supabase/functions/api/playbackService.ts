@@ -1,6 +1,9 @@
 import { SupabaseClient } from "@supabase/supabase-js";
 import { StorageRouter } from "../_shared/storage-router.ts";
-import { bulkUpsertMediaProgress, upsertMediaProgress } from "../_shared/progress.ts";
+import {
+  bulkUpsertMediaProgress,
+  upsertMediaProgress,
+} from "../_shared/progress.ts";
 
 export class PlaybackService {
   static async startSession(
@@ -306,11 +309,11 @@ export class PlaybackService {
       duration?: number;
       progress?: number;
       episodeId?: string;
-    }>
+    }>,
   ) {
     if (syncPayloads.length === 0) return { success: true };
 
-    const progressItems = syncPayloads.map(payload => {
+    const progressItems = syncPayloads.map((payload) => {
       const [libraryItemId] = payload.sessionId.split("__");
       return {
         libraryItemId,
@@ -319,28 +322,38 @@ export class PlaybackService {
         duration: payload.duration,
         progress: payload.progress,
       };
-    }).filter(item => item.libraryItemId);
+    }).filter((item) => item.libraryItemId);
 
     if (progressItems.length > 0) {
       try {
         await bulkUpsertMediaProgress(supabase, userId, progressItems);
       } catch (e: any) {
-        console.error(`[PlaybackService] Failed to bulk upsert media progress:`, e);
-        return { success: false, error: e.message || "Failed to bulk upsert media progress" };
+        console.error(
+          `[PlaybackService] Failed to bulk upsert media progress:`,
+          e,
+        );
+        return {
+          success: false,
+          error: e.message || "Failed to bulk upsert media progress",
+        };
       }
     }
 
     // Now update playback_sessions
     // We aggregate timeListened by sessionUuid
-    const sessionUpdates = new Map<string, { currentTime: number; timeListened: number }>();
-    
+    const sessionUpdates = new Map<
+      string,
+      { currentTime: number; timeListened: number }
+    >();
+
     for (const payload of syncPayloads) {
       const [, sessionUuid] = payload.sessionId.split("__");
       if (sessionUuid) {
-        const existing = sessionUpdates.get(sessionUuid) || { currentTime: 0, timeListened: 0 };
+        const existing = sessionUpdates.get(sessionUuid) ||
+          { currentTime: 0, timeListened: 0 };
         sessionUpdates.set(sessionUuid, {
           currentTime: Math.max(existing.currentTime, payload.currentTime), // Assuming latest currentTime is max
-          timeListened: existing.timeListened + (payload.timeListened || 0)
+          timeListened: existing.timeListened + (payload.timeListened || 0),
         });
       }
     }
@@ -354,23 +367,30 @@ export class PlaybackService {
           .select("id, time_listening")
           .in("id", sessionUuids);
 
-        const existingMap = new Map((existingSessions || []).map(s => [s.id, s.time_listening || 0]));
+        const existingMap = new Map(
+          (existingSessions || []).map((s) => [s.id, s.time_listening || 0]),
+        );
 
         // Update concurrently
-        const updatePromises = Array.from(sessionUpdates.entries()).map(([sessionUuid, update]) => {
-          const existingTime = existingMap.get(sessionUuid) || 0;
-          return supabase.from("playback_sessions")
-            .update({
-              current_time_pos: update.currentTime,
-              time_listening: existingTime + update.timeListened,
-              updated_at: new Date().toISOString(),
-            })
-            .eq("id", sessionUuid);
-        });
-        
+        const updatePromises = Array.from(sessionUpdates.entries()).map(
+          ([sessionUuid, update]) => {
+            const existingTime = existingMap.get(sessionUuid) || 0;
+            return supabase.from("playback_sessions")
+              .update({
+                current_time_pos: update.currentTime,
+                time_listening: existingTime + update.timeListened,
+                updated_at: new Date().toISOString(),
+              })
+              .eq("id", sessionUuid);
+          },
+        );
+
         await Promise.all(updatePromises);
       } catch (e: any) {
-        console.error(`[PlaybackService] Failed to bulk update playback_sessions:`, e);
+        console.error(
+          `[PlaybackService] Failed to bulk update playback_sessions:`,
+          e,
+        );
       }
     }
 
