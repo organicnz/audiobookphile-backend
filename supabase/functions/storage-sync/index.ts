@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "npm:@supabase/supabase-js";
-import { DeleteObjectCommand, S3Client } from "npm:@aws-sdk/client-s3";
+
 import { corsHeaders } from "../_shared/cors.ts";
 
 // Basic types
@@ -90,7 +90,7 @@ serve(async (req) => {
 
   const buildReport = async () => {
     const [sb, b2] = await Promise.all([listSupabaseAudio(), listB2Objects()]);
-    const all = [...sb, ...b2];
+    const _all = [...sb, ...b2];
 
     // get DB paths
     const { data: books } = await adminClient.from("books").select(

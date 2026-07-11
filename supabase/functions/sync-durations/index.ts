@@ -59,7 +59,7 @@ serve(async (req) => {
       if (!book.audio_files) continue;
 
       const files = book.audio_files;
-      const metadataPromises = files.map(async (file: any, i: number) => {
+      const metadataPromises = files.map(async (file: any, _i: number) => {
         let duration = file.duration || file.metadata?.duration || 0;
         // ALWAYS re-sync if 0
         if (duration > 0) {
@@ -87,7 +87,7 @@ serve(async (req) => {
 
                 try {
                   res.body.cancel();
-                } catch (e) {}
+                } catch (_e) { /* ignore */ }
               }
             }
           }

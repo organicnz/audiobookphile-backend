@@ -32,7 +32,7 @@ serve(async (req) => {
       try {
         const body = await req.json();
         if (body.itemId) itemId = body.itemId;
-      } catch (e) {
+      } catch (_e) {
         // ignore
       }
     }
