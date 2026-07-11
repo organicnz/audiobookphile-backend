@@ -2,7 +2,6 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "@supabase/supabase-js";
-import { corsHeaders } from "../_shared/cors.ts";
 import { Sentry } from "../_shared/sentry.ts";
 
 // Native Hono Routers
@@ -51,7 +50,7 @@ app.use("*", async (c, next) => {
 
   const requireUser = async () => {
     const jwt = authHeader?.replace("Bearer ", "") || "";
-    const { data: { user }, error } = await supabase.auth.getUser(jwt);
+    const { data: { user }, error: _error } = await supabase.auth.getUser(jwt);
     if (!user) throw new Error("Unauthorized");
     return user;
   };

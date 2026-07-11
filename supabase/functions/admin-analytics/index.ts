@@ -85,11 +85,6 @@ serve(async (req) => {
       // Ignore if table doesn't exist
     }
 
-    // Since aggregating duration over all books might be heavy, we can do a sum if it's small,
-    // or just return the counts for now. We will just sum up duration from library_items if available.
-    let totalDuration = 0;
-    // Skip heavy aggregation for now to ensure stability
-
     return new Response(
       JSON.stringify({
         totalUsers: totalUsers || 0,

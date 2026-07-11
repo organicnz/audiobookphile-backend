@@ -13,8 +13,6 @@
     "rules": {
       "exclude": [
         "no-explicit-any",
-        "no-unused-vars",
-        "no-empty",
         "ban-ts-comment",
         "prefer-const",
         "no-import-prefix",

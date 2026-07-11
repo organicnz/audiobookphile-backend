@@ -292,7 +292,9 @@ serve(async (req) => {
                 // Immediately cancel the stream to save bandwidth and memory!
                 try {
                   res.body.cancel();
-                } catch (e) {}
+                } catch (_e) {
+                  // Ignore
+                }
               }
             }
           } catch (err) {

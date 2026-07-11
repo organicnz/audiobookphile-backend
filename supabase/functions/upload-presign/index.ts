@@ -39,7 +39,7 @@ serve(async (req) => {
       });
     }
 
-    const { filename, contentType, size } = await req.json();
+    const { filename, contentType } = await req.json();
 
     if (!filename) {
       return new Response(JSON.stringify({ error: "Filename is required" }), {
@@ -47,8 +47,6 @@ serve(async (req) => {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
-
-    const fileSize = Number(size) || 0;
 
     // User requested to fully use Backblaze for all audiobook files
     if (Deno.env.get("B2_ENDPOINT") && Deno.env.get("B2_BUCKET_NAME")) {

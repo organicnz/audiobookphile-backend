@@ -11,10 +11,10 @@ export class PlaybackService {
     userId: string,
     libraryItemId: string,
     episodeId?: string | null,
-    deviceInfo?: Record<string, unknown>,
-    supportedMimeTypes?: string[],
-    forceDirectPlay?: boolean,
-    forceTranscode?: boolean,
+    _deviceInfo?: Record<string, unknown>,
+    _supportedMimeTypes?: string[],
+    _forceDirectPlay?: boolean,
+    _forceTranscode?: boolean,
   ) {
     // Fetch the single library item with all relations
     const { data: item, error: itemError } = await supabase
@@ -311,9 +311,25 @@ export class PlaybackService {
       episodeId?: string;
     }>,
   ) {
-    if (syncPayloads.length === 0) return { success: true };
+    if (syncPayloads.length === 0) {
+      return { success: true, syncedSessionIds: [] };
+    }
 
-    const progressItems = syncPayloads.map((payload) => {
+    const syncedSessionIds: string[] = [];
+
+    // 1. Process media progress
+    // We group by libraryItemId + episodeId to find the latest progress update for each item in the batch
+    const progressMap = new Map<string, typeof syncPayloads[0]>();
+    for (const payload of syncPayloads) {
+      const key = `${payload.sessionId}_${payload.episodeId || ""}`;
+      const existing = progressMap.get(key);
+      if (!existing || existing.currentTime < payload.currentTime) {
+        progressMap.set(key, payload);
+      }
+    }
+
+    const progressItemsToSync = Array.from(progressMap.values());
+    const progressItems = progressItemsToSync.map((payload) => {
       const [libraryItemId] = payload.sessionId.split("__");
       return {
         libraryItemId,
@@ -321,39 +337,67 @@ export class PlaybackService {
         currentTime: payload.currentTime,
         duration: payload.duration,
         progress: payload.progress,
+        sessionId: payload.sessionId,
       };
     }).filter((item) => item.libraryItemId);
 
     if (progressItems.length > 0) {
       try {
         await bulkUpsertMediaProgress(supabase, userId, progressItems);
+        // All of these sessionIds succeeded
+        for (const item of progressItems) {
+          syncedSessionIds.push(item.sessionId);
+        }
       } catch (e: any) {
-        console.error(
-          `[PlaybackService] Failed to bulk upsert media progress:`,
+        console.warn(
+          `[PlaybackService] Bulk progress upsert failed, falling back to individual:`,
           e,
         );
-        return {
-          success: false,
-          error: e.message || "Failed to bulk upsert media progress",
-        };
+        // Fall back to individual upsert
+        for (const item of progressItems) {
+          try {
+            await upsertMediaProgress(
+              supabase,
+              userId,
+              item.libraryItemId,
+              item.episodeId,
+              {
+                currentTime: item.currentTime,
+                duration: item.duration,
+                progress: item.progress,
+              },
+            );
+            syncedSessionIds.push(item.sessionId);
+          } catch (individualErr: any) {
+            console.error(
+              `[PlaybackService] Individual progress upsert failed for ${item.sessionId}:`,
+              individualErr,
+            );
+          }
+        }
       }
     }
 
-    // Now update playback_sessions
-    // We aggregate timeListened by sessionUuid
+    // 2. Process playback sessions updates
     const sessionUpdates = new Map<
       string,
-      { currentTime: number; timeListened: number }
+      { currentTime: number; timeListened: number; originalSessionId: string }
     >();
 
     for (const payload of syncPayloads) {
+      if (!syncedSessionIds.includes(payload.sessionId)) continue;
+
       const [, sessionUuid] = payload.sessionId.split("__");
       if (sessionUuid) {
-        const existing = sessionUpdates.get(sessionUuid) ||
-          { currentTime: 0, timeListened: 0 };
+        const existing = sessionUpdates.get(sessionUuid) || {
+          currentTime: 0,
+          timeListened: 0,
+          originalSessionId: payload.sessionId,
+        };
         sessionUpdates.set(sessionUuid, {
-          currentTime: Math.max(existing.currentTime, payload.currentTime), // Assuming latest currentTime is max
+          currentTime: Math.max(existing.currentTime, payload.currentTime),
           timeListened: existing.timeListened + (payload.timeListened || 0),
+          originalSessionId: payload.sessionId,
         });
       }
     }
@@ -361,7 +405,6 @@ export class PlaybackService {
     const sessionUuids = Array.from(sessionUpdates.keys());
     if (sessionUuids.length > 0) {
       try {
-        // Fetch existing sessions
         const { data: existingSessions } = await supabase
           .from("playback_sessions")
           .select("id, time_listening")
@@ -373,28 +416,43 @@ export class PlaybackService {
 
         // Update concurrently
         const updatePromises = Array.from(sessionUpdates.entries()).map(
-          ([sessionUuid, update]) => {
+          async ([sessionUuid, update]) => {
             const existingTime = existingMap.get(sessionUuid) || 0;
-            return supabase.from("playback_sessions")
-              .update({
-                current_time_pos: update.currentTime,
-                time_listening: existingTime + update.timeListened,
-                updated_at: new Date().toISOString(),
-              })
-              .eq("id", sessionUuid);
+            try {
+              await supabase.from("playback_sessions")
+                .update({
+                  current_time_pos: update.currentTime,
+                  time_listening: existingTime + update.timeListened,
+                  updated_at: new Date().toISOString(),
+                })
+                .eq("id", sessionUuid);
+            } catch (sessionErr: any) {
+              console.error(
+                `[PlaybackService] Failed to update playback_session ${sessionUuid}:`,
+                sessionErr,
+              );
+              // If updating playback_sessions fails, remove it from syncedSessionIds so the client retries
+              const idx = syncedSessionIds.indexOf(update.originalSessionId);
+              if (idx !== -1) syncedSessionIds.splice(idx, 1);
+            }
           },
         );
 
         await Promise.all(updatePromises);
       } catch (e: any) {
         console.error(
-          `[PlaybackService] Failed to bulk update playback_sessions:`,
+          `[PlaybackService] Failed to fetch or bulk update playback_sessions:`,
           e,
         );
+        return {
+          success: false,
+          error: e.message || "Failed to update playback sessions",
+          syncedSessionIds: [],
+        };
       }
     }
 
-    return { success: true };
+    return { success: true, syncedSessionIds };
   }
 
   static async closeSession(

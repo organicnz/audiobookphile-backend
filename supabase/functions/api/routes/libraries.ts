@@ -1,5 +1,4 @@
 import { Hono } from "hono";
-import { createClient } from "@supabase/supabase-js";
 import { mapBookForMobile, mapLibraryForMobile } from "../mappers.ts";
 import { Database } from "../../../../src/types/supabase.ts";
 import { z } from "zod";

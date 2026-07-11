@@ -96,7 +96,7 @@ serve(async (req) => {
     const filename = `backup-${new Date().toISOString().split("T")[0]}.json`;
 
     // 2. Upload to storage
-    const { data, error: uploadErr } = await supabase.storage
+    const { error: uploadErr } = await supabase.storage
       .from("backups")
       .upload(filename, backupJson, {
         contentType: "application/json",

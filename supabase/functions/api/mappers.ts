@@ -19,7 +19,7 @@ type LibraryItemWithBooks = LibraryItemRow & {
   books?: Record<string, unknown> | Record<string, unknown>[] | null;
 };
 
-function formatCoverPath(
+function _formatCoverPath(
   rawPath: string | null | undefined,
   itemId: string,
 ): string | null {
