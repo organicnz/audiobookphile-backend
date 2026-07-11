@@ -1,6 +1,8 @@
 BEGIN;
 SELECT plan(1);
 
+SET local role anon;
+
 -- Test: Public user cannot read private profiles
 SELECT throws_ok(
   'SELECT * FROM public.profiles',
