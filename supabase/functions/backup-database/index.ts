@@ -1,6 +1,6 @@
-import { serve } from "std/http/server.ts";
-import { createClient } from "@supabase/supabase-js@2";
-import { Database } from "../../src/types/supabase.ts";
+import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from "npm:@supabase/supabase-js@2";
+import { Database } from "../../../src/types/supabase.ts";
 
 serve(async (req) => {
   try {

@@ -1,9 +1,9 @@
-import { serve } from "std/http/server.ts";
+import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "@supabase/supabase-js";
 import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { corsHeaders } from "../_shared/cors.ts";
-import { Database } from "../../src/types/supabase.ts";
+import { Database } from "../../../src/types/supabase.ts";
 
 serve(async (req) => {
   if (req.method === "OPTIONS") {

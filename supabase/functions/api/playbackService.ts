@@ -1,5 +1,6 @@
 import { SupabaseClient } from "@supabase/supabase-js";
 import { StorageRouter } from "../_shared/storage-router.ts";
+import { bulkUpsertMediaProgress, upsertMediaProgress } from "../_shared/progress.ts";
 
 export class PlaybackService {
   static async startSession(
@@ -250,24 +251,32 @@ export class PlaybackService {
     sessionId: string,
     currentTime: number,
     timeListened: number,
+    duration?: number,
+    progress?: number,
+    episodeId?: string,
   ) {
     const [libraryItemId, sessionUuid] = sessionId.split("__");
     if (!libraryItemId) return { success: false, error: "Invalid session ID" };
 
-    const { error: upsertError } = await supabase
-      .from("media_progress")
-      .upsert(
+    try {
+      await upsertMediaProgress(
+        supabase,
+        userId,
+        libraryItemId,
+        episodeId || null,
         {
-          user_id: userId,
-          library_item_id: libraryItemId,
-          episode_id: null,
-          current_time_pos: currentTime,
-          last_update: new Date().toISOString(),
+          currentTime,
+          duration,
+          progress,
         },
-        { onConflict: "user_id,library_item_id,episode_id" },
       );
-
-    if (upsertError) return { success: false, error: upsertError.message };
+    } catch (e: any) {
+      console.error(`[PlaybackService] Failed to sync session:`, e);
+      return {
+        success: false,
+        error: e.message || "Failed to upsert media progress",
+      };
+    }
 
     if (sessionUuid) {
       const { data: session } = await supabase.from("playback_sessions").select(
@@ -287,29 +296,120 @@ export class PlaybackService {
     return { success: true };
   }
 
+  static async bulkSyncSessions(
+    supabase: SupabaseClient,
+    userId: string,
+    syncPayloads: Array<{
+      sessionId: string;
+      currentTime: number;
+      timeListened: number;
+      duration?: number;
+      progress?: number;
+      episodeId?: string;
+    }>
+  ) {
+    if (syncPayloads.length === 0) return { success: true };
+
+    const progressItems = syncPayloads.map(payload => {
+      const [libraryItemId] = payload.sessionId.split("__");
+      return {
+        libraryItemId,
+        episodeId: payload.episodeId || null,
+        currentTime: payload.currentTime,
+        duration: payload.duration,
+        progress: payload.progress,
+      };
+    }).filter(item => item.libraryItemId);
+
+    if (progressItems.length > 0) {
+      try {
+        await bulkUpsertMediaProgress(supabase, userId, progressItems);
+      } catch (e: any) {
+        console.error(`[PlaybackService] Failed to bulk upsert media progress:`, e);
+        return { success: false, error: e.message || "Failed to bulk upsert media progress" };
+      }
+    }
+
+    // Now update playback_sessions
+    // We aggregate timeListened by sessionUuid
+    const sessionUpdates = new Map<string, { currentTime: number; timeListened: number }>();
+    
+    for (const payload of syncPayloads) {
+      const [, sessionUuid] = payload.sessionId.split("__");
+      if (sessionUuid) {
+        const existing = sessionUpdates.get(sessionUuid) || { currentTime: 0, timeListened: 0 };
+        sessionUpdates.set(sessionUuid, {
+          currentTime: Math.max(existing.currentTime, payload.currentTime), // Assuming latest currentTime is max
+          timeListened: existing.timeListened + (payload.timeListened || 0)
+        });
+      }
+    }
+
+    const sessionUuids = Array.from(sessionUpdates.keys());
+    if (sessionUuids.length > 0) {
+      try {
+        // Fetch existing sessions
+        const { data: existingSessions } = await supabase
+          .from("playback_sessions")
+          .select("id, time_listening")
+          .in("id", sessionUuids);
+
+        const existingMap = new Map((existingSessions || []).map(s => [s.id, s.time_listening || 0]));
+
+        // Update concurrently
+        const updatePromises = Array.from(sessionUpdates.entries()).map(([sessionUuid, update]) => {
+          const existingTime = existingMap.get(sessionUuid) || 0;
+          return supabase.from("playback_sessions")
+            .update({
+              current_time_pos: update.currentTime,
+              time_listening: existingTime + update.timeListened,
+              updated_at: new Date().toISOString(),
+            })
+            .eq("id", sessionUuid);
+        });
+        
+        await Promise.all(updatePromises);
+      } catch (e: any) {
+        console.error(`[PlaybackService] Failed to bulk update playback_sessions:`, e);
+      }
+    }
+
+    return { success: true };
+  }
+
   static async closeSession(
     supabase: SupabaseClient,
     userId: string,
     sessionId: string,
     currentTime?: number,
     timeListened?: number,
+    duration?: number,
+    progress?: number,
+    episodeId?: string,
   ) {
     const [libraryItemId, sessionUuid] = sessionId.split("__");
     if (!libraryItemId) return { success: false, error: "Invalid session ID" };
 
     if (currentTime !== undefined) {
-      await supabase
-        .from("media_progress")
-        .upsert(
+      try {
+        await upsertMediaProgress(
+          supabase,
+          userId,
+          libraryItemId,
+          episodeId || null,
           {
-            user_id: userId,
-            library_item_id: libraryItemId,
-            episode_id: null,
-            current_time_pos: currentTime,
-            last_update: new Date().toISOString(),
+            currentTime,
+            duration,
+            progress,
           },
-          { onConflict: "user_id,library_item_id,episode_id" },
         );
+      } catch (e: any) {
+        console.error(`[PlaybackService] Failed to close session:`, e);
+        return {
+          success: false,
+          error: e.message || "Failed to close session and update progress",
+        };
+      }
     }
 
     if (sessionUuid && timeListened !== undefined) {

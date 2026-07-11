@@ -51,3 +51,48 @@ export async function upsertMediaProgress(
   if (error) throw error;
   return data;
 }
+
+export async function bulkUpsertMediaProgress(
+  supabase: SupabaseClient,
+  userId: string,
+  progressItems: Array<{
+    libraryItemId: string;
+    episodeId?: string | null;
+    progress?: number;
+    duration?: number;
+    currentTime?: number;
+    isFinished?: boolean;
+    hideFromContinueListening?: boolean;
+  }>
+) {
+  const dataToUpsert = progressItems.map((item) => {
+    const finalDuration = item.duration || 0;
+    const finalCurrentTime = item.currentTime ??
+      (item.progress && finalDuration ? item.progress * finalDuration : 0);
+    const finalProgress = item.progress ??
+      (finalDuration > 0 ? finalCurrentTime / finalDuration : 0);
+    const finalIsFinished = item.isFinished ??
+      (finalDuration > 0 && finalCurrentTime >= finalDuration - 5);
+
+    return {
+      user_id: userId,
+      library_item_id: item.libraryItemId,
+      episode_id: item.episodeId || null,
+      progress: finalProgress,
+      duration: finalDuration,
+      current_time_pos: finalCurrentTime,
+      is_finished: finalIsFinished,
+      last_update: new Date().toISOString(),
+      hide_from_continue_listening: item.hideFromContinueListening ?? false,
+      finished_at: finalIsFinished ? new Date().toISOString() : null,
+    };
+  });
+
+  const { data, error } = await supabase
+    .from("media_progress")
+    .upsert(dataToUpsert, { onConflict: "user_id,library_item_id,episode_id" })
+    .select();
+
+  if (error) throw error;
+  return data;
+}
