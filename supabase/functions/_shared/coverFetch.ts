@@ -104,10 +104,6 @@ export async function fetchBookMetadata(
   title: string,
   author?: string,
 ): Promise<FetchResult> {
-  // Add a random jitter (0-2.5 seconds) to stagger concurrent requests from the iOS app
-  // and prevent instantly hitting provider rate limits (thundering herd).
-  await new Promise((r) => setTimeout(r, Math.random() * 2500));
-
   const { cleanTitle, extractedAuthor } = parseRawTitle(title);
   const cleanAuthor = author ? normalizeString(author) : extractedAuthor;
 
@@ -139,9 +135,6 @@ export async function fetchBookMetadata(
           `[coverFetch] Provider failed for "${strategy.title}":`,
           err,
         );
-        if (err instanceof Error && err.message === "RateLimitExceeded") {
-          throw err;
-        }
       }
     }
   }
@@ -161,9 +154,6 @@ async function fetchFromITunes(
       }&media=audiobook&limit=1`,
       { signal: AbortSignal.timeout(8000) },
     );
-    if (searchRes.status === 429 || searchRes.status === 403) {
-      throw new Error("RateLimitExceeded");
-    }
     if (!searchRes.ok) return null;
 
     const data = await searchRes.json();
@@ -226,9 +216,6 @@ async function fetchFromOpenLibrary(
       `https://openlibrary.org/search.json?${query.toString()}`,
       { signal: AbortSignal.timeout(8000) },
     );
-    if (searchRes.status === 429 || searchRes.status === 503) {
-      throw new Error("RateLimitExceeded");
-    }
     if (!searchRes.ok) return null;
 
     const data = await searchRes.json();
@@ -283,7 +270,6 @@ async function fetchFromGoogleBooks(
       }&maxResults=3&printType=books`,
       { signal: AbortSignal.timeout(8000) },
     );
-    if (searchRes.status === 429) throw new Error("RateLimitExceeded");
     if (!searchRes.ok) return null;
 
     const data = await searchRes.json();

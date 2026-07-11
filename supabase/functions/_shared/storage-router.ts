@@ -1,6 +1,6 @@
-import { GetObjectCommand, S3Client } from "@aws-sdk/client-s3";
-import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
-import { SupabaseClient } from "@supabase/supabase-js";
+import { GetObjectCommand, S3Client } from "npm:@aws-sdk/client-s3";
+import { getSignedUrl } from "npm:@aws-sdk/s3-request-presigner";
+import { SupabaseClient } from "npm:@supabase/supabase-js";
 
 export class StorageRouter {
   constructor(private supabase: SupabaseClient) {}
