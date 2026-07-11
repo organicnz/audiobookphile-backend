@@ -569,11 +569,21 @@ CREATE TRIGGER on_auth_user_created
 -- ============================================================
 -- Helper: reusable admin check
 --   Returns true when the calling user has user_type = 'admin' in profiles.
---   Used in USING / WITH CHECK clauses below.
+--   Uses SECURITY DEFINER to bypass RLS and prevent infinite recursion.
 -- ============================================================
 
--- (No separate function needed — inline EXISTS subquery is used throughout
---  to avoid a dependency on a helper function that could be dropped.)
+CREATE OR REPLACE FUNCTION public.is_admin()
+RETURNS boolean
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = ''
+STABLE
+AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM public.profiles
+    WHERE id = auth.uid() AND user_type = 'admin'
+  );
+$$;
 
 -- ============================================================
 -- 1. profiles
@@ -593,11 +603,7 @@ CREATE POLICY "profiles: admins can read all rows"
   ON public.profiles
   FOR SELECT
   USING (
-    EXISTS (
-      SELECT 1 FROM public.profiles p
-      WHERE p.id = auth.uid()
-        AND p.user_type = 'admin'
-    )
+    public.is_admin()
   );
 
 -- Users can update their own profile row
