@@ -10,6 +10,9 @@
     "gen:types": "supabase gen types typescript --linked > ../audiobookphile-web/src/types/supabase.ts",
     "prepare": "lefthook install"
   },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.1085.0"
+  },
   "devDependencies": {
     "@evilmartians/lefthook": "^2.1.9",
     "supabase": "^2.98.2"
