@@ -18,7 +18,6 @@ export async function upsertMediaProgress(
     duration,
     currentTime,
     isFinished,
-    hideFromContinueListening,
   } = progressData;
 
   const finalDuration = duration || 0;
@@ -38,8 +37,6 @@ export async function upsertMediaProgress(
     current_time_pos: finalCurrentTime,
     is_finished: finalIsFinished,
     last_update: new Date().toISOString(),
-    hide_from_continue_listening: hideFromContinueListening ?? false,
-    finished_at: finalIsFinished ? new Date().toISOString() : null,
   };
 
   const { data, error } = await supabase
@@ -85,8 +82,6 @@ export async function bulkUpsertMediaProgress(
       current_time_pos: finalCurrentTime,
       is_finished: finalIsFinished,
       last_update: new Date().toISOString(),
-      hide_from_continue_listening: item.hideFromContinueListening ?? false,
-      finished_at: finalIsFinished ? new Date().toISOString() : null,
     };
   });
 
