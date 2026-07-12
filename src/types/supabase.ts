@@ -753,6 +753,8 @@ export type Database = {
           current_time_pos: number | null;
           duration: number | null;
           episode_id: string | null;
+          finished_at: string | null;
+          hide_from_continue_listening: boolean;
           id: string;
           is_finished: boolean | null;
           last_update: string | null;
@@ -764,6 +766,8 @@ export type Database = {
           current_time_pos?: number | null;
           duration?: number | null;
           episode_id?: string | null;
+          finished_at?: string | null;
+          hide_from_continue_listening?: boolean;
           id?: string;
           is_finished?: boolean | null;
           last_update?: string | null;
@@ -775,6 +779,8 @@ export type Database = {
           current_time_pos?: number | null;
           duration?: number | null;
           episode_id?: string | null;
+          finished_at?: string | null;
+          hide_from_continue_listening?: boolean;
           id?: string;
           is_finished?: boolean | null;
           last_update?: string | null;

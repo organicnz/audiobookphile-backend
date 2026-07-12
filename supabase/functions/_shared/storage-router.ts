@@ -2,8 +2,10 @@ import { GetObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { SupabaseClient } from "npm:@supabase/supabase-js@2.44.0";
 
+import { Database } from "../../../src/types/supabase.ts";
+
 export class StorageRouter {
-  constructor(private supabase: SupabaseClient<any, any, any>) {}
+  constructor(private supabase: SupabaseClient<Database>) {}
 
   async getSignedUrl(path: string, expiresIn: number): Promise<string> {
     if (path.startsWith("supabase://")) {

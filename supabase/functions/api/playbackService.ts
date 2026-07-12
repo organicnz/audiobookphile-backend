@@ -1,4 +1,5 @@
 import { SupabaseClient } from "npm:@supabase/supabase-js@2.44.0";
+import { Database } from "../../../src/types/supabase.ts";
 import { StorageRouter } from "../_shared/storage-router.ts";
 import {
   bulkUpsertMediaProgress,
@@ -7,7 +8,7 @@ import {
 
 export class PlaybackService {
   static async startSession(
-    supabase: SupabaseClient,
+    supabase: SupabaseClient<Database>,
     userId: string,
     libraryItemId: string,
     episodeId?: string | null,
@@ -59,7 +60,8 @@ export class PlaybackService {
       throw new Error("No audio files found for this item");
     }
 
-    const totalBookDuration = Number(book?.duration || item.duration) || 0;
+    const totalBookDuration =
+      Number(book?.duration || (item as any).duration) || 0;
 
     let totalFilesSize = 0;
     const sortedAudioFiles = [...audioFilesList].map((af) => {
@@ -185,7 +187,7 @@ export class PlaybackService {
     })).sort((a, b) => Number(a.id) - Number(b.id));
 
     const nowMs = Date.now();
-    const totalDuration = Number(book?.duration || item.duration) ||
+    const totalDuration = Number(book?.duration || (item as any).duration) ||
       currentOffset;
     const sessionUuid = crypto.randomUUID();
 
@@ -216,7 +218,7 @@ export class PlaybackService {
   }
 
   static async syncSession(
-    supabase: SupabaseClient,
+    supabase: SupabaseClient<Database>,
     userId: string,
     sessionId: string,
     currentTime: number,
@@ -252,7 +254,7 @@ export class PlaybackService {
   }
 
   static async bulkSyncSessions(
-    supabase: SupabaseClient,
+    supabase: SupabaseClient<Database>,
     userId: string,
     syncPayloads: Array<{
       sessionId: string;
@@ -408,7 +410,7 @@ export class PlaybackService {
   }
 
   static async closeSession(
-    supabase: SupabaseClient,
+    supabase: SupabaseClient<Database>,
     userId: string,
     sessionId: string,
     currentTime?: number,

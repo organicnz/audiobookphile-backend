@@ -1,7 +1,8 @@
 import { SupabaseClient } from "npm:@supabase/supabase-js@2.44.0";
+import { Database } from "../../../src/types/supabase.ts";
 
 export async function upsertMediaProgress(
-  supabase: SupabaseClient<any, any, any>,
+  supabase: SupabaseClient<Database>,
   userId: string,
   libraryItemId: string,
   episodeId: string | null,
@@ -18,6 +19,7 @@ export async function upsertMediaProgress(
     duration,
     currentTime,
     isFinished,
+    hideFromContinueListening,
   } = progressData;
 
   const finalDuration = duration || 0;
@@ -36,6 +38,8 @@ export async function upsertMediaProgress(
     duration: finalDuration,
     current_time_pos: finalCurrentTime,
     is_finished: finalIsFinished,
+    hide_from_continue_listening: hideFromContinueListening ?? false,
+    finished_at: finalIsFinished ? new Date().toISOString() : null,
     last_update: new Date().toISOString(),
   };
 
@@ -52,7 +56,7 @@ export async function upsertMediaProgress(
 }
 
 export async function bulkUpsertMediaProgress(
-  supabase: SupabaseClient,
+  supabase: SupabaseClient<Database>,
   userId: string,
   progressItems: {
     libraryItemId: string;
@@ -81,6 +85,8 @@ export async function bulkUpsertMediaProgress(
       duration: finalDuration,
       current_time_pos: finalCurrentTime,
       is_finished: finalIsFinished,
+      hide_from_continue_listening: item.hideFromContinueListening ?? false,
+      finished_at: finalIsFinished ? new Date().toISOString() : null,
       last_update: new Date().toISOString(),
     };
   });
