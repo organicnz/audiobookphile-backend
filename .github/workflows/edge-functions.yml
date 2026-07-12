@@ -38,7 +38,7 @@ jobs:
 
       - name: Lint Database Migrations (linked project)
         run: |
-          supabase db lint --project-ref ${{ secrets.SUPABASE_PROJECT_ID }}
+          supabase db lint --linked
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
 
