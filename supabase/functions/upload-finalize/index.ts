@@ -1,5 +1,5 @@
 import { createClient } from "npm:@supabase/supabase-js@2.44.0";
-import { HeadObjectCommand, S3Client } from "@aws-sdk/client-s3";
+
 import * as mm from "music-metadata";
 import { corsHeaders } from "../_shared/cors.ts";
 import { StorageRouter } from "../_shared/storage-router.ts";
@@ -58,70 +58,11 @@ Deno.serve(async (req) => {
 
     const missingFiles: string[] = [];
 
-    let s3Client: S3Client | null = null;
-    if (Deno.env.get("B2_ENDPOINT") && Deno.env.get("B2_BUCKET_NAME")) {
-      s3Client = new S3Client({
-        endpoint: Deno.env.get("B2_ENDPOINT")!,
-        region: Deno.env.get("B2_REGION") || "us-west-004",
-        credentials: {
-          accessKeyId: Deno.env.get("B2_KEY_ID")!,
-          secretAccessKey: Deno.env.get("B2_APP_KEY")!,
-        },
-        forcePathStyle: true,
-      });
-    }
+    const storageRouter = new StorageRouter(db);
 
     const fileCheckPromises = files.map(async (file: any) => {
-      if (file.storagePath.startsWith("b2://")) {
-        const actualPath = file.storagePath.substring("b2://".length);
-        let exists = false;
-        if (s3Client) {
-          try {
-            await s3Client.send(
-              new HeadObjectCommand({
-                Bucket: Deno.env.get("B2_BUCKET_NAME")!,
-                Key: actualPath,
-              }),
-            );
-            exists = true;
-          } catch {
-            exists = false;
-          }
-        }
-        return exists ? null : file.storagePath;
-      } else if (file.storagePath.startsWith("supabase://")) {
-        const actualPath = file.storagePath.substring("supabase://".length);
-        const folder = actualPath.split("/").slice(0, -1).join("/");
-        const filename = actualPath.split("/").pop();
-        const { data } = await db.storage.from("audio-files").list(folder, {
-          search: filename,
-        });
-        const exists = data && data.length > 0 && data[0].name === filename;
-        return exists ? null : file.storagePath;
-      } else {
-        let exists = false;
-        if (s3Client) {
-          try {
-            await s3Client.send(
-              new HeadObjectCommand({
-                Bucket: Deno.env.get("B2_BUCKET_NAME")!,
-                Key: file.storagePath,
-              }),
-            );
-            exists = true;
-          } catch {
-            exists = false;
-          }
-        } else {
-          const folder = file.storagePath.split("/").slice(0, -1).join("/");
-          const filename = file.storagePath.split("/").pop();
-          const { data } = await db.storage.from("audio-files").list(folder, {
-            search: filename,
-          });
-          exists = !!(data && data.length > 0 && data[0].name === filename);
-        }
-        return exists ? null : file.storagePath;
-      }
+      const exists = await storageRouter.fileExists(file.storagePath);
+      return exists ? null : file.storagePath;
     });
 
     const checkResults = await Promise.all(fileCheckPromises);

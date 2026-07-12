@@ -1,4 +1,8 @@
-import { GetObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import {
+  GetObjectCommand,
+  HeadObjectCommand,
+  S3Client,
+} from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { SupabaseClient } from "npm:@supabase/supabase-js@2.44.0";
 
@@ -60,6 +64,68 @@ export class StorageRouter {
       });
 
       return await getSignedUrl(s3Client, command, { expiresIn });
+    }
+
+    throw new Error(`Unsupported storage provider for path: ${path}`);
+  }
+
+  async fileExists(path: string): Promise<boolean> {
+    if (path.startsWith("supabase://")) {
+      const actualPath = path.replace("supabase://", "");
+      const folder = actualPath.split("/").slice(0, -1).join("/");
+      const filename = actualPath.split("/").pop()!;
+      const { data } = await this.supabase.storage
+        .from("audio-files")
+        .list(folder, { search: filename });
+      return !!(data && data.length > 0 && data[0].name === filename);
+    }
+
+    if (path.startsWith("b2-secondary://")) {
+      const actualPath = path.replace("b2-secondary://", "");
+      const s3Client = new S3Client({
+        endpoint: Deno.env.get("B2_SECONDARY_ENDPOINT")!,
+        region: Deno.env.get("B2_SECONDARY_REGION") || "us-west-004",
+        credentials: {
+          accessKeyId: Deno.env.get("B2_SECONDARY_KEY_ID")!,
+          secretAccessKey: Deno.env.get("B2_SECONDARY_APP_KEY")!,
+        },
+        forcePathStyle: true,
+      });
+      try {
+        await s3Client.send(
+          new HeadObjectCommand({
+            Bucket: Deno.env.get("B2_SECONDARY_BUCKET_NAME")!,
+            Key: actualPath,
+          }),
+        );
+        return true;
+      } catch {
+        return false;
+      }
+    }
+
+    if (path.startsWith("b2://") || (!path.includes("://"))) {
+      const actualPath = path.replace("b2://", "");
+      const s3Client = new S3Client({
+        endpoint: Deno.env.get("B2_ENDPOINT")!,
+        region: Deno.env.get("B2_REGION") || "us-west-004",
+        credentials: {
+          accessKeyId: Deno.env.get("B2_KEY_ID")!,
+          secretAccessKey: Deno.env.get("B2_APP_KEY")!,
+        },
+        forcePathStyle: true,
+      });
+      try {
+        await s3Client.send(
+          new HeadObjectCommand({
+            Bucket: Deno.env.get("B2_BUCKET_NAME")!,
+            Key: actualPath,
+          }),
+        );
+        return true;
+      } catch {
+        return false;
+      }
     }
 
     throw new Error(`Unsupported storage provider for path: ${path}`);
