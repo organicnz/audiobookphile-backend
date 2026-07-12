@@ -4,6 +4,49 @@ import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { corsHeaders } from "../_shared/cors.ts";
 import { Database } from "../../../src/types/supabase.ts";
 
+// Cached S3 clients — reused within a single invocation (parallel presigns)
+// and across warm starts (Deno module-level state persists per isolate).
+let _b2PrimaryClient: S3Client | null = null;
+let _b2SecondaryClient: S3Client | null = null;
+
+function getB2PrimaryClient(): S3Client {
+  if (!_b2PrimaryClient) {
+    _b2PrimaryClient = new S3Client({
+      endpoint: Deno.env.get("B2_ENDPOINT")!,
+      region: Deno.env.get("B2_REGION") || "us-west-004",
+      credentials: {
+        accessKeyId: Deno.env.get("B2_KEY_ID")!,
+        secretAccessKey: Deno.env.get("B2_APP_KEY")!,
+      },
+      forcePathStyle: true,
+      // @ts-ignore
+      requestChecksumCalculation: "WHEN_REQUIRED",
+      // @ts-ignore
+      responseChecksumValidation: "WHEN_REQUIRED",
+    });
+  }
+  return _b2PrimaryClient;
+}
+
+function getB2SecondaryClient(): S3Client {
+  if (!_b2SecondaryClient) {
+    _b2SecondaryClient = new S3Client({
+      endpoint: Deno.env.get("B2_SECONDARY_ENDPOINT")!,
+      region: Deno.env.get("B2_SECONDARY_REGION") || "us-west-004",
+      credentials: {
+        accessKeyId: Deno.env.get("B2_SECONDARY_KEY_ID")!,
+        secretAccessKey: Deno.env.get("B2_SECONDARY_APP_KEY")!,
+      },
+      forcePathStyle: true,
+      // @ts-ignore
+      requestChecksumCalculation: "WHEN_REQUIRED",
+      // @ts-ignore
+      responseChecksumValidation: "WHEN_REQUIRED",
+    });
+  }
+  return _b2SecondaryClient;
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -47,7 +90,6 @@ Deno.serve(async (req) => {
       });
     }
 
-    // User requested to fully use Backblaze for all audiobook files
     const activeTier = Deno.env.get("ACTIVE_B2_TIER") === "secondary"
       ? "secondary"
       : "primary";
@@ -56,27 +98,15 @@ Deno.serve(async (req) => {
       activeTier === "secondary" && Deno.env.get("B2_SECONDARY_ENDPOINT") &&
       Deno.env.get("B2_SECONDARY_BUCKET_NAME")
     ) {
-      const s3Client = new S3Client({
-        endpoint: Deno.env.get("B2_SECONDARY_ENDPOINT")!,
-        region: Deno.env.get("B2_SECONDARY_REGION") || "us-west-004",
-        credentials: {
-          accessKeyId: Deno.env.get("B2_SECONDARY_KEY_ID")!,
-          secretAccessKey: Deno.env.get("B2_SECONDARY_APP_KEY")!,
-        },
-        forcePathStyle: true,
-        // @ts-ignore
-        requestChecksumCalculation: "WHEN_REQUIRED",
-        // @ts-ignore
-        responseChecksumValidation: "WHEN_REQUIRED",
-      });
-
       const command = new PutObjectCommand({
         Bucket: Deno.env.get("B2_SECONDARY_BUCKET_NAME")!,
         Key: filename,
         ContentType: contentType || "application/octet-stream",
       });
 
-      const url = await getSignedUrl(s3Client, command, { expiresIn: 3600 });
+      const url = await getSignedUrl(getB2SecondaryClient(), command, {
+        expiresIn: 3600,
+      });
 
       return new Response(
         JSON.stringify({ url, provider_prefix: "b2-secondary://" }),
@@ -86,27 +116,15 @@ Deno.serve(async (req) => {
         },
       );
     } else if (Deno.env.get("B2_ENDPOINT") && Deno.env.get("B2_BUCKET_NAME")) {
-      const s3Client = new S3Client({
-        endpoint: Deno.env.get("B2_ENDPOINT")!,
-        region: Deno.env.get("B2_REGION") || "us-west-004",
-        credentials: {
-          accessKeyId: Deno.env.get("B2_KEY_ID")!,
-          secretAccessKey: Deno.env.get("B2_APP_KEY")!,
-        },
-        forcePathStyle: true,
-        // @ts-ignore
-        requestChecksumCalculation: "WHEN_REQUIRED",
-        // @ts-ignore
-        responseChecksumValidation: "WHEN_REQUIRED",
-      });
-
       const command = new PutObjectCommand({
         Bucket: Deno.env.get("B2_BUCKET_NAME")!,
         Key: filename,
         ContentType: contentType || "application/octet-stream",
       });
 
-      const url = await getSignedUrl(s3Client, command, { expiresIn: 3600 });
+      const url = await getSignedUrl(getB2PrimaryClient(), command, {
+        expiresIn: 3600,
+      });
 
       return new Response(JSON.stringify({ url, provider_prefix: "b2://" }), {
         status: 200,
@@ -121,10 +139,8 @@ Deno.serve(async (req) => {
         throw new Error(`Supabase presign error: ${error?.message}`);
       }
 
-      const signedUrl = data.signedUrl;
-
       return new Response(
-        JSON.stringify({ url: signedUrl, provider_prefix: "supabase://" }),
+        JSON.stringify({ url: data.signedUrl, provider_prefix: "supabase://" }),
         {
           status: 200,
           headers: { ...corsHeaders, "Content-Type": "application/json" },

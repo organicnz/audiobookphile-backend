@@ -117,10 +117,6 @@ Deno.serve(async (req) => {
         audio_files: updatedAudioFilesJson,
         duration: totalDuration,
       }).eq("id", book.id);
-      await db.from("books").update({
-        audio_files: updatedAudioFilesJson,
-        duration: totalDuration,
-      }).eq("id", book.id);
 
       results.push({
         bookTitle: book.title,

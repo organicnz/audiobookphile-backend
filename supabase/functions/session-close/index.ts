@@ -1,5 +1,6 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { corsHeaders } from "../_shared/cors.ts";
+import { upsertMediaProgress } from "../_shared/progress.ts";
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -36,7 +37,7 @@ Deno.serve(async (req) => {
       );
     }
 
-    const [libraryItemId] = sessionId.split("__");
+    const [libraryItemId, sessionUuid] = sessionId.split("__");
     if (!libraryItemId) {
       return new Response(
         JSON.stringify({ error: "Invalid session ID format" }),
@@ -48,7 +49,7 @@ Deno.serve(async (req) => {
     }
 
     const body = await req.json();
-    const { currentTime, duration } = body;
+    const { currentTime, duration, timeListened } = body;
 
     if (typeof currentTime !== "number") {
       return new Response(
@@ -60,27 +61,20 @@ Deno.serve(async (req) => {
       );
     }
 
-    const finalDuration = duration || 0;
-    const progress = finalDuration > 0 ? currentTime / finalDuration : 0;
-    const isFinished = finalDuration > 0 && currentTime >= finalDuration - 5;
+    await upsertMediaProgress(supabase, user.id, libraryItemId, null, {
+      duration,
+      currentTime,
+    });
 
-    const { error: upsertError } = await supabase
-      .from("media_progress")
-      .upsert(
-        {
-          user_id: user.id,
-          library_item_id: libraryItemId,
-          episode_id: null,
+    if (sessionUuid) {
+      await supabase.from("playback_sessions")
+        .update({
           current_time_pos: currentTime,
-          duration: finalDuration,
-          progress: progress,
-          is_finished: isFinished,
-          last_update: new Date().toISOString(),
-        },
-        { onConflict: "user_id,library_item_id,episode_id" },
-      );
-
-    if (upsertError) throw upsertError;
+          time_listening: timeListened || 0,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", sessionUuid);
+    }
 
     return new Response(JSON.stringify({ success: true }), {
       status: 200,

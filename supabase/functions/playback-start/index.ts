@@ -52,23 +52,30 @@ Deno.serve(async (req) => {
     }
 
     const storageRouter = new StorageRouter(supabase);
-    const tracksWithUrls = await Promise.all(
+    const tracksWithUrls = (await Promise.all(
       audioFiles.map(async (audioFile, idx) => {
         const storagePath = audioFile.metadata?.path ??
           audioFile.storage_path ?? "";
-        const finalSignedUrl = await storageRouter.getSignedUrl(
-          storagePath,
-          3600,
-        );
-        return {
-          index: audioFile.index ?? idx,
-          audioFileId: audioFile.ino || audioFile.id,
-          contentUrl: finalSignedUrl,
-          duration: audioFile.duration,
-          mimeType: audioFile.mimeType || audioFile.mime_type,
-        };
+        try {
+          const finalSignedUrl = await storageRouter.getSignedUrl(
+            storagePath,
+            3600,
+          );
+          return {
+            index: audioFile.index ?? idx,
+            audioFileId: audioFile.ino || audioFile.id,
+            contentUrl: finalSignedUrl,
+            duration: audioFile.duration,
+            mimeType: audioFile.mimeType || audioFile.mime_type,
+          };
+        } catch (signErr: any) {
+          console.warn(
+            `[playback-start] Missing storage file at "${storagePath}": ${signErr.message}`,
+          );
+          return null;
+        }
       }),
-    );
+    )).filter(Boolean);
 
     const chapters = (book?.chapters as any[]) || [];
 

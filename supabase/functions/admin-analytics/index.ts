@@ -45,7 +45,7 @@ Deno.serve(async (req) => {
       .eq("id", user.id)
       .single();
 
-    if (profileError || profile?.user_type !== "admin") {
+    if (profileError || !["admin", "root"].includes(profile?.user_type ?? "")) {
       return new Response(JSON.stringify({ error: "Forbidden: Admins only" }), {
         status: 403,
         headers: corsHeaders,

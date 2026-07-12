@@ -21,8 +21,10 @@ Deno.serve(async (req) => {
       },
     });
 
-    // Verify user is an admin or the request comes from cron with service key
-    const isCron = authHeader.replace("Bearer ", "") === supabaseServiceKey;
+    // Verify user is an admin or the request comes from a cron job with CRON_SECRET
+    const cronSecret = Deno.env.get("CRON_SECRET");
+    const isCron = typeof cronSecret === "string" && cronSecret.length > 0 &&
+      authHeader === `Bearer ${cronSecret}`;
 
     if (!isCron) {
       // Check if user is admin
