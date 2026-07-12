@@ -1,4 +1,5 @@
 import { createClient } from "npm:@supabase/supabase-js@2.44.0";
+import { Database } from "../../../src/types/supabase.ts";
 import { corsHeaders } from "../_shared/cors.ts";
 
 Deno.serve(async (req) => {
@@ -20,7 +21,7 @@ Deno.serve(async (req) => {
 
     // Auth client with service role key to bypass RLS for DB aggregation,
     // but we will authenticate the user first to ensure they are an admin.
-    const supabase = createClient(supabaseUrl, supabaseServiceKey, {
+    const supabase = createClient<Database>(supabaseUrl, supabaseServiceKey, {
       auth: {
         autoRefreshToken: false,
         persistSession: false,
@@ -72,16 +73,19 @@ Deno.serve(async (req) => {
 
     if (itemsErr) throw new Error(itemsErr.message);
 
-    // 4. Get active playback sessions
+    // 4. Get active playback sessions (users active in the last 2 hours)
     let activeSessions = 0;
     try {
+      const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000)
+        .toISOString();
       const { count, error: sessionsErr } = await supabase
-        .from("playback_sessions")
-        .select("*", { count: "exact", head: true });
-      // Could filter by updated_at recent...
+        .from("media_progress")
+        .select("*", { count: "exact", head: true })
+        .gte("last_update", twoHoursAgo);
+
       if (!sessionsErr && count) activeSessions = count;
     } catch {
-      // Ignore if table doesn't exist
+      // Fallback
     }
 
     return new Response(
