@@ -48,10 +48,6 @@ function getB2SecondaryClient(): S3Client {
         secretAccessKey: Deno.env.get("B2_SECONDARY_APP_KEY")!,
       },
       forcePathStyle: true,
-      // @ts-ignore
-      requestChecksumCalculation: "WHEN_REQUIRED",
-      // @ts-ignore
-      responseChecksumValidation: "WHEN_REQUIRED",
     });
   }
   return _b2SecondaryClient;
@@ -293,6 +289,7 @@ Deno.serve(async (req) => {
     }
   } catch (e: unknown) {
     const err = e as Error;
+    console.error("[upload-presign] Error:", err.message, err.stack);
     return new Response(JSON.stringify({ error: err.message }), {
       status: 500,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
