@@ -1,8 +1,18 @@
 import { createClient } from "npm:@supabase/supabase-js@2.44.0";
-import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import {
+  CompleteMultipartUploadCommand,
+  CreateMultipartUploadCommand,
+  PutObjectCommand,
+  S3Client,
+  UploadPartCommand,
+} from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { corsHeaders } from "../_shared/cors.ts";
 import { Database } from "../../../src/types/supabase.ts";
+
+// 50 MB chunk size for multipart uploads
+const MULTIPART_THRESHOLD = 50 * 1024 * 1024;
+const PART_SIZE = 50 * 1024 * 1024;
 
 // Cached S3 clients — reused within a single invocation (parallel presigns)
 // and across warm starts (Deno module-level state persists per isolate).
@@ -47,6 +57,71 @@ function getB2SecondaryClient(): S3Client {
   return _b2SecondaryClient;
 }
 
+async function handleMultipartPresign(
+  s3Client: S3Client,
+  bucket: string,
+  key: string,
+  contentType: string,
+  fileSize: number,
+  providerPrefix: string,
+): Promise<Response> {
+  // Initiate multipart upload
+  const createCmd = new CreateMultipartUploadCommand({
+    Bucket: bucket,
+    Key: key,
+    ContentType: contentType,
+  });
+  const { UploadId } = await s3Client.send(createCmd);
+
+  // Generate a presigned URL for each part
+  const partCount = Math.ceil(fileSize / PART_SIZE);
+  const partUrls: string[] = [];
+  for (let partNumber = 1; partNumber <= partCount; partNumber++) {
+    const partCmd = new UploadPartCommand({
+      Bucket: bucket,
+      Key: key,
+      UploadId,
+      PartNumber: partNumber,
+    });
+    const url = await getSignedUrl(s3Client, partCmd, { expiresIn: 3600 });
+    partUrls.push(url);
+  }
+
+  return new Response(
+    JSON.stringify({
+      multipart: true,
+      uploadId: UploadId,
+      partUrls,
+      partSize: PART_SIZE,
+      provider_prefix: providerPrefix,
+    }),
+    {
+      status: 200,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    },
+  );
+}
+
+async function handleCompleteMultipart(
+  s3Client: S3Client,
+  bucket: string,
+  key: string,
+  uploadId: string,
+  parts: { PartNumber: number; ETag: string }[],
+): Promise<Response> {
+  const cmd = new CompleteMultipartUploadCommand({
+    Bucket: bucket,
+    Key: key,
+    UploadId: uploadId,
+    MultipartUpload: { Parts: parts },
+  });
+  await s3Client.send(cmd);
+  return new Response(JSON.stringify({ success: true }), {
+    status: 200,
+    headers: { ...corsHeaders, "Content-Type": "application/json" },
+  });
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -81,7 +156,8 @@ Deno.serve(async (req) => {
       });
     }
 
-    const { filename, contentType } = await req.json();
+    const body = await req.json();
+    const { filename, contentType, size, action } = body;
 
     if (!filename) {
       return new Response(JSON.stringify({ error: "Filename is required" }), {
@@ -94,20 +170,77 @@ Deno.serve(async (req) => {
       ? "secondary"
       : "primary";
 
-    if (
-      activeTier === "secondary" && Deno.env.get("B2_SECONDARY_ENDPOINT") &&
-      Deno.env.get("B2_SECONDARY_BUCKET_NAME")
-    ) {
+    const isB2Secondary = activeTier === "secondary" &&
+      Deno.env.get("B2_SECONDARY_ENDPOINT") &&
+      Deno.env.get("B2_SECONDARY_BUCKET_NAME");
+    const isB2Primary = !isB2Secondary && Deno.env.get("B2_ENDPOINT") &&
+      Deno.env.get("B2_BUCKET_NAME");
+
+    // Handle complete-multipart action
+    if (action === "complete-multipart") {
+      const { uploadId, parts } = body;
+      if (!uploadId || !parts) {
+        return new Response(
+          JSON.stringify({ error: "uploadId and parts required" }),
+          {
+            status: 400,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          },
+        );
+      }
+
+      if (isB2Secondary) {
+        return await handleCompleteMultipart(
+          getB2SecondaryClient(),
+          Deno.env.get("B2_SECONDARY_BUCKET_NAME")!,
+          filename,
+          uploadId,
+          parts,
+        );
+      } else if (isB2Primary) {
+        return await handleCompleteMultipart(
+          getB2PrimaryClient(),
+          Deno.env.get("B2_BUCKET_NAME")!,
+          filename,
+          uploadId,
+          parts,
+        );
+      }
+      return new Response(
+        JSON.stringify({ error: "No B2 storage configured" }),
+        {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        },
+      );
+    }
+
+    // For B2 uploads: use multipart if file exceeds threshold
+    const fileSize = typeof size === "number" ? size : 0;
+    const useMultipart = fileSize > MULTIPART_THRESHOLD;
+
+    if (isB2Secondary) {
+      const bucket = Deno.env.get("B2_SECONDARY_BUCKET_NAME")!;
+
+      if (useMultipart) {
+        return await handleMultipartPresign(
+          getB2SecondaryClient(),
+          bucket,
+          filename,
+          contentType || "application/octet-stream",
+          fileSize,
+          "b2-secondary://",
+        );
+      }
+
       const command = new PutObjectCommand({
-        Bucket: Deno.env.get("B2_SECONDARY_BUCKET_NAME")!,
+        Bucket: bucket,
         Key: filename,
         ContentType: contentType || "application/octet-stream",
       });
-
       const url = await getSignedUrl(getB2SecondaryClient(), command, {
         expiresIn: 3600,
       });
-
       return new Response(
         JSON.stringify({ url, provider_prefix: "b2-secondary://" }),
         {
@@ -115,17 +248,28 @@ Deno.serve(async (req) => {
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         },
       );
-    } else if (Deno.env.get("B2_ENDPOINT") && Deno.env.get("B2_BUCKET_NAME")) {
+    } else if (isB2Primary) {
+      const bucket = Deno.env.get("B2_BUCKET_NAME")!;
+
+      if (useMultipart) {
+        return await handleMultipartPresign(
+          getB2PrimaryClient(),
+          bucket,
+          filename,
+          contentType || "application/octet-stream",
+          fileSize,
+          "b2://",
+        );
+      }
+
       const command = new PutObjectCommand({
-        Bucket: Deno.env.get("B2_BUCKET_NAME")!,
+        Bucket: bucket,
         Key: filename,
         ContentType: contentType || "application/octet-stream",
       });
-
       const url = await getSignedUrl(getB2PrimaryClient(), command, {
         expiresIn: 3600,
       });
-
       return new Response(JSON.stringify({ url, provider_prefix: "b2://" }), {
         status: 200,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
