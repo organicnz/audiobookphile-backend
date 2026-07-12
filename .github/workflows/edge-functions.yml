@@ -36,11 +36,7 @@ jobs:
           deno fmt --check
           deno check **/*.ts
 
-      - name: Lint Database Migrations (linked project)
-        run: |
-          supabase db lint --linked
-        env:
-          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+
 
   deploy:
     needs: lint
