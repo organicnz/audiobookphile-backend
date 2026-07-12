@@ -48,7 +48,44 @@ Deno.serve(async (req) => {
     }
 
     // User requested to fully use Backblaze for all audiobook files
-    if (Deno.env.get("B2_ENDPOINT") && Deno.env.get("B2_BUCKET_NAME")) {
+    const activeTier = Deno.env.get("ACTIVE_B2_TIER") === "secondary"
+      ? "secondary"
+      : "primary";
+
+    if (
+      activeTier === "secondary" && Deno.env.get("B2_SECONDARY_ENDPOINT") &&
+      Deno.env.get("B2_SECONDARY_BUCKET_NAME")
+    ) {
+      const s3Client = new S3Client({
+        endpoint: Deno.env.get("B2_SECONDARY_ENDPOINT")!,
+        region: Deno.env.get("B2_SECONDARY_REGION") || "us-west-004",
+        credentials: {
+          accessKeyId: Deno.env.get("B2_SECONDARY_KEY_ID")!,
+          secretAccessKey: Deno.env.get("B2_SECONDARY_APP_KEY")!,
+        },
+        forcePathStyle: true,
+        // @ts-ignore
+        requestChecksumCalculation: "WHEN_REQUIRED",
+        // @ts-ignore
+        responseChecksumValidation: "WHEN_REQUIRED",
+      });
+
+      const command = new PutObjectCommand({
+        Bucket: Deno.env.get("B2_SECONDARY_BUCKET_NAME")!,
+        Key: filename,
+        ContentType: contentType || "application/octet-stream",
+      });
+
+      const url = await getSignedUrl(s3Client, command, { expiresIn: 3600 });
+
+      return new Response(
+        JSON.stringify({ url, provider_prefix: "b2-secondary://" }),
+        {
+          status: 200,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        },
+      );
+    } else if (Deno.env.get("B2_ENDPOINT") && Deno.env.get("B2_BUCKET_NAME")) {
       const s3Client = new S3Client({
         endpoint: Deno.env.get("B2_ENDPOINT")!,
         region: Deno.env.get("B2_REGION") || "us-west-004",
@@ -57,7 +94,7 @@ Deno.serve(async (req) => {
           secretAccessKey: Deno.env.get("B2_APP_KEY")!,
         },
         forcePathStyle: true,
-        // @ts-ignore: These might not be present in all aws-sdk versions but help with B2
+        // @ts-ignore
         requestChecksumCalculation: "WHEN_REQUIRED",
         // @ts-ignore
         responseChecksumValidation: "WHEN_REQUIRED",

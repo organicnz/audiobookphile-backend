@@ -20,6 +20,27 @@ export class StorageRouter {
       return data.signedUrl;
     }
 
+    if (path.startsWith("b2-secondary://")) {
+      const actualPath = path.replace("b2-secondary://", "");
+
+      const s3Client = new S3Client({
+        endpoint: Deno.env.get("B2_SECONDARY_ENDPOINT")!,
+        region: Deno.env.get("B2_SECONDARY_REGION") || "us-west-004",
+        credentials: {
+          accessKeyId: Deno.env.get("B2_SECONDARY_KEY_ID")!,
+          secretAccessKey: Deno.env.get("B2_SECONDARY_APP_KEY")!,
+        },
+        forcePathStyle: true,
+      });
+
+      const command = new GetObjectCommand({
+        Bucket: Deno.env.get("B2_SECONDARY_BUCKET_NAME")!,
+        Key: actualPath,
+      });
+
+      return await getSignedUrl(s3Client, command, { expiresIn });
+    }
+
     if (path.startsWith("b2://") || (!path.includes("://"))) {
       const actualPath = path.replace("b2://", "");
 
