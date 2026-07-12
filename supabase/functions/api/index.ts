@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
-import { createClient } from "@supabase/supabase-js";
+import { createClient } from "npm:@supabase/supabase-js@2.44.0";
 import { Sentry } from "../_shared/sentry.ts";
 
 // Native Hono Routers

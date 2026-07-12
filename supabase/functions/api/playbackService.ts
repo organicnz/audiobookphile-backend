@@ -1,4 +1,4 @@
-import { SupabaseClient } from "@supabase/supabase-js";
+import { SupabaseClient } from "npm:@supabase/supabase-js@2.44.0";
 import { StorageRouter } from "../_shared/storage-router.ts";
 import {
   bulkUpsertMediaProgress,

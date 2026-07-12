@@ -1,4 +1,4 @@
-import { createClient } from "@supabase/supabase-js";
+import { createClient } from "npm:@supabase/supabase-js@2.44.0";
 import { Database } from "../../../src/types/supabase.ts";
 
 Deno.serve(async (req) => {

@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { createClient } from "@supabase/supabase-js";
+import { createClient } from "npm:@supabase/supabase-js@2.44.0";
 import { Variables } from "../_shared/types.ts";
 
 export const usersRouter = new Hono<{ Variables: Variables }>();

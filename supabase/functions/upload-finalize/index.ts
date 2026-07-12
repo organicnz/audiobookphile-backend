@@ -1,4 +1,4 @@
-import { createClient } from "@supabase/supabase-js";
+import { createClient } from "npm:@supabase/supabase-js@2.44.0";
 import { HeadObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import * as mm from "music-metadata";
 import { corsHeaders } from "../_shared/cors.ts";

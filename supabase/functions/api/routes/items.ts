@@ -1,5 +1,5 @@
 import { Context, Hono } from "hono";
-import { createClient } from "@supabase/supabase-js";
+import { createClient } from "npm:@supabase/supabase-js@2.44.0";
 import { mapBookForMobile } from "../mappers.ts";
 import { Variables } from "../_shared/types.ts";
 import { getProxyOrigin } from "../_shared/proxy.ts";
