@@ -1,5 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import { corsHeaders } from "../_shared/cors.ts";
+import { z } from "zod";
 
 // Note: Ensure `EdgeRuntime` is configured in the environment to allow async operations after response
 declare const EdgeRuntime: any;
@@ -51,14 +52,22 @@ Deno.serve(async (req) => {
     }
 
     const body = await req.json().catch(() => ({}));
-    const { libraryItemId } = body;
 
-    if (!libraryItemId) {
+    const PayloadSchema = z.object({
+      libraryItemId: z.string().min(1),
+    });
+
+    const parsed = PayloadSchema.safeParse(body);
+    if (!parsed.success) {
       return new Response(
-        JSON.stringify({ error: "libraryItemId is required" }),
+        JSON.stringify({
+          error: "Invalid payload",
+          details: parsed.error.issues,
+        }),
         { status: 400, headers: corsHeaders },
       );
     }
+    const { libraryItemId } = parsed.data;
 
     if (!openAiApiKey) {
       return new Response(

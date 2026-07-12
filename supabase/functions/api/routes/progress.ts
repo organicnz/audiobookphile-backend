@@ -1,20 +1,45 @@
 import { Hono } from "hono";
 import { upsertMediaProgress } from "../../_shared/progress.ts";
 import { Variables } from "../_shared/types.ts";
+import { z } from "zod";
 
 export const progressRouter = new Hono<{ Variables: Variables }>();
+
+const ProgressPayloadSchema = z.object({
+  episodeId: z.string().optional(),
+  progress: z.number().min(0).max(1),
+  duration: z.number().min(0).optional(),
+  isFinished: z.boolean().optional(),
+  hideFromContinueListening: z.boolean().optional(),
+});
+
+const BatchProgressPayloadSchema = z.array(
+  ProgressPayloadSchema.extend({
+    libraryItemId: z.string(),
+  }),
+);
 
 progressRouter.patch("/me/progress/:id", async (c) => {
   const supabase = c.get("supabase");
   const user = c.get("user")!;
   const libraryItemId = c.req.param("id");
-  const body = await c.req.json();
+  let body;
+
+  try {
+    const rawBody = await c.req.json();
+    body = ProgressPayloadSchema.parse(rawBody);
+  } catch (e: any) {
+    return c.json(
+      { success: false, error: e.errors || "Invalid payload" },
+      400,
+    );
+  }
 
   const data = await upsertMediaProgress(
     supabase,
     user.id,
     libraryItemId,
-    body.episodeId,
+    body.episodeId ?? null,
     {
       progress: body.progress,
       duration: body.duration,
@@ -29,14 +54,24 @@ progressRouter.patch("/me/progress/:id", async (c) => {
 progressRouter.patch("/me/progress-batch", async (c) => {
   const supabase = c.get("supabase");
   const user = c.get("user")!;
-  const items = await c.req.json();
+  let items;
+
+  try {
+    const rawBody = await c.req.json();
+    items = BatchProgressPayloadSchema.parse(rawBody);
+  } catch (e: any) {
+    return c.json(
+      { success: false, error: e.errors || "Invalid payload" },
+      400,
+    );
+  }
 
   for (const item of items) {
     await upsertMediaProgress(
       supabase,
       user.id,
       item.libraryItemId,
-      item.episodeId,
+      item.episodeId ?? null,
       {
         progress: item.progress,
         duration: item.duration,

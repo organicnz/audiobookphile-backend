@@ -1,5 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import { corsHeaders } from "../_shared/cors.ts";
+import { z } from "zod";
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -37,13 +38,21 @@ Deno.serve(async (req) => {
       });
     }
 
+    const SearchSchema = z.object({
+      query: z.string().min(1).optional(),
+      q: z.string().min(1).optional(),
+    });
+
     let query = "";
     try {
       const body = await req.json();
-      query = body.query || body.q;
+      const parsed = SearchSchema.safeParse(body);
+      if (parsed.success) {
+        query = parsed.data.query || parsed.data.q || "";
+      }
     } catch {
       const url = new URL(req.url);
-      query = url.searchParams.get("q") || "";
+      query = url.searchParams.get("q") || url.searchParams.get("query") || "";
     }
 
     if (!query) {
