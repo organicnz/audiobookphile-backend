@@ -189,39 +189,6 @@ export class PlaybackService {
       currentOffset;
     const sessionUuid = crypto.randomUUID();
 
-    const sessionDate = new Date();
-    const dayOfWeek = [
-      "Sunday",
-      "Monday",
-      "Tuesday",
-      "Wednesday",
-      "Thursday",
-      "Friday",
-      "Saturday",
-    ][sessionDate.getDay()];
-    const sessionDateStr = sessionDate.toISOString().split("T")[0];
-
-    // Save robust session log into db
-    await supabase.from("playback_sessions").insert({
-      id: sessionUuid,
-      user_id: userId,
-      library_id: item.library_id,
-      media_item_id: libraryItemId,
-      media_item_type: item.media_type || "book",
-      display_title: book?.title || item.title || "Unknown Title",
-      display_author: authorName,
-      duration: totalDuration,
-      play_method: 0,
-      media_player: "html5",
-      start_time_pos: currentTime,
-      current_time_pos: currentTime,
-      time_listening: 0,
-      session_date: sessionDateStr,
-      day_of_week: dayOfWeek,
-      server_version: "Edge",
-      cover_path: item.cover_path || book?.cover_path || null,
-    });
-
     return {
       id: `${libraryItemId}__${sessionUuid}`,
       userId: userId,
@@ -253,12 +220,12 @@ export class PlaybackService {
     userId: string,
     sessionId: string,
     currentTime: number,
-    timeListened: number,
+    _timeListened: number,
     duration?: number,
     progress?: number,
     episodeId?: string,
   ) {
-    const [libraryItemId, sessionUuid] = sessionId.split("__");
+    const [libraryItemId, _sessionUuid] = sessionId.split("__");
     if (!libraryItemId) return { success: false, error: "Invalid session ID" };
 
     try {
@@ -279,21 +246,6 @@ export class PlaybackService {
         success: false,
         error: e.message || "Failed to upsert media progress",
       };
-    }
-
-    if (sessionUuid) {
-      const { data: session } = await supabase.from("playback_sessions").select(
-        "time_listening",
-      ).eq("id", sessionUuid).single();
-      const existingTime = session?.time_listening || 0;
-
-      await supabase.from("playback_sessions")
-        .update({
-          current_time_pos: currentTime,
-          time_listening: existingTime + (timeListened || 0),
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", sessionUuid);
     }
 
     return { success: true };
@@ -460,12 +412,12 @@ export class PlaybackService {
     userId: string,
     sessionId: string,
     currentTime?: number,
-    timeListened?: number,
+    _timeListened?: number,
     duration?: number,
     progress?: number,
     episodeId?: string,
   ) {
-    const [libraryItemId, sessionUuid] = sessionId.split("__");
+    const [libraryItemId, _sessionUuid] = sessionId.split("__");
     if (!libraryItemId) return { success: false, error: "Invalid session ID" };
 
     if (currentTime !== undefined) {
@@ -488,24 +440,6 @@ export class PlaybackService {
           error: e.message || "Failed to close session and update progress",
         };
       }
-    }
-
-    if (sessionUuid && timeListened !== undefined) {
-      const { data: session } = await supabase.from("playback_sessions").select(
-        "time_listening, current_time_pos",
-      ).eq("id", sessionUuid).single();
-      const existingTime = session?.time_listening || 0;
-      const existingPos = session?.current_time_pos || 0;
-
-      await supabase.from("playback_sessions")
-        .update({
-          current_time_pos: currentTime !== undefined
-            ? currentTime
-            : existingPos,
-          time_listening: existingTime + (timeListened || 0),
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", sessionUuid);
     }
 
     return { success: true };

@@ -36,8 +36,6 @@ jobs:
           deno fmt --check
           deno check **/*.ts
 
-
-
   deploy:
     needs: lint
     if: github.ref == 'refs/heads/main'
