@@ -42,7 +42,7 @@ export async function upsertMediaProgress(
   const { data, error } = await supabase
     .from("media_progress")
     .upsert(dataToUpsert, {
-      onConflict: "media_progress_user_id_library_item_id_episode_id_key",
+      onConflict: "user_id,library_item_id,episode_id",
     })
     .select()
     .single();
@@ -88,7 +88,7 @@ export async function bulkUpsertMediaProgress(
   const { data, error } = await supabase
     .from("media_progress")
     .upsert(dataToUpsert, {
-      onConflict: "media_progress_user_id_library_item_id_episode_id_key",
+      onConflict: "user_id,library_item_id,episode_id",
     })
     .select();
 
