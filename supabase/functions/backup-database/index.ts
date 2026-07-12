@@ -1,8 +1,7 @@
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from "npm:@supabase/supabase-js@2";
+import { createClient } from "@supabase/supabase-js";
 import { Database } from "../../../src/types/supabase.ts";
 
-serve(async (req) => {
+Deno.serve(async (req) => {
   try {
     const authHeader = req.headers.get("Authorization");
     if (!authHeader) {

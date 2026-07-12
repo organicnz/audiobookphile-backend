@@ -1,10 +1,9 @@
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from "npm:@supabase/supabase-js";
+import { createClient } from "@supabase/supabase-js";
 import * as mm from "https://esm.sh/music-metadata";
 import { corsHeaders } from "../_shared/cors.ts";
 import { StorageRouter } from "../_shared/storage-router.ts";
 
-serve(async (req) => {
+Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
   }

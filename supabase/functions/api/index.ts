@@ -1,6 +1,5 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "@supabase/supabase-js";
 import { Sentry } from "../_shared/sentry.ts";
 
@@ -115,4 +114,4 @@ app.all("*", (c) => {
   return c.json({ error: "Endpoint not found or method not supported" }, 404);
 });
 
-serve(app.fetch);
+Deno.serve(app.fetch);

@@ -1,12 +1,11 @@
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from "npm:@supabase/supabase-js";
+import { createClient } from "@supabase/supabase-js";
 
 import { corsHeaders } from "../_shared/cors.ts";
 
 // Basic types
 type StorageObject = { storagePath: string; source: "supabase" | "b2" };
 
-serve(async (req) => {
+Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
   }
@@ -65,7 +64,7 @@ serve(async (req) => {
     if (!Deno.env.get("B2_ENDPOINT")) return [];
     try {
       const { S3Client, ListObjectsV2Command } = await import(
-        "npm:@aws-sdk/client-s3"
+        "@aws-sdk/client-s3"
       );
       const s3 = new S3Client({
         endpoint: Deno.env.get("B2_ENDPOINT"),

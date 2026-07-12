@@ -6,8 +6,7 @@
     "hono": "npm:hono@4.4.0",
     "@aws-sdk/client-s3": "npm:@aws-sdk/client-s3@3.588.0",
     "@aws-sdk/s3-request-presigner": "npm:@aws-sdk/s3-request-presigner@3.588.0",
-    "music-metadata": "npm:music-metadata@10.2.0",
-    "std/http/server.ts": "https://deno.land/std@0.168.0/http/server.ts"
+    "music-metadata": "npm:music-metadata@10.2.0"
   },
   "lint": {
     "rules": {

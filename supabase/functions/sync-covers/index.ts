@@ -1,11 +1,10 @@
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from "npm:@supabase/supabase-js";
+import { createClient } from "@supabase/supabase-js";
 import { corsHeaders } from "../_shared/cors.ts";
 import { fetchBookMetadata } from "../_shared/coverFetch.ts";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-serve(async (req) => {
+Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
   }
