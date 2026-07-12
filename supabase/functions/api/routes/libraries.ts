@@ -339,11 +339,11 @@ librariesRouter.get("/:id/matchall", async (c) => {
 
   // @ts-ignore
   if (
-    typeof EdgeRuntime !== "undefined" &&
-    typeof EdgeRuntime.waitUntil === "function"
+    typeof (globalThis as any).EdgeRuntime !== "undefined" &&
+    typeof (globalThis as any).EdgeRuntime.waitUntil === "function"
   ) {
     // @ts-ignore
-    EdgeRuntime.waitUntil(processAllChunks(0));
+    (globalThis as any).EdgeRuntime.waitUntil(processAllChunks(0));
   } else {
     processAllChunks(0).catch(() => {});
   }

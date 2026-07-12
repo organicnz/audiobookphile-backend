@@ -57,7 +57,9 @@ Deno.serve(async (req) => {
           secretAccessKey: Deno.env.get("B2_APP_KEY")!,
         },
         forcePathStyle: true,
+        // @ts-ignore: These might not be present in all aws-sdk versions but help with B2
         requestChecksumCalculation: "WHEN_REQUIRED",
+        // @ts-ignore
         responseChecksumValidation: "WHEN_REQUIRED",
       });
 

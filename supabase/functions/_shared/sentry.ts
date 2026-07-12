@@ -1,4 +1,4 @@
-import * as Sentry from "npm:@sentry/deno@8.32.0";
+import * as Sentry from "@sentry/deno";
 
 Sentry.init({
   dsn:

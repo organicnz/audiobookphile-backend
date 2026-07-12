@@ -41,7 +41,7 @@ Deno.serve(async (req) => {
         .eq("id", user.id)
         .single();
 
-      if (!profile || !["admin", "root"].includes(profile.user_type)) {
+      if (!profile || !["admin", "root"].includes(profile.user_type ?? "")) {
         return new Response(JSON.stringify({ error: "Forbidden" }), {
           status: 403,
         });
@@ -59,7 +59,7 @@ Deno.serve(async (req) => {
 
       while (hasMore) {
         const { data, error } = await supabase
-          .from(table)
+          .from(table as any)
           .select("*")
           .range(from, from + limit - 1);
 

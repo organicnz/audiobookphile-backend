@@ -135,9 +135,10 @@ itemsRouter.get("/:id/cover", async (c) => {
     const authorArray = Array.isArray(bookAuthors)
       ? bookAuthors
       : [bookAuthors];
-    const firstAuthorName =
-      (authorArray[0]?.authors as Record<string, unknown>)?.name as string ||
-      "";
+    const authorsObj = authorArray[0]?.authors as any;
+    const firstAuthorName = (Array.isArray(authorsObj)
+      ? authorsObj[0]?.name
+      : authorsObj?.name) as string || "";
     const author = firstAuthorName;
 
     if (title) {

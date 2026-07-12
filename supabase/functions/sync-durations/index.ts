@@ -1,5 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
-import * as mm from "https://esm.sh/music-metadata";
+import * as mm from "music-metadata";
 import { corsHeaders } from "../_shared/cors.ts";
 import { StorageRouter } from "../_shared/storage-router.ts";
 

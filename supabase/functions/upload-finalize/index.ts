@@ -344,11 +344,11 @@ Deno.serve(async (req) => {
     // Spawn detached task depending on environment
     // @ts-ignore
     if (
-      typeof EdgeRuntime !== "undefined" &&
-      typeof EdgeRuntime.waitUntil === "function"
+      typeof (globalThis as any).EdgeRuntime !== "undefined" &&
+      typeof (globalThis as any).EdgeRuntime.waitUntil === "function"
     ) {
       // @ts-ignore
-      EdgeRuntime.waitUntil(processDurationsAsync());
+      (globalThis as any).EdgeRuntime.waitUntil(processDurationsAsync());
     } else {
       processDurationsAsync().catch(() => {});
     }

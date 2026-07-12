@@ -34,6 +34,7 @@ jobs:
           cd supabase/functions
           deno lint
           deno fmt --check
+          deno check **/*.ts
 
       - name: Lint Database Migrations (linked project)
         run: |
