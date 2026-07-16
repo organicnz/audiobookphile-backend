@@ -363,7 +363,20 @@ librariesRouter.get("/:id/personalized", async (c) => {
   const user = c.get("user")!;
   const libraryId = c.req.param("id");
 
-  // Fetch recently added items
+  // --- Resolve all library_item_ids for this library up-front.
+  // This is the idiomatic two-step pattern for PostgREST: filter on a direct
+  // column of the driving table rather than using dot-notation join filters,
+  // which are unreliable across PostgREST versions and silently drop rows when
+  // the embedded filter can't be pushed into the join condition.
+  const { data: libraryItemRows } = await supabase
+    .from("library_items")
+    .select("id")
+    .eq("library_id", libraryId);
+
+  const libraryItemIds = (libraryItemRows || []).map((r) => r.id);
+
+  // --- Recently Added ---
+  // Fetch in a separate query so it stays a simple ORDER BY created_at scan.
   const { data: recentItems } = await supabase
     .from("library_items")
     .select("*, books(*, book_authors(authors(*)), book_series(series(*)))")
@@ -371,60 +384,66 @@ librariesRouter.get("/:id/personalized", async (c) => {
     .order("created_at", { ascending: false })
     .limit(10);
 
-  const itemIds = (recentItems || []).map((i) => i.id);
-  let progressMap = new Map();
-  if (user && itemIds.length > 0) {
-    const { data: progressData } = await supabase.from("media_progress")
+  // Attach progress to recently-added items
+  const recentItemIds = (recentItems || []).map((i) => i.id);
+  let recentProgressMap = new Map<string, any>();
+  if (recentItemIds.length > 0) {
+    const { data: recentProgressData } = await supabase
+      .from("media_progress")
       .select("*")
       .eq("user_id", user.id)
-      .in("library_item_id", itemIds)
+      .in("library_item_id", recentItemIds)
       .is("episode_id", null);
-    progressMap = new Map(
-      (progressData || []).map((p: any) => [p.library_item_id, p]),
+    recentProgressMap = new Map(
+      (recentProgressData || []).map((p: any) => [p.library_item_id, p]),
     );
   }
 
   const formattedRecent = (recentItems || []).map((item: any) =>
-    mapBookForMobile(item, progressMap.get(item.id) as any)
+    mapBookForMobile(item, recentProgressMap.get(item.id) ?? null)
   );
 
-  // Continue Listening: drive from media_progress outward (not derived from
-  // the items list), so all in-progress books appear regardless of where they
-  // sit in the library ordering. Finished and hidden items are filtered here.
-  const { data: continueProgress } = await supabase
-    .from("media_progress")
-    .select(
-      "*, library_items!inner(*, books(*, book_authors(authors(*)), book_series(series(*))))",
-    )
-    .eq("user_id", user.id)
-    .eq("library_items.library_id", libraryId)
-    .eq("is_finished", false)
-    .eq("hide_from_continue_listening", false)
-    .is("episode_id", null)
-    .order("last_update", { ascending: false });
+  // --- Continue Listening & Listen Again ---
+  // Drive from media_progress → library_items using a direct .in() filter on
+  // library_item_id (a real uuid column with a proper FK after the schema fix).
+  // This avoids the !inner dot-notation pattern that silently dropped rows.
+  const [continueResult, listenAgainResult] = libraryItemIds.length > 0
+    ? await Promise.all([
+      supabase
+        .from("media_progress")
+        .select(
+          "*, library_items(*, books(*, book_authors(authors(*)), book_series(series(*))))",
+        )
+        .eq("user_id", user.id)
+        .in("library_item_id", libraryItemIds)
+        .eq("is_finished", false)
+        .eq("hide_from_continue_listening", false)
+        .is("episode_id", null)
+        .order("last_update", { ascending: false })
+        .limit(30),
+      supabase
+        .from("media_progress")
+        .select(
+          "*, library_items(*, books(*, book_authors(authors(*)), book_series(series(*))))",
+        )
+        .eq("user_id", user.id)
+        .in("library_item_id", libraryItemIds)
+        .eq("is_finished", true)
+        .is("episode_id", null)
+        .order("last_update", { ascending: false })
+        .limit(30),
+    ])
+    : [{ data: [] }, { data: [] }];
 
-  const { data: listenAgainProgress } = await supabase
-    .from("media_progress")
-    .select(
-      "*, library_items!inner(*, books(*, book_authors(authors(*)), book_series(series(*))))",
-    )
-    .eq("user_id", user.id)
-    .eq("library_items.library_id", libraryId)
-    .eq("is_finished", true)
-    .is("episode_id", null)
-    .order("last_update", { ascending: false });
-
-  const continueItems = ((continueProgress || []) as any[])
+  const continueItems = ((continueResult.data || []) as any[])
     .filter((p) => p.library_items)
     .map((p) => mapBookForMobile(p.library_items, p))
-    .filter(Boolean)
-    .slice(0, 30);
+    .filter(Boolean);
 
-  const listenAgainItems = ((listenAgainProgress || []) as any[])
+  const listenAgainItems = ((listenAgainResult.data || []) as any[])
     .filter((p) => p.library_items)
     .map((p) => mapBookForMobile(p.library_items, p))
-    .filter(Boolean)
-    .slice(0, 30);
+    .filter(Boolean);
 
   const shelves: Array<{
     id: string;
@@ -461,7 +480,7 @@ librariesRouter.get("/:id/personalized", async (c) => {
     id: "recently-added",
     label: "Recently Added",
     labelStringKey: "LabelRecentlyAdded",
-    type: "book", // Defaulting to book, front-end handles it
+    type: "book",
     entities: formattedRecent,
     total: formattedRecent.length,
   });

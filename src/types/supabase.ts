@@ -760,6 +760,7 @@ export type Database = {
           last_update: string | null;
           library_item_id: string;
           progress: number | null;
+          started_at: string | null;
           user_id: string;
         };
         Insert: {
@@ -773,6 +774,7 @@ export type Database = {
           last_update?: string | null;
           library_item_id: string;
           progress?: number | null;
+          started_at?: string | null;
           user_id: string;
         };
         Update: {
@@ -786,9 +788,18 @@ export type Database = {
           last_update?: string | null;
           library_item_id?: string;
           progress?: number | null;
+          started_at?: string | null;
           user_id?: string;
         };
-        Relationships: [];
+        Relationships: [
+          {
+            foreignKeyName: "media_progress_library_item_id_fkey";
+            columns: ["library_item_id"];
+            isOneToOne: false;
+            referencedRelation: "library_items";
+            referencedColumns: ["id"];
+          },
+        ];
       };
       migrations_meta: {
         Row: {
