@@ -401,8 +401,7 @@ librariesRouter.get("/:id/personalized", async (c) => {
     .eq("is_finished", false)
     .eq("hide_from_continue_listening", false)
     .is("episode_id", null)
-    .order("last_update", { ascending: false })
-    .limit(30);
+    .order("last_update", { ascending: false });
 
   const { data: listenAgainProgress } = await supabase
     .from("media_progress")
@@ -413,18 +412,19 @@ librariesRouter.get("/:id/personalized", async (c) => {
     .eq("library_items.library_id", libraryId)
     .eq("is_finished", true)
     .is("episode_id", null)
-    .order("last_update", { ascending: false })
-    .limit(30);
+    .order("last_update", { ascending: false });
 
   const continueItems = ((continueProgress || []) as any[])
     .filter((p) => p.library_items)
     .map((p) => mapBookForMobile(p.library_items, p))
-    .filter(Boolean);
+    .filter(Boolean)
+    .slice(0, 30);
 
   const listenAgainItems = ((listenAgainProgress || []) as any[])
     .filter((p) => p.library_items)
     .map((p) => mapBookForMobile(p.library_items, p))
-    .filter(Boolean);
+    .filter(Boolean)
+    .slice(0, 30);
 
   const shelves: Array<{
     id: string;
