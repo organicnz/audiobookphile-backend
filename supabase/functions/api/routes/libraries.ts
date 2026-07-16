@@ -388,16 +388,83 @@ librariesRouter.get("/:id/personalized", async (c) => {
     mapBookForMobile(item, progressMap.get(item.id) as any)
   );
 
-  const shelves = [
-    {
-      id: "recently-added",
-      label: "Recently Added",
-      labelStringKey: "LabelRecentlyAdded",
-      type: "book", // Defaulting to book, front-end handles it
-      entities: formattedRecent,
-      total: formattedRecent.length,
-    },
-  ];
+  // Continue Listening: drive from media_progress outward (not derived from
+  // the items list), so all in-progress books appear regardless of where they
+  // sit in the library ordering. Finished and hidden items are filtered here.
+  const { data: continueProgress } = await supabase
+    .from("media_progress")
+    .select(
+      "*, library_items!inner(*, books(*, book_authors(authors(*)), book_series(series(*))))",
+    )
+    .eq("user_id", user.id)
+    .eq("library_items.library_id", libraryId)
+    .eq("is_finished", false)
+    .eq("hide_from_continue_listening", false)
+    .is("episode_id", null)
+    .order("last_update", { ascending: false })
+    .limit(30);
+
+  const { data: listenAgainProgress } = await supabase
+    .from("media_progress")
+    .select(
+      "*, library_items!inner(*, books(*, book_authors(authors(*)), book_series(series(*))))",
+    )
+    .eq("user_id", user.id)
+    .eq("library_items.library_id", libraryId)
+    .eq("is_finished", true)
+    .is("episode_id", null)
+    .order("last_update", { ascending: false })
+    .limit(30);
+
+  const continueItems = ((continueProgress || []) as any[])
+    .filter((p) => p.library_items)
+    .map((p) => mapBookForMobile(p.library_items, p))
+    .filter(Boolean);
+
+  const listenAgainItems = ((listenAgainProgress || []) as any[])
+    .filter((p) => p.library_items)
+    .map((p) => mapBookForMobile(p.library_items, p))
+    .filter(Boolean);
+
+  const shelves: Array<{
+    id: string;
+    label: string;
+    labelStringKey: string;
+    type: string;
+    entities: any[];
+    total: number;
+  }> = [];
+
+  if (continueItems.length > 0) {
+    shelves.push({
+      id: "continue-listening",
+      label: "Continue Listening",
+      labelStringKey: "LabelContinueListening",
+      type: "book",
+      entities: continueItems,
+      total: continueItems.length,
+    });
+  }
+
+  if (listenAgainItems.length > 0) {
+    shelves.push({
+      id: "listen-again",
+      label: "Listen Again",
+      labelStringKey: "LabelListenAgain",
+      type: "book",
+      entities: listenAgainItems,
+      total: listenAgainItems.length,
+    });
+  }
+
+  shelves.push({
+    id: "recently-added",
+    label: "Recently Added",
+    labelStringKey: "LabelRecentlyAdded",
+    type: "book", // Defaulting to book, front-end handles it
+    entities: formattedRecent,
+    total: formattedRecent.length,
+  });
 
   return c.json(shelves);
 });
