@@ -74,6 +74,15 @@ Deno.serve(async (req) => {
           secretAccessKey: Deno.env.get("B2_APP_KEY")!,
         },
         forcePathStyle: true,
+        // Keep this client consistent with the other B2 S3Client instances —
+        // see _shared/storage-router.ts for the rationale. Currently this
+        // client only calls ListObjectsV2 (header-signed), so the option is
+        // defensive, but adding it avoids a footgun if a presigned operation
+        // is introduced here later.
+        // @ts-ignore — options recognised at runtime, not in older type defs
+        requestChecksumCalculation: "WHEN_REQUIRED",
+        // @ts-ignore
+        responseChecksumValidation: "WHEN_REQUIRED",
       });
       const data = await s3.send(
         new ListObjectsV2Command({ Bucket: Deno.env.get("B2_BUCKET_NAME") }),

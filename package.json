@@ -11,7 +11,8 @@
     "prepare": "lefthook install"
   },
   "dependencies": {
-    "@aws-sdk/client-s3": "^3.1085.0"
+    "@aws-sdk/client-s3": "^3.1085.0",
+    "@aws-sdk/s3-request-presigner": "^3.1085.0"
   },
   "devDependencies": {
     "@evilmartians/lefthook": "^2.1.9",

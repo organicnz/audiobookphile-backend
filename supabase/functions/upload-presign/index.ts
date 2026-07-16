@@ -19,7 +19,12 @@ function getB2PrimaryClient(): S3Client {
         secretAccessKey: Deno.env.get("B2_APP_KEY")!,
       },
       forcePathStyle: true,
-      // @ts-ignore
+      // B2 rejects presigned URLs that carry unsigned x-amz-checksum-* query
+      // params, which the AWS SDK injects by default on newer versions. These
+      // options force checksums to be computed only when the operation requires
+      // them, keeping PutObject presigned URLs clean. Without this, every
+      // upload signed via this function fails with SignatureDoesNotMatch.
+      // @ts-ignore — options recognised at runtime, not in older type defs
       requestChecksumCalculation: "WHEN_REQUIRED",
       // @ts-ignore
       responseChecksumValidation: "WHEN_REQUIRED",
@@ -38,7 +43,9 @@ function getB2SecondaryClient(): S3Client {
         secretAccessKey: Deno.env.get("B2_SECONDARY_APP_KEY")!,
       },
       forcePathStyle: true,
-      // @ts-ignore
+      // See getB2PrimaryClient: required to keep PutObject presigned URLs
+      // B2-compatible on AWS SDK v3.693.0+ / v3.1085.0+.
+      // @ts-ignore — options recognised at runtime, not in older type defs
       requestChecksumCalculation: "WHEN_REQUIRED",
       // @ts-ignore
       responseChecksumValidation: "WHEN_REQUIRED",

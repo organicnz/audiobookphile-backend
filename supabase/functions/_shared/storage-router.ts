@@ -8,6 +8,57 @@ import { SupabaseClient } from "npm:@supabase/supabase-js@2.44.0";
 
 import { Database } from "../../../src/types/supabase.ts";
 
+// S3Client instances are cached per-process to avoid re-initialising on every
+// request. Each edge function invocation is a new process, but within a single
+// invocation (e.g. signing N tracks in parallel) this avoids N allocations.
+let _b2PrimaryClient: S3Client | null = null;
+let _b2SecondaryClient: S3Client | null = null;
+
+function getB2PrimaryClient(): S3Client {
+  if (!_b2PrimaryClient) {
+    _b2PrimaryClient = new S3Client({
+      endpoint: Deno.env.get("B2_ENDPOINT")!,
+      region: Deno.env.get("B2_REGION") || "us-west-004",
+      credentials: {
+        accessKeyId: Deno.env.get("B2_KEY_ID")!,
+        secretAccessKey: Deno.env.get("B2_APP_KEY")!,
+      },
+      forcePathStyle: true,
+      // B2 rejects presigned URLs that carry unsigned x-amz-checksum-* query
+      // params, which the AWS SDK injects by default on newer versions. These
+      // options force checksums to be computed only when the operation requires
+      // them, keeping GetObject presigned URLs clean. Without this, every
+      // download signed via this router fails with SignatureDoesNotMatch.
+      // @ts-ignore — options recognised at runtime, not in older type defs
+      requestChecksumCalculation: "WHEN_REQUIRED",
+      // @ts-ignore
+      responseChecksumValidation: "WHEN_REQUIRED",
+    });
+  }
+  return _b2PrimaryClient;
+}
+
+function getB2SecondaryClient(): S3Client {
+  if (!_b2SecondaryClient) {
+    _b2SecondaryClient = new S3Client({
+      endpoint: Deno.env.get("B2_SECONDARY_ENDPOINT")!,
+      region: Deno.env.get("B2_SECONDARY_REGION") || "us-west-004",
+      credentials: {
+        accessKeyId: Deno.env.get("B2_SECONDARY_KEY_ID")!,
+        secretAccessKey: Deno.env.get("B2_SECONDARY_APP_KEY")!,
+      },
+      forcePathStyle: true,
+      // See getB2PrimaryClient: required to keep GetObject presigned URLs
+      // B2-compatible on AWS SDK v3.693.0+ / v3.1085.0+.
+      // @ts-ignore — options recognised at runtime, not in older type defs
+      requestChecksumCalculation: "WHEN_REQUIRED",
+      // @ts-ignore
+      responseChecksumValidation: "WHEN_REQUIRED",
+    });
+  }
+  return _b2SecondaryClient;
+}
+
 export class StorageRouter {
   constructor(private supabase: SupabaseClient<Database>) {}
 
@@ -26,44 +77,20 @@ export class StorageRouter {
 
     if (path.startsWith("b2-secondary://")) {
       const actualPath = path.replace("b2-secondary://", "");
-
-      const s3Client = new S3Client({
-        endpoint: Deno.env.get("B2_SECONDARY_ENDPOINT")!,
-        region: Deno.env.get("B2_SECONDARY_REGION") || "us-west-004",
-        credentials: {
-          accessKeyId: Deno.env.get("B2_SECONDARY_KEY_ID")!,
-          secretAccessKey: Deno.env.get("B2_SECONDARY_APP_KEY")!,
-        },
-        forcePathStyle: true,
-      });
-
       const command = new GetObjectCommand({
         Bucket: Deno.env.get("B2_SECONDARY_BUCKET_NAME")!,
         Key: actualPath,
       });
-
-      return await getSignedUrl(s3Client, command, { expiresIn });
+      return await getSignedUrl(getB2SecondaryClient(), command, { expiresIn });
     }
 
-    if (path.startsWith("b2://") || (!path.includes("://"))) {
+    if (path.startsWith("b2://") || !path.includes("://")) {
       const actualPath = path.replace("b2://", "");
-
-      const s3Client = new S3Client({
-        endpoint: Deno.env.get("B2_ENDPOINT")!,
-        region: Deno.env.get("B2_REGION") || "us-west-004",
-        credentials: {
-          accessKeyId: Deno.env.get("B2_KEY_ID")!,
-          secretAccessKey: Deno.env.get("B2_APP_KEY")!,
-        },
-        forcePathStyle: true,
-      });
-
       const command = new GetObjectCommand({
         Bucket: Deno.env.get("B2_BUCKET_NAME")!,
         Key: actualPath,
       });
-
-      return await getSignedUrl(s3Client, command, { expiresIn });
+      return await getSignedUrl(getB2PrimaryClient(), command, { expiresIn });
     }
 
     throw new Error(`Unsupported storage provider for path: ${path}`);
@@ -82,17 +109,8 @@ export class StorageRouter {
 
     if (path.startsWith("b2-secondary://")) {
       const actualPath = path.replace("b2-secondary://", "");
-      const s3Client = new S3Client({
-        endpoint: Deno.env.get("B2_SECONDARY_ENDPOINT")!,
-        region: Deno.env.get("B2_SECONDARY_REGION") || "us-west-004",
-        credentials: {
-          accessKeyId: Deno.env.get("B2_SECONDARY_KEY_ID")!,
-          secretAccessKey: Deno.env.get("B2_SECONDARY_APP_KEY")!,
-        },
-        forcePathStyle: true,
-      });
       try {
-        await s3Client.send(
+        await getB2SecondaryClient().send(
           new HeadObjectCommand({
             Bucket: Deno.env.get("B2_SECONDARY_BUCKET_NAME")!,
             Key: actualPath,
@@ -104,19 +122,10 @@ export class StorageRouter {
       }
     }
 
-    if (path.startsWith("b2://") || (!path.includes("://"))) {
+    if (path.startsWith("b2://") || !path.includes("://")) {
       const actualPath = path.replace("b2://", "");
-      const s3Client = new S3Client({
-        endpoint: Deno.env.get("B2_ENDPOINT")!,
-        region: Deno.env.get("B2_REGION") || "us-west-004",
-        credentials: {
-          accessKeyId: Deno.env.get("B2_KEY_ID")!,
-          secretAccessKey: Deno.env.get("B2_APP_KEY")!,
-        },
-        forcePathStyle: true,
-      });
       try {
-        await s3Client.send(
+        await getB2PrimaryClient().send(
           new HeadObjectCommand({
             Bucket: Deno.env.get("B2_BUCKET_NAME")!,
             Key: actualPath,

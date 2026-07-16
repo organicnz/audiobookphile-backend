@@ -5,8 +5,8 @@
     "@supabase/supabase-js": "npm:@supabase/supabase-js@2.44.0",
     "zod": "npm:zod@3.23.8",
     "hono": "npm:hono@4.4.0",
-    "@aws-sdk/client-s3": "npm:@aws-sdk/client-s3@3.588.0",
-    "@aws-sdk/s3-request-presigner": "npm:@aws-sdk/s3-request-presigner@3.588.0",
+    "@aws-sdk/client-s3": "npm:@aws-sdk/client-s3@3.1085.0",
+    "@aws-sdk/s3-request-presigner": "npm:@aws-sdk/s3-request-presigner@3.1085.0",
     "music-metadata": "npm:music-metadata@10.2.0",
     "@sentry/deno": "npm:@sentry/deno@8.32.0"
   },
