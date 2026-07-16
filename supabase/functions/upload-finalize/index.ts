@@ -261,14 +261,25 @@ Deno.serve(async (req) => {
           ...(existingBook?.audio_files || []),
           ...updatedAudioFilesJson,
         ];
-        const totalDuration = finalMergedAudioFiles.reduce(
+
+        // Deduplicate the merged files to prevent duplicate chapters and incorrect playtime on re-uploads
+        const uniqueMergedMap = new Map<string, any>();
+        for (const af of finalMergedAudioFiles) {
+          if (af.metadata?.filename) {
+            uniqueMergedMap.set(af.metadata.filename, af);
+          }
+        }
+        const deduplicatedMergedFiles = Array.from(uniqueMergedMap.values());
+        deduplicatedMergedFiles.forEach((af, idx) => af.index = idx + 1);
+
+        const totalDuration = deduplicatedMergedFiles.reduce(
           (sum: number, af: any) => sum + (af.duration || 0),
           0,
         );
 
         // Update database with new durations
         await db.from("books").update({
-          audio_files: finalMergedAudioFiles,
+          audio_files: deduplicatedMergedFiles,
           duration: totalDuration,
         }).eq("id", bookId);
         console.log(
