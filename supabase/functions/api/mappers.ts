@@ -264,8 +264,6 @@ export function mapBookForMobile(
     isInvalid: item.is_invalid ?? false,
     mediaType: item.media_type || "book",
     media: {
-      id: item.id,
-      libraryItemId: item.id,
       libraryFiles: audioFiles.map((af) => ({
         id: String((af as any).index),
         ino: af.ino,
