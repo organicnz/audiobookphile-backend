@@ -373,7 +373,7 @@ librariesRouter.get("/:id/series", async (c) => {
   const { data: seriesRows, error, count } = await supabase
     .from("series")
     .select(
-      "*, book_series(book_id, sequence, books(id, title, cover_path, library_items(id, cover_path)))",
+      "*, book_series(book_id, sequence, books(id, title, cover_path, duration, library_items(id, cover_path, updated_at, added_at, created_at)))",
       {
         count: "exact",
       },
@@ -391,11 +391,31 @@ librariesRouter.get("/:id/series", async (c) => {
       const libraryItem = Array.isArray(book?.library_items)
         ? book.library_items[0]
         : book?.library_items;
+      // Return a LibraryItem-compatible shape so the frontend cover pipeline
+      // (`getLibraryItemCoverSrc` → `GET /api/items/:id/cover`) resolves to the
+      // correct `library_items.id` and the dynamic cover fetcher hits the right row.
+      // Falling back to the books-table id keeps cards navigable when no
+      // library_item exists, even though the cover would 404 in that case.
+      const itemId = libraryItem?.id || bs.book_id;
+      const coverPath = libraryItem?.cover_path || book?.cover_path || null;
+      const toMs = (v: unknown): number | undefined =>
+        typeof v === "string" && v
+          ? new Date(v).getTime() || undefined
+          : undefined;
       return {
-        id: bs.book_id,
+        id: itemId,
         sequence: bs.sequence,
         title: book?.title || "",
-        cover: libraryItem?.cover_path || book?.cover_path || null,
+        addedAt: toMs(libraryItem?.added_at || libraryItem?.created_at),
+        updatedAt: toMs(libraryItem?.updated_at),
+        media: {
+          // books-table id — keys the per-book progress map on the frontend
+          id: book?.id,
+          coverPath,
+          duration: Number(book?.duration) || undefined,
+        },
+        // Kept for any legacy consumer of the old flat `cover` field
+        cover: coverPath,
       };
     });
     return {
