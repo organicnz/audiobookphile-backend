@@ -358,6 +358,105 @@ librariesRouter.post("/:id/scan", (c) => {
   return c.json({ result: "UPTODATE" });
 });
 
+// ── Series ────────────────────────────────────────────────────────────────────
+librariesRouter.get("/:id/series", async (c) => {
+  const supabase = c.get("supabase");
+  const libraryId = c.req.param("id");
+  const qp = new URL(c.req.raw.url).searchParams;
+  const limit = parseInt(qp.get("limit") || "24", 10);
+  const page = parseInt(qp.get("page") || "0", 10);
+  const sort = qp.get("sort") || "name";
+  const desc = qp.get("desc") === "1";
+  const offset = page * limit;
+  const dbSortField = sort === "name" ? "name" : "created_at";
+
+  const { data: seriesRows, error, count } = await supabase
+    .from("series")
+    .select(
+      "*, book_series(book_id, sequence, library_items(id, title, cover_path, media_id))",
+      {
+        count: "exact",
+      },
+    )
+    .eq("library_id", libraryId)
+    .order(dbSortField, { ascending: !desc })
+    .range(offset, offset + limit - 1);
+
+  if (error) return c.json({ error: error.message }, 500);
+
+  const results = (seriesRows || []).map((s: any) => {
+    const books = (s.book_series || []).map((bs: any) => ({
+      id: bs.book_id,
+      sequence: bs.sequence,
+      title: bs.library_items?.title || "",
+      cover: bs.library_items?.cover_path || null,
+    }));
+    return {
+      id: s.id,
+      name: s.name,
+      nameIgnorePrefix: s.name_ignore_prefix || s.name,
+      description: s.description || null,
+      libraryId: s.library_id,
+      addedAt: new Date(s.created_at).getTime(),
+      updatedAt: new Date(s.updated_at || s.created_at).getTime(),
+      books,
+      numBooks: books.length,
+    };
+  });
+
+  return c.json({
+    results,
+    total: count || 0,
+    limit,
+    page,
+    sortBy: sort,
+    sortDesc: desc,
+  });
+});
+
+// ── Authors ───────────────────────────────────────────────────────────────────
+librariesRouter.get("/:id/authors", async (c) => {
+  const supabase = c.get("supabase");
+  const libraryId = c.req.param("id");
+  const qp = new URL(c.req.raw.url).searchParams;
+  const limit = parseInt(qp.get("limit") || "24", 10);
+  const page = parseInt(qp.get("page") || "0", 10);
+  const sort = qp.get("sort") || "name";
+  const desc = qp.get("desc") === "1";
+  const offset = page * limit;
+  const dbSortField = sort === "name" ? "name" : "created_at";
+
+  const { data: authorRows, error, count } = await supabase
+    .from("authors")
+    .select("*", { count: "exact" })
+    .eq("library_id", libraryId)
+    .order(dbSortField, { ascending: !desc })
+    .range(offset, offset + limit - 1);
+
+  if (error) return c.json({ error: error.message }, 500);
+
+  const authors = (authorRows || []).map((a: any) => ({
+    id: a.id,
+    name: a.name,
+    asin: a.asin || null,
+    description: a.description || null,
+    imagePath: a.image_path || null,
+    libraryId: a.library_id,
+    addedAt: new Date(a.created_at).getTime(),
+    updatedAt: new Date(a.updated_at || a.created_at).getTime(),
+    numBooks: 0,
+  }));
+
+  return c.json({
+    authors,
+    total: count || 0,
+    limit,
+    page,
+    sortBy: sort,
+    sortDesc: desc,
+  });
+});
+
 librariesRouter.get("/:id/personalized", async (c) => {
   const supabase = c.get("supabase");
   const user = c.get("user")!;
