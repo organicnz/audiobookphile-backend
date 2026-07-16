@@ -373,7 +373,7 @@ librariesRouter.get("/:id/series", async (c) => {
   const { data: seriesRows, error, count } = await supabase
     .from("series")
     .select(
-      "*, book_series(book_id, sequence, library_items(id, title, cover_path, media_id))",
+      "*, book_series(book_id, sequence, books(id, title, cover_path, library_items(id, cover_path)))",
       {
         count: "exact",
       },
@@ -385,12 +385,19 @@ librariesRouter.get("/:id/series", async (c) => {
   if (error) return c.json({ error: error.message }, 500);
 
   const results = (seriesRows || []).map((s: any) => {
-    const books = (s.book_series || []).map((bs: any) => ({
-      id: bs.book_id,
-      sequence: bs.sequence,
-      title: bs.library_items?.title || "",
-      cover: bs.library_items?.cover_path || null,
-    }));
+    const books = (s.book_series || []).map((bs: any) => {
+      const book = bs.books;
+      // library_items is a one-to-many from books; take the first match
+      const libraryItem = Array.isArray(book?.library_items)
+        ? book.library_items[0]
+        : book?.library_items;
+      return {
+        id: bs.book_id,
+        sequence: bs.sequence,
+        title: book?.title || "",
+        cover: libraryItem?.cover_path || book?.cover_path || null,
+      };
+    });
     return {
       id: s.id,
       name: s.name,
