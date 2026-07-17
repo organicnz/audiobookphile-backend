@@ -1,3 +1,18 @@
+/**
+ * ⚠️  SOURCE OF TRUTH
+ *
+ * This file is the canonical definition of all Zod schemas shared between
+ * the backend edge functions and the web application.
+ *
+ * The web application keeps a copy at:
+ *   audiobookphile-web/src/types/schemas.ts
+ *
+ * After editing this file:
+ *   1. Run `pnpm generate-types` (or `npm run generate-types`) in the backend
+ *      workspace to regenerate supabase.ts from the live database.
+ *   2. Copy this file to the web location above.
+ *   3. Commit both changes together so the copies stay in sync.
+ */
 import { z } from "zod";
 
 export const AudioMetadataSchema = z.object({
@@ -60,6 +75,17 @@ export const EbookFileSchema = z.object({
   ebookFormat: z.string(),
 });
 
+/**
+ * BookMetadataSchema — flat string representation of book metadata.
+ * Authors, narrators, and series are pre-joined as strings, not arrays.
+ * This is the shape the iOS / mobile client expects.
+ *
+ * Compare with `BookMetadata` in the web `api/models.ts`, which uses
+ * structured Author[], string[], Series[] for the ABS / web path.
+ *
+ * `BookMetadataModel` below is pinned to `BookMetadataFlat` (the interface
+ * declared in the web layer) so any drift between them is caught at compile time.
+ */
 export const BookMetadataSchema = z.object({
   title: z.string(),
   subtitle: z.string().nullish(),
@@ -163,6 +189,14 @@ export type ChapterModel = z.infer<typeof ChapterSchema>;
 export type FileMetadataModel = z.infer<typeof FileMetadataSchema>;
 export type LibraryFileModel = z.infer<typeof LibraryFileSchema>;
 export type EbookFileModel = z.infer<typeof EbookFileSchema>;
+/**
+ * BookMetadataModel is the inferred type from BookMetadataSchema.
+ *
+ * In the web layer (audiobookphile-web/src/types/schemas.ts) this type is
+ * additionally pinned to `BookMetadataFlat` from `@/types/api/models` so
+ * that drift between the schema and the interface is caught at compile time.
+ * When making structural changes here, verify the web copy still compiles.
+ */
 export type BookMetadataModel = z.infer<typeof BookMetadataSchema>;
 export type BookMediaModel = z.infer<typeof BookMediaSchema>;
 export type MediaProgressModel = z.infer<typeof MediaProgressSchema>;

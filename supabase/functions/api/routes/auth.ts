@@ -200,13 +200,48 @@ authRouter.post("/authorize", async (c) => {
   const serviceRoleKey = c.get("serviceRoleKey");
   const jwt = c.req.header("Authorization")?.replace("Bearer ", "") || "";
 
-  const { data: { user }, error: userError } = await supabase.auth.getUser(jwt);
+  let user = null;
+  let activeToken = jwt;
+  let newRefreshToken: string | null = null;
+
+  // Attempt to validate the current JWT.
+  const { data: { user: jwtUser }, error: userError } = await supabase.auth
+    .getUser(jwt);
+  user = jwtUser;
+
+  // If the JWT is expired (or otherwise invalid), attempt a silent refresh
+  // using a refresh token supplied via the x-refresh-token header or request body.
+  // This is the common case on iOS: the Audiobookshelf app sends /authorize once
+  // per session start; if the 1-hour access token has expired the user would be
+  // forced to log in again without this silent-refresh path.
   if (userError || !user) {
+    let refreshToken: string | null = c.req.header("x-refresh-token") || null;
+
+    if (!refreshToken) {
+      try {
+        const body = await c.req.json().catch(() => ({}));
+        refreshToken = (body as Record<string, string>).refreshToken ?? null;
+      } catch {
+        // body already consumed or not JSON — ignore
+      }
+    }
+
+    if (refreshToken) {
+      const { data: refreshData, error: refreshError } = await supabase.auth
+        .refreshSession({ refresh_token: refreshToken });
+
+      if (!refreshError && refreshData.session && refreshData.user) {
+        user = refreshData.user;
+        activeToken = refreshData.session.access_token;
+        newRefreshToken = refreshData.session.refresh_token;
+      }
+    }
+  }
+
+  if (!user) {
     console.error(
-      `[auth.ts] /authorize getUser failed:`,
-      userError,
-      `user is null?`,
-      !user,
+      `[auth.ts] /authorize failed — JWT invalid and no valid refresh token provided. userError:`,
+      userError?.message,
     );
     return c.json({ error: { message: "Unauthorized" } }, 401);
   }
@@ -223,7 +258,12 @@ authRouter.post("/authorize", async (c) => {
       username: profile?.username || user.email?.split("@")[0] || "User",
       email: user.email,
       type: profile?.user_type || "user",
-      token: c.req.header("Authorization")?.replace("Bearer ", "") || "",
+      // Always return the active (possibly freshly-issued) token so the client
+      // can store it and avoid re-authentication on the next session start.
+      token: activeToken,
+      // Include the new refresh token if one was issued during silent refresh,
+      // otherwise return null so the client knows to keep its existing one.
+      refreshToken: newRefreshToken,
       mediaProgress: [],
       seriesHideFromContinueListening: [],
       bookmarks: [],

@@ -1,10 +1,10 @@
-export type Json =
-  | string
-  | number
-  | boolean
-  | null
-  | { [key: string]: Json | undefined }
-  | Json[];
+// ⚠️  AUTO-GENERATED — DO NOT EDIT DIRECTLY
+// Run `npm run gen:types` in audiobookphile-backend to regenerate from the live database.
+// This file is kept in sync with audiobookphile-web/src/types/supabase.ts via that script.
+
+export type Json = string | number | boolean | null | {
+  [key: string]: Json | undefined;
+} | Json[];
 
 export type Database = {
   // Allows to automatically instantiate createClient with right options
@@ -1288,22 +1288,20 @@ export type Tables<
     Row: infer R;
   } ? R
   : never
-  : DefaultSchemaTableNameOrOptions extends keyof (
-    & DefaultSchema["Tables"]
-    & DefaultSchema["Views"]
-  ) ? (
-      & DefaultSchema["Tables"]
-      & DefaultSchema["Views"]
-    )[DefaultSchemaTableNameOrOptions] extends {
+  : DefaultSchemaTableNameOrOptions extends
+    keyof (DefaultSchema["Tables"] & DefaultSchema["Views"])
+    ? (DefaultSchema["Tables"] & DefaultSchema["Views"])[
+      DefaultSchemaTableNameOrOptions
+    ] extends {
       Row: infer R;
     } ? R
     : never
   : never;
 
 export type TablesInsert<
-  DefaultSchemaTableNameOrOptions extends
-    | keyof DefaultSchema["Tables"]
-    | { schema: keyof DatabaseWithoutInternals },
+  DefaultSchemaTableNameOrOptions extends keyof DefaultSchema["Tables"] | {
+    schema: keyof DatabaseWithoutInternals;
+  },
   TableName extends DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals;
   } ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]][
@@ -1326,9 +1324,9 @@ export type TablesInsert<
   : never;
 
 export type TablesUpdate<
-  DefaultSchemaTableNameOrOptions extends
-    | keyof DefaultSchema["Tables"]
-    | { schema: keyof DatabaseWithoutInternals },
+  DefaultSchemaTableNameOrOptions extends keyof DefaultSchema["Tables"] | {
+    schema: keyof DatabaseWithoutInternals;
+  },
   TableName extends DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals;
   } ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]][
@@ -1351,9 +1349,9 @@ export type TablesUpdate<
   : never;
 
 export type Enums<
-  DefaultSchemaEnumNameOrOptions extends
-    | keyof DefaultSchema["Enums"]
-    | { schema: keyof DatabaseWithoutInternals },
+  DefaultSchemaEnumNameOrOptions extends keyof DefaultSchema["Enums"] | {
+    schema: keyof DatabaseWithoutInternals;
+  },
   EnumName extends DefaultSchemaEnumNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals;
   } ? keyof DatabaseWithoutInternals[DefaultSchemaEnumNameOrOptions["schema"]][

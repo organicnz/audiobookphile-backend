@@ -7,7 +7,9 @@
     "stop": "supabase stop",
     "status": "supabase status",
     "deploy": "supabase link --project-ref <your-project-id> && supabase db push",
-    "gen:types": "supabase gen types typescript --linked > ../audiobookphile-web/src/types/supabase.ts",
+    "gen:types": "supabase gen types typescript --linked --schema public > src/types/supabase.ts && cp src/types/supabase.ts ../audiobookphile-web/src/types/supabase.ts",
+    "sync:schemas": "cp src/types/schemas.ts ../audiobookphile-web/src/types/schemas.ts",
+    "sync": "npm run gen:types && npm run sync:schemas",
     "prepare": "lefthook install"
   },
   "dependencies": {

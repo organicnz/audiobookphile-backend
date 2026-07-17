@@ -1,5 +1,6 @@
-import { createClient } from "npm:@supabase/supabase-js@2";
+import { createClient } from "npm:@supabase/supabase-js@2.44.0";
 import { corsHeaders } from "../_shared/cors.ts";
+import { upsertMediaProgress } from "../_shared/progress.ts";
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -44,28 +45,20 @@ Deno.serve(async (req) => {
 
     const progress = duration ? currentTime / duration : undefined;
 
-    const { error } = await supabase.from("media_progress").upsert(
-      {
-        user_id: user.id,
-        library_item_id: itemId,
-        episode_id: episodeId ?? null,
-        current_time_pos: currentTime,
-        duration: duration,
-        progress,
-        is_finished: isFinished ?? false,
-        last_update: new Date().toISOString(),
-      },
-      { onConflict: "user_id,library_item_id,episode_id" },
-    );
-
-    if (error) throw error;
+    await upsertMediaProgress(supabase, user.id, itemId, episodeId ?? null, {
+      currentTime,
+      duration,
+      progress,
+      isFinished: isFinished ?? false,
+    });
 
     return new Response(JSON.stringify({ success: true }), {
       status: 200,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
-  } catch (err: any) {
-    return new Response(JSON.stringify({ error: err.message }), {
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    return new Response(JSON.stringify({ error: message }), {
       status: 500,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
