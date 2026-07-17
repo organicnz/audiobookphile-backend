@@ -14,9 +14,15 @@ type LibraryItemRow = Database["public"]["Tables"]["library_items"]["Row"];
 type BookRow = Database["public"]["Tables"]["books"]["Row"];
 type MediaProgressRow = Database["public"]["Tables"]["media_progress"]["Row"];
 
-// Using loose Record<string, unknown> for deep relations to avoid excessive type assertions, but strict for inputs
+// Using typed intersection for join results; only add fields actually accessed
 type LibraryItemWithBooks = LibraryItemRow & {
   books?: Record<string, unknown> | Record<string, unknown>[] | null;
+  folder_id?: string | null;
+  duration?: number | null;
+  added_at?: string | null;
+  mtime?: string | null;
+  ctime?: string | null;
+  birthtime?: string | null;
 };
 
 function _formatCoverPath(
@@ -154,7 +160,14 @@ export function mapBookForMobile(
 
     return {
       ino: String(
-        af.id || af.ino || `track-${Math.floor(Math.random() * 100000)}`,
+        af.id || af.ino ||
+          `${item.id}-track-${
+            Number(
+              af.track_index !== undefined
+                ? af.track_index
+                : (af.index !== undefined ? af.index : 0),
+            )
+          }`,
       ),
       index: af.track_index !== undefined
         ? af.track_index
@@ -232,7 +245,7 @@ export function mapBookForMobile(
     id: item.id,
     ino: item.id,
     libraryId: item.library_id,
-    folderId: (item as any).folder_id || "default",
+    folderId: item.folder_id || "default",
     path: item.path || "",
     relPath: item.rel_path || item.path || "",
     isFile: item.is_file ?? false,
