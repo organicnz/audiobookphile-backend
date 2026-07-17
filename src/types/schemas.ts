@@ -22,6 +22,8 @@ export const AudioFileSchema = z.object({
   language: z.string().nullish(),
   codec: z.string().nullish(),
   mimeType: z.string(),
+  addedAt: z.number().nullish(),
+  updatedAt: z.number().nullish(),
 });
 
 export const ChapterSchema = z.object({
@@ -48,6 +50,8 @@ export const LibraryFileSchema = z.object({
   metadata: FileMetadataSchema.nullish(),
   isSupplementary: z.boolean().nullish(),
   fileType: z.string().nullish(),
+  addedAt: z.number().nullish(),
+  updatedAt: z.number().nullish(),
 });
 
 export const EbookFileSchema = z.object({
