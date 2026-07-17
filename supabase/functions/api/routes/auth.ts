@@ -166,7 +166,7 @@ authRouter.post("/auth/refresh", async (c) => {
       email: data.user!.email,
       type: profile?.user_type || "user",
       token: data.session.access_token,
-      refreshToken: data.session.refresh_token,
+      refreshToken: data.session.refresh_token || refreshToken,
       mediaProgress: [],
       seriesHideFromContinueListening: [],
       bookmarks: [],
@@ -204,6 +204,21 @@ authRouter.post("/authorize", async (c) => {
   let activeToken = jwt;
   let newRefreshToken: string | null = null;
 
+  // Extract refresh token unconditionally so we can echo it back if a new one isn't issued
+  let providedRefreshToken: string | null = c.req.header("x-refresh-token") ||
+    null;
+  if (!providedRefreshToken) {
+    try {
+      // Clone the request so we can safely read JSON without breaking other middlewares,
+      // though at this point it's usually safe.
+      const body = await c.req.json().catch(() => ({}));
+      providedRefreshToken = (body as Record<string, string>).refreshToken ??
+        null;
+    } catch {
+      // body already consumed or not JSON — ignore
+    }
+  }
+
   // Attempt to validate the current JWT.
   const { data: { user: jwtUser }, error: userError } = await supabase.auth
     .getUser(jwt);
@@ -214,27 +229,14 @@ authRouter.post("/authorize", async (c) => {
   // This is the common case on iOS: the Audiobookshelf app sends /authorize once
   // per session start; if the 1-hour access token has expired the user would be
   // forced to log in again without this silent-refresh path.
-  if (userError || !user) {
-    let refreshToken: string | null = c.req.header("x-refresh-token") || null;
+  if ((userError || !user) && providedRefreshToken) {
+    const { data: refreshData, error: refreshError } = await supabase.auth
+      .refreshSession({ refresh_token: providedRefreshToken });
 
-    if (!refreshToken) {
-      try {
-        const body = await c.req.json().catch(() => ({}));
-        refreshToken = (body as Record<string, string>).refreshToken ?? null;
-      } catch {
-        // body already consumed or not JSON — ignore
-      }
-    }
-
-    if (refreshToken) {
-      const { data: refreshData, error: refreshError } = await supabase.auth
-        .refreshSession({ refresh_token: refreshToken });
-
-      if (!refreshError && refreshData.session && refreshData.user) {
-        user = refreshData.user;
-        activeToken = refreshData.session.access_token;
-        newRefreshToken = refreshData.session.refresh_token;
-      }
+    if (!refreshError && refreshData.session && refreshData.user) {
+      user = refreshData.user;
+      activeToken = refreshData.session.access_token;
+      newRefreshToken = refreshData.session.refresh_token;
     }
   }
 
@@ -261,9 +263,8 @@ authRouter.post("/authorize", async (c) => {
       // Always return the active (possibly freshly-issued) token so the client
       // can store it and avoid re-authentication on the next session start.
       token: activeToken,
-      // Include the new refresh token if one was issued during silent refresh,
-      // otherwise return null so the client knows to keep its existing one.
-      refreshToken: newRefreshToken,
+      // Always return a refresh token so the client doesn't overwrite its stored one with null.
+      refreshToken: newRefreshToken || providedRefreshToken,
       mediaProgress: [],
       seriesHideFromContinueListening: [],
       bookmarks: [],

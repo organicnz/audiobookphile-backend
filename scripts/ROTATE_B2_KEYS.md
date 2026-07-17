@@ -48,7 +48,8 @@ curl -sS -u "$NEW_KEY_ID:$NEW_APP_KEY" \
   "https://api.backblazeb2.com/b2api/v3/b2_authorize_account"
 ```
 
-If this returns `401`, the key is dead on arrival — do not proceed. Re-create it.
+If this returns `401`, the key is dead on arrival — do not proceed. Re-create
+it.
 
 ### 3. Update the Supabase secret store
 
