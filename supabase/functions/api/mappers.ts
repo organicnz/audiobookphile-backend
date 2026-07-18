@@ -13,16 +13,75 @@ type LibraryWithFolders = LibraryRow & {
 type LibraryItemRow = Database["public"]["Tables"]["library_items"]["Row"];
 type BookRow = Database["public"]["Tables"]["books"]["Row"];
 type MediaProgressRow = Database["public"]["Tables"]["media_progress"]["Row"];
+type BookAuthorRow = Database["public"]["Tables"]["book_authors"]["Row"];
+type AuthorRow = Database["public"]["Tables"]["authors"]["Row"];
+type BookSeriesRow = Database["public"]["Tables"]["book_series"]["Row"];
+type SeriesRow = Database["public"]["Tables"]["series"]["Row"];
+
+type JoinedAuthor = Partial<BookAuthorRow> & { authors?: AuthorRow | null };
+type JoinedSeries = Partial<BookSeriesRow> & { series?: SeriesRow | null };
+
+export type AudioFile = {
+  id?: string;
+  ino?: string;
+  index?: number;
+  track_index?: number;
+  filename?: string;
+  path?: string;
+  relPath?: string;
+  rel_path?: string;
+  storage_path?: string;
+  size?: number;
+  duration?: number;
+  mime_type?: string;
+  mimeType?: string;
+  bit_rate?: number;
+  bitRate?: number;
+  codec?: string;
+  language?: string;
+  metadata?: {
+    filename?: string;
+    ext?: string;
+    path?: string;
+    relPath?: string;
+    rel_path?: string;
+    size?: number;
+    mtimeMs?: number;
+    mtime_ms?: number;
+    ctimeMs?: number;
+    ctime_ms?: number;
+    birthtimeMs?: number;
+    birthtime_ms?: number;
+    duration?: number;
+  };
+};
+
+export type Chapter = {
+  id?: number;
+  chapter_index?: number;
+  title?: string;
+  start_time?: number;
+  start?: number;
+  end_time?: number;
+  end?: number;
+};
+
+type JoinedBook = BookRow & {
+  book_authors?: JoinedAuthor[] | null;
+  book_series?: JoinedSeries[] | null;
+};
 
 // Using typed intersection for join results; only add fields actually accessed
-type LibraryItemWithBooks = LibraryItemRow & {
-  books?: Record<string, unknown> | Record<string, unknown>[] | null;
+export type LibraryItemWithBooks = LibraryItemRow & {
+  books?: JoinedBook | JoinedBook[] | null;
   folder_id?: string | null;
   duration?: number | null;
   added_at?: string | null;
   mtime?: string | null;
   ctime?: string | null;
   birthtime?: string | null;
+  updated_at?: string | null;
+  created_at?: string | null;
 };
 
 function _formatCoverPath(
@@ -95,17 +154,17 @@ export function mapBookForMobile(
   progressRecord?: MediaProgressRow | null,
 ): MobileBook {
   const book = Array.isArray(item.books) ? item.books[0] : item.books;
-  const bookRecord = (book as Record<string, unknown> | null) || {};
+  const bookRecord = book || ({} as Partial<JoinedBook>);
 
   // 1. Authors
-  const authorsList = (bookRecord.book_authors as Record<string, unknown>[]) ||
-    [];
-  const authors = authorsList.map((ba) => ba.authors as Record<string, unknown>)
-    .filter(Boolean);
+  const authorsList = bookRecord.book_authors || [];
+  const authors = authorsList.map((ba) => ba.authors).filter(
+    Boolean,
+  ) as AuthorRow[];
   const authorNames = authors.map((a) => String(a.name));
   const authorName = authorNames.join(", ") || "Unknown Author";
   const authorNameLF =
-    authors.map((a) => String(a.name_lf || a.name)).join(", ") ||
+    authors.map((a) => String(a.last_first || a.name)).join(", ") ||
     "Unknown Author";
 
   // 2. Narrators
@@ -115,22 +174,18 @@ export function mapBookForMobile(
     : (narrators as string || null);
 
   // 3. Series
-  const bookSeries = (bookRecord.book_series as Record<string, unknown>[]) ||
-    [];
+  const bookSeries = bookRecord.book_series || [];
   const seriesInfo = bookSeries[0];
-  const seriesName = seriesInfo?.series
-    ? String((seriesInfo.series as Record<string, unknown>).name)
-    : null;
+  const seriesName = seriesInfo?.series ? String(seriesInfo.series.name) : null;
 
   // 4. Audio Files
-  const audioFilesList =
-    (bookRecord.audio_files as Record<string, unknown>[]) || [];
+  const audioFilesList = (bookRecord.audio_files as AudioFile[]) || [];
 
   const totalBookDuration =
-    Number(bookRecord.duration || Number((item as any).duration)) || 0;
+    Number(bookRecord.duration || Number(item.duration)) || 0;
   let totalFilesSize = 0;
   const mappedFiles = audioFilesList.map((af) => {
-    const meta = (af.metadata as Record<string, unknown>) || {};
+    const meta = af.metadata || {};
     const size = Number(af.size || meta.size) || 0;
     totalFilesSize += size;
     return { af, meta, size };
@@ -159,6 +214,16 @@ export function mapBookForMobile(
     totalCalculatedDuration += duration;
 
     return {
+      id: String(
+        af.id || af.ino ||
+          `${item.id}-track-${
+            Number(
+              af.track_index !== undefined
+                ? af.track_index
+                : (af.index !== undefined ? af.index : 0),
+            )
+          }`,
+      ),
       ino: String(
         af.id || af.ino ||
           `${item.id}-track-${
@@ -194,7 +259,7 @@ export function mapBookForMobile(
   }).sort((a, b) => Number(a.index || 0) - Number(b.index || 0)) || [];
 
   // 5. Chapters
-  const chaptersList = (bookRecord.chapters as Record<string, unknown>[]) || [];
+  const chaptersList = (bookRecord.chapters as Chapter[]) || [];
   const chapters = chaptersList.map((ch) => ({
     id: ch.chapter_index !== undefined
       ? Number(ch.chapter_index)
@@ -207,35 +272,30 @@ export function mapBookForMobile(
   // 6. User Media Progress
   const userMediaProgress = progressRecord
     ? {
-      id: (progressRecord as any).id,
+      id: progressRecord.id,
       libraryItemId: item.id,
-      episodeId: (progressRecord as any).episode_id || null,
-      duration: Number((progressRecord as any).duration) ||
-        Number(bookRecord.duration || Number((item as any).duration)) || 0,
-      progress: Number((progressRecord as any).progress) || 0,
-      currentTime: Number((progressRecord as any).current_time_pos) ||
-        Number((progressRecord as any).current_time) || 0,
-      isFinished: (progressRecord as any).is_finished || false,
-      hideFromContinueListening:
-        (progressRecord as any).hide_from_continue_listening ?? false,
+      episodeId: progressRecord.episode_id || null,
+      duration: Number(progressRecord.duration) ||
+        Number(bookRecord.duration || Number(item.duration)) || 0,
+      progress: Number(progressRecord.progress) || 0,
+      currentTime: Number(progressRecord.current_time_pos) || 0,
+      isFinished: progressRecord.is_finished || false,
+      hideFromContinueListening: progressRecord.hide_from_continue_listening ??
+        false,
       lastUpdate: new Date(
-        (progressRecord as any).last_update ||
-          (progressRecord as any).updated_at || Date.now(),
+        progressRecord.last_update || Date.now(),
       ).getTime(),
-      startedAt: ((progressRecord as any).started_at ||
-          (progressRecord as any).created_at)
+      startedAt: progressRecord.started_at
         ? new Date(
-          (progressRecord as any).started_at ||
-            (progressRecord as any).created_at ||
-            (progressRecord as any).last_update!,
+          progressRecord.started_at,
         ).getTime()
         : null,
-      finishedAt: (progressRecord as any).is_finished &&
-          ((progressRecord as any).finished_at ||
-            (progressRecord as any).last_update)
+      finishedAt: progressRecord.is_finished &&
+          (progressRecord.finished_at ||
+            progressRecord.last_update)
         ? new Date(
-          (progressRecord as any).finished_at ||
-            (progressRecord as any).last_update!,
+          progressRecord.finished_at ||
+            progressRecord.last_update!,
         ).getTime()
         : null,
     }
@@ -249,51 +309,56 @@ export function mapBookForMobile(
     path: item.path || "",
     relPath: item.rel_path || item.path || "",
     isFile: item.is_file ?? false,
-    mtimeMs: String((item as any).updated_at) || String((item as any).mtime)
+    mtimeMs: String(item.updated_at) || String(item.mtime)
       ? new Date(
-        String((item as any).updated_at) || String((item as any).mtime),
+        String(item.updated_at) || String(item.mtime),
       ).getTime()
       : Date.now(),
-    ctimeMs: String((item as any).created_at) || String((item as any).ctime)
+    ctimeMs: String(item.created_at) || String(item.ctime)
       ? new Date(
-        String((item as any).created_at) || String((item as any).ctime),
+        String(item.created_at) || String(item.ctime),
       ).getTime()
       : Date.now(),
-    birthtimeMs:
-      String((item as any).created_at) || String((item as any).birthtime)
-        ? new Date(
-          String((item as any).created_at) || String((item as any).birthtime),
-        ).getTime()
-        : Date.now(),
-    addedAt: String((item as any).added_at) || String((item as any).created_at)
+    birthtimeMs: String(item.created_at) || String(item.birthtime)
       ? new Date(
-        String((item as any).added_at) || String((item as any).created_at),
+        String(item.created_at) || String(item.birthtime),
       ).getTime()
       : Date.now(),
-    updatedAt: String((item as any).updated_at)
-      ? new Date(String((item as any).updated_at)).getTime()
+    addedAt: String(item.added_at) || String(item.created_at)
+      ? new Date(
+        String(item.added_at) || String(item.created_at),
+      ).getTime()
+      : Date.now(),
+    updatedAt: String(item.updated_at)
+      ? new Date(String(item.updated_at)).getTime()
       : Date.now(),
     isMissing: item.is_missing ?? false,
     isInvalid: item.is_invalid ?? false,
     mediaType: item.media_type || "book",
     media: {
       libraryFiles: audioFiles.map((af) => ({
-        id: String((af as any).index),
+        id: String(af.index),
         ino: af.ino,
-        metadata: af.metadata as any, // TODO: Type metadata mapping
+        metadata: af.metadata,
         isSupplementary: false,
         fileType: "audio",
       })),
       chapters: chapters,
-      duration: Number(bookRecord.duration || Number((item as any).duration)) ||
+      duration: Number(bookRecord.duration || Number(item.duration)) ||
         totalCalculatedDuration,
-      size: Number(bookRecord.size || item.size) || 0,
+      size: Number(item.size) || 0,
       coverPath: item.cover_path || String(bookRecord.cover_path || "") || null,
       tags: (bookRecord.tags as string[]) || [],
-      audioFiles: audioFiles as any, // TODO: Type array mapping
-      tracks: audioFiles as any,
+      audioFiles: audioFiles,
+      tracks: audioFiles,
       numTracks: audioFiles.length,
-      ebookFile: (bookRecord.ebook_file as any) || null,
+      ebookFile: bookRecord.ebook_file
+        ? (bookRecord.ebook_file as unknown as {
+          ino: string;
+          metadata: Record<string, unknown>;
+          ebookFormat: string;
+        })
+        : null,
       metadata: {
         title: String(bookRecord.title || item.title || "Unknown Title"),
         subtitle: bookRecord.subtitle ? String(bookRecord.subtitle) : null,

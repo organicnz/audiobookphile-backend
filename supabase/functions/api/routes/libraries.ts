@@ -1,5 +1,9 @@
 import { Hono } from "hono";
-import { mapBookForMobile, mapLibraryForMobile } from "../mappers.ts";
+import {
+  LibraryItemWithBooks,
+  mapBookForMobile,
+  mapLibraryForMobile,
+} from "../mappers.ts";
 import { Database } from "../../../../src/types/supabase.ts";
 import { z } from "zod";
 import { Variables } from "../_shared/types.ts";
@@ -16,7 +20,7 @@ librariesRouter.get("/", async (c) => {
     "*, library_folders(*)",
   ).order("display_order");
   if (error) throw error;
-  const formatted = libraries.map((l: any) =>
+  const formatted = libraries.map((l) =>
     mapLibraryForMobile(l as unknown as LibraryWithFolders)
   );
   return c.json({ libraries: formatted });
@@ -51,23 +55,26 @@ librariesRouter.post("/", async (c) => {
       media_type: body.mediaType,
       provider: body.provider || "default",
       display_order,
-    } as any,
+    },
   ).select().single();
 
   if (error) throw error;
 
   if (body.folders && body.folders.length > 0) {
     const folders = body.folders.map((f: Record<string, unknown>) => ({
+      id: String(f.id || crypto.randomUUID()),
       library_id: data.id,
-      full_path: String(f.fullPath || ""),
+      path: String(f.fullPath || f.path || ""),
     }));
-    await supabase.from("library_folders").insert(folders as any);
+    await supabase.from("library_folders").insert(folders);
   }
 
   const { data: fullLibrary } = await supabase.from("libraries").select(
     "*, library_folders(*)",
   ).eq("id", data.id).single();
-  return c.json(mapLibraryForMobile((fullLibrary || {}) as any));
+  return c.json(
+    mapLibraryForMobile((fullLibrary || {}) as unknown as LibraryWithFolders),
+  );
 });
 
 librariesRouter.patch("/:id", async (c) => {
@@ -92,14 +99,14 @@ librariesRouter.patch("/:id", async (c) => {
   }
   const body = parsed.data;
 
-  const updates: Record<string, unknown> = {};
+  const updates: Database["public"]["Tables"]["libraries"]["Update"] = {};
   if (body.name !== undefined) updates.name = body.name;
   if (body.displayOrder !== undefined) {
     updates.display_order = body.displayOrder;
   }
   // etc
 
-  const { error } = await supabase.from("libraries").update(updates as any).eq(
+  const { error } = await supabase.from("libraries").update(updates).eq(
     "id",
     libraryId,
   );
@@ -109,17 +116,20 @@ librariesRouter.patch("/:id", async (c) => {
     await supabase.from("library_folders").delete().eq("library_id", libraryId);
     if (body.folders.length > 0) {
       const folders = body.folders.map((f: Record<string, unknown>) => ({
+        id: String(f.id || crypto.randomUUID()),
         library_id: libraryId,
-        full_path: String(f.fullPath || f.id),
+        path: String(f.fullPath || f.path || f.id),
       }));
-      await supabase.from("library_folders").insert(folders as any);
+      await supabase.from("library_folders").insert(folders);
     }
   }
 
   const { data: fullLibrary } = await supabase.from("libraries").select(
     "*, library_folders(*)",
   ).eq("id", libraryId).single();
-  return c.json(mapLibraryForMobile((fullLibrary || {}) as any));
+  return c.json(
+    mapLibraryForMobile((fullLibrary || {}) as unknown as LibraryWithFolders),
+  );
 });
 
 librariesRouter.delete("/:id", async (c) => {
@@ -171,17 +181,20 @@ librariesRouter.get("/:id/items", async (c) => {
     let progressMap = new Map();
     if (itemIds.length > 0) {
       const { data: progressData } = await supabase.from("media_progress")
-        .select("*").eq("user_id", (user as any).id).in(
+        .select("*").eq("user_id", user.id).in(
           "library_item_id",
           itemIds,
         ).is("episode_id", null);
       progressMap = new Map(
-        (progressData || []).map((p: any) => [p.library_item_id, p]),
+        (progressData || []).map((p) => [p.library_item_id, p]),
       );
     }
 
-    const mappedItems = items.map((i: any) =>
-      mapBookForMobile(i, progressMap.get(i.id) as any)
+    const mappedItems = items.map((i) =>
+      mapBookForMobile(
+        i as unknown as LibraryItemWithBooks,
+        progressMap.get(i.id),
+      )
     );
 
     const response = {
@@ -232,12 +245,15 @@ librariesRouter.get("/:id/search", async (c) => {
       .in("library_item_id", itemIds)
       .is("episode_id", null);
     progressMap = new Map(
-      (progressData || []).map((p: any) => [p.library_item_id, p]),
+      (progressData || []).map((p) => [p.library_item_id, p]),
     );
   }
 
-  const results = items.map((item: any) => ({
-    libraryItem: mapBookForMobile(item, progressMap.get(item.id) as any),
+  const results = items.map((item) => ({
+    libraryItem: mapBookForMobile(
+      item as unknown as LibraryItemWithBooks,
+      progressMap.get(item.id),
+    ),
     matchKey: "title",
     matchText: item.title || "",
   }));
@@ -295,7 +311,7 @@ librariesRouter.get("/:id/matchall", async (c) => {
           const result = await fetchBookMetadata(item.title || "", authorName);
 
           if (result && result.metadata) {
-            const updates: Record<string, unknown> = {};
+            const updates: Database["public"]["Tables"]["books"]["Update"] = {};
             if (result.metadata.description) {
               updates.description = result.metadata.description;
             }
@@ -311,9 +327,9 @@ librariesRouter.get("/:id/matchall", async (c) => {
             if (result.metadata.genres) updates.genres = result.metadata.genres;
 
             if (Object.keys(updates).length > 0) {
-              await supabase.from("library_items").update(updates as any).eq(
+              await supabase.from("books").update(updates).eq(
                 "id",
-                item.id,
+                (bookItem as Database["public"]["Tables"]["books"]["Row"]).id,
               );
             }
 
@@ -337,13 +353,13 @@ librariesRouter.get("/:id/matchall", async (c) => {
     }
   };
 
-  // @ts-ignore
+  // deno-lint-ignore no-explicit-any
+  const edgeRuntime = (globalThis as any).EdgeRuntime;
   if (
-    typeof (globalThis as any).EdgeRuntime !== "undefined" &&
-    typeof (globalThis as any).EdgeRuntime.waitUntil === "function"
+    typeof edgeRuntime !== "undefined" &&
+    typeof edgeRuntime?.waitUntil === "function"
   ) {
-    // @ts-ignore
-    (globalThis as any).EdgeRuntime.waitUntil(processAllChunks(0));
+    edgeRuntime.waitUntil(processAllChunks(0));
   } else {
     processAllChunks(0).catch(() => {});
   }
@@ -384,9 +400,9 @@ librariesRouter.get("/:id/series", async (c) => {
 
   if (error) return c.json({ error: error.message }, 500);
 
-  const results = (seriesRows || []).map((s: any) => {
-    const books = (s.book_series || []).map((bs: any) => {
-      const book = bs.books;
+  const results = (seriesRows || []).map((s) => {
+    const books = (s.book_series || []).map((bs) => {
+      const book = Array.isArray(bs.books) ? bs.books[0] : bs.books;
       // library_items is a one-to-many from books; take the first match
       const libraryItem = Array.isArray(book?.library_items)
         ? book.library_items[0]
@@ -462,7 +478,7 @@ librariesRouter.get("/:id/authors", async (c) => {
 
   if (error) return c.json({ error: error.message }, 500);
 
-  const authors = (authorRows || []).map((a: any) => ({
+  const authors = (authorRows || []).map((a) => ({
     id: a.id,
     name: a.name,
     asin: a.asin || null,
@@ -508,9 +524,9 @@ librariesRouter.get("/:id/collections", async (c) => {
 
   if (error) return c.json({ error: error.message }, 500);
 
-  const results = (collectionRows || []).map((cObj: any) => {
-    const books = (cObj.collection_books || []).map((cb: any) => {
-      const book = cb.books;
+  const results = (collectionRows || []).map((cObj) => {
+    const books = (cObj.collection_books || []).map((cb) => {
+      const book = Array.isArray(cb.books) ? cb.books[0] : cb.books;
       const libraryItem = Array.isArray(book?.library_items)
         ? book.library_items[0]
         : book?.library_items;
@@ -529,7 +545,9 @@ librariesRouter.get("/:id/collections", async (c) => {
       };
     });
     // Sort books by order
-    books.sort((a: any, b: any) => a.order - b.order);
+    books.sort((a: { order?: number | null }, b: { order?: number | null }) =>
+      (a.order || 0) - (b.order || 0)
+    );
 
     return {
       id: cObj.id,
@@ -577,9 +595,9 @@ librariesRouter.get("/:id/playlists", async (c) => {
 
   if (error) return c.json({ error: error.message }, 500);
 
-  const results = (playlistRows || []).map((pObj: any) => {
-    const items = (pObj.playlist_media_items || []).map((pm: any) => {
-      const book = pm.books;
+  const results = (playlistRows || []).map((pObj) => {
+    const items = (pObj.playlist_media_items || []).map((pm) => {
+      const book = Array.isArray(pm.books) ? pm.books[0] : pm.books;
       const libraryItem = Array.isArray(book?.library_items)
         ? book.library_items[0]
         : book?.library_items;
@@ -598,7 +616,9 @@ librariesRouter.get("/:id/playlists", async (c) => {
       };
     });
     // Sort items by order
-    items.sort((a: any, b: any) => a.order - b.order);
+    items.sort((a: { order?: number | null }, b: { order?: number | null }) =>
+      (a.order || 0) - (b.order || 0)
+    );
 
     return {
       id: pObj.id,
@@ -650,7 +670,10 @@ librariesRouter.get("/:id/personalized", async (c) => {
 
   // Attach progress to recently-added items
   const recentItemIds = (recentItems || []).map((i) => i.id);
-  let recentProgressMap = new Map<string, any>();
+  let recentProgressMap = new Map<
+    string,
+    Database["public"]["Tables"]["media_progress"]["Row"]
+  >();
   if (recentItemIds.length > 0) {
     const { data: recentProgressData } = await supabase
       .from("media_progress")
@@ -659,12 +682,15 @@ librariesRouter.get("/:id/personalized", async (c) => {
       .in("library_item_id", recentItemIds)
       .is("episode_id", null);
     recentProgressMap = new Map(
-      (recentProgressData || []).map((p: any) => [p.library_item_id, p]),
+      (recentProgressData || []).map((p) => [p.library_item_id, p]),
     );
   }
 
-  const formattedRecent = (recentItems || []).map((item: any) =>
-    mapBookForMobile(item, recentProgressMap.get(item.id) ?? null)
+  const formattedRecent = (recentItems || []).map((item) =>
+    mapBookForMobile(
+      item as unknown as LibraryItemWithBooks,
+      recentProgressMap.get(item.id) ?? null,
+    )
   );
 
   // --- Continue Listening & Listen Again ---
@@ -699,22 +725,32 @@ librariesRouter.get("/:id/personalized", async (c) => {
     ])
     : [{ data: [] }, { data: [] }];
 
-  const continueItems = ((continueResult.data || []) as any[])
-    .filter((p) => p.library_items)
-    .map((p) => mapBookForMobile(p.library_items, p))
-    .filter(Boolean);
+  type ProgressWithItem =
+    & Database["public"]["Tables"]["media_progress"]["Row"]
+    & { library_items?: any };
 
-  const listenAgainItems = ((listenAgainResult.data || []) as any[])
-    .filter((p) => p.library_items)
-    .map((p) => mapBookForMobile(p.library_items, p))
-    .filter(Boolean);
+  const continueItems =
+    ((continueResult.data || []) as unknown as ProgressWithItem[])
+      .filter((p) => p.library_items)
+      .map((p) =>
+        mapBookForMobile(p.library_items as unknown as LibraryItemWithBooks, p)
+      )
+      .filter(Boolean);
+
+  const listenAgainItems =
+    ((listenAgainResult.data || []) as unknown as ProgressWithItem[])
+      .filter((p) => p.library_items)
+      .map((p) =>
+        mapBookForMobile(p.library_items as unknown as LibraryItemWithBooks, p)
+      )
+      .filter(Boolean);
 
   const shelves: Array<{
     id: string;
     label: string;
     labelStringKey: string;
     type: string;
-    entities: any[];
+    entities: unknown[];
     total: number;
   }> = [];
 
