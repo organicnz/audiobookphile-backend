@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { createClient } from "npm:@supabase/supabase-js@2.44.0";
+import { getProxyOrigin } from "../_shared/proxy.ts";
 import { Variables } from "../_shared/types.ts";
 
 export const authorsRouter = new Hono<{ Variables: Variables }>();
@@ -107,6 +108,105 @@ authorsRouter.post("/:id/match", async (c) => {
     const err = e as Error;
     return c.json({ error: err.message }, 500);
   }
+});
+
+authorsRouter.get("/:id/image", async (c) => {
+  const supabaseUrl = c.get("supabaseUrl");
+  const serviceRoleKey = c.get("serviceRoleKey");
+  const authorId = c.req.param("id");
+
+  const adminClient = createClient(supabaseUrl, serviceRoleKey);
+  const { data: author } = await adminClient.from("authors").select(
+    "name, image_path",
+  ).eq("id", authorId).single();
+
+  if (!author) {
+    return new Response("Not found", { status: 404 });
+  }
+
+  let storagePath = author.image_path;
+
+  if (!storagePath || storagePath.startsWith("/")) {
+    if (author.name) {
+      try {
+        const res = await fetch(
+          `https://openlibrary.org/search/authors.json?q=${
+            encodeURIComponent(author.name)
+          }&limit=1`,
+        );
+        if (res.ok) {
+          const data = await res.json();
+          const doc = data?.docs?.[0];
+          if (doc?.photos?.[0]) {
+            const photoId = doc.photos[0];
+            const photoUrl =
+              `https://covers.openlibrary.org/a/id/${photoId}-L.jpg`;
+            const imgRes = await fetch(photoUrl);
+            if (imgRes.ok) {
+              const buf = await imgRes.arrayBuffer();
+              if (buf.byteLength > 5000) {
+                storagePath = `authors/${authorId}/photo.jpg`;
+                const { error: uploadErr } = await adminClient.storage.from(
+                  "covers",
+                ).upload(
+                  storagePath,
+                  buf,
+                  { upsert: true, contentType: "image/jpeg" },
+                );
+                if (!uploadErr) {
+                  await adminClient.from("authors").update({
+                    image_path: storagePath,
+                  }).eq("id", authorId);
+                } else {
+                  storagePath = null;
+                }
+              }
+            }
+          }
+        }
+      } catch (_e) {
+        // ignore fetch errors
+      }
+    }
+
+    if (!storagePath) {
+      storagePath = "missing";
+      await adminClient.from("authors").update({ image_path: "missing" }).eq(
+        "id",
+        authorId,
+      );
+    }
+  }
+
+  if (
+    !storagePath || storagePath === "missing" || storagePath.startsWith("/")
+  ) {
+    return new Response("Not found", {
+      status: 404,
+      headers: {
+        "Cache-Control": "public, max-age=31536000, immutable",
+      },
+    });
+  }
+
+  const { data } = adminClient.storage.from("covers").getPublicUrl(storagePath);
+  let publicUrl = data.publicUrl;
+
+  if (
+    publicUrl.includes("127.0.0.1") || publicUrl.includes("localhost") ||
+    publicUrl.includes("host.docker.internal")
+  ) {
+    const origin = getProxyOrigin(c);
+    try {
+      const urlObj = new URL(publicUrl);
+      publicUrl = `${origin}${urlObj.pathname}`;
+    } catch (_e) {
+      // Ignore URL parse errors
+    }
+  }
+
+  c.header("Cache-Control", "public, max-age=31536000, immutable");
+  return c.redirect(publicUrl, 302);
 });
 
 authorsRouter.post("/:id/image", async (c) => {
