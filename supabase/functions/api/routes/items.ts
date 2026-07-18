@@ -203,7 +203,7 @@ itemsRouter.get("/:id/cover", async (c) => {
     return new Response("Not found", {
       status: 404,
       headers: {
-        "Cache-Control": "public, max-age=31536000, immutable",
+        "Cache-Control": "public, max-age=3600, stale-while-revalidate=86400",
       },
     });
   }
