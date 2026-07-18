@@ -69,6 +69,8 @@ app.use("*", async (c, next) => {
     let user = null;
     const isGetCover = urlObj.pathname.includes("/api/items") &&
       urlObj.pathname.endsWith("/cover") && req.method === "GET";
+    const isGetAuthorImage = urlObj.pathname.includes("/api/authors") &&
+      urlObj.pathname.endsWith("/image") && req.method === "GET";
     const isLogin = urlObj.pathname.includes("/api/login");
     const isSignup = urlObj.pathname.includes("/api/signup");
     const isForgotPassword = urlObj.pathname.includes(
@@ -80,7 +82,8 @@ app.use("*", async (c, next) => {
     const isRefresh = urlObj.pathname.includes("/api/auth/refresh");
 
     if (
-      !isGetCover && !isLogin && !isSignup && !isForgotPassword &&
+      !isGetCover && !isGetAuthorImage && !isLogin && !isSignup &&
+      !isForgotPassword &&
       !isResetPassword && !isRefresh
     ) {
       user = await requireUser();
