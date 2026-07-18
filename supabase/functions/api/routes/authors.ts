@@ -70,6 +70,9 @@ authorsRouter.post("/:id/match", async (c) => {
           if (typeof bio === "string" && bio.length > 10) {
             updates.description = bio.slice(0, 2000);
           }
+          if (authorData.photos?.[0]) {
+            doc.photos = authorData.photos;
+          }
         }
       } catch { /* ignore */ }
     }
@@ -127,6 +130,7 @@ authorsRouter.get("/:id/image", async (c) => {
   let storagePath = author.image_path;
 
   if (!storagePath || storagePath.startsWith("/")) {
+    let noPhotoFound = false;
     if (author.name) {
       try {
         const res = await fetch(
@@ -137,31 +141,46 @@ authorsRouter.get("/:id/image", async (c) => {
         if (res.ok) {
           const data = await res.json();
           const doc = data?.docs?.[0];
-          if (doc?.photos?.[0]) {
-            const photoId = doc.photos[0];
-            const photoUrl =
-              `https://covers.openlibrary.org/a/id/${photoId}-L.jpg`;
-            const imgRes = await fetch(photoUrl);
-            if (imgRes.ok) {
-              const buf = await imgRes.arrayBuffer();
-              if (buf.byteLength > 5000) {
-                storagePath = `authors/${authorId}/photo.jpg`;
-                const { error: uploadErr } = await adminClient.storage.from(
-                  "covers",
-                ).upload(
-                  storagePath,
-                  buf,
-                  { upsert: true, contentType: "image/jpeg" },
-                );
-                if (!uploadErr) {
-                  await adminClient.from("authors").update({
-                    image_path: storagePath,
-                  }).eq("id", authorId);
-                } else {
-                  storagePath = null;
+
+          if (doc?.key) {
+            const authorRes = await fetch(
+              `https://openlibrary.org${doc.key}.json`,
+            );
+            if (authorRes.ok) {
+              const authorData = await authorRes.json();
+              if (authorData?.photos?.[0]) {
+                const photoId = authorData.photos[0];
+                const photoUrl =
+                  `https://covers.openlibrary.org/a/id/${photoId}-L.jpg`;
+                const imgRes = await fetch(photoUrl);
+                if (imgRes.ok) {
+                  const buf = await imgRes.arrayBuffer();
+                  if (buf.byteLength > 5000) {
+                    storagePath = `authors/${authorId}/photo.jpg`;
+                    const { error: uploadErr } = await adminClient.storage.from(
+                      "covers",
+                    ).upload(
+                      storagePath,
+                      buf,
+                      { upsert: true, contentType: "image/jpeg" },
+                    );
+                    if (!uploadErr) {
+                      await adminClient.from("authors").update({
+                        image_path: storagePath,
+                      }).eq("id", authorId);
+                    } else {
+                      storagePath = null;
+                    }
+                  } else {
+                    noPhotoFound = true;
+                  }
                 }
+              } else {
+                noPhotoFound = true;
               }
             }
+          } else {
+            noPhotoFound = true;
           }
         }
       } catch (_e) {
@@ -169,7 +188,7 @@ authorsRouter.get("/:id/image", async (c) => {
       }
     }
 
-    if (!storagePath) {
+    if (!storagePath && noPhotoFound) {
       storagePath = "missing";
       await adminClient.from("authors").update({ image_path: "missing" }).eq(
         "id",
