@@ -87,7 +87,7 @@ itemsRouter.get("/:id", async (c) => {
   console.log(`[handleItems] Fetching item ${itemId} for user ${user?.id}`);
   const { data: item, error } = await supabase
     .from("library_items")
-    .select("*, books(*, book_authors(authors(*)), book_series(series(*)))")
+    .select("*, book_authors(authors(*)), book_series(series(*))")
     .eq("id", itemId)
     .single();
 

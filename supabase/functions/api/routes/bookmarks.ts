@@ -29,7 +29,7 @@ bookmarksRouter.get("/", async (c) => {
 bookmarksRouter.post("/", async (c) => {
   const user = c.get("user")!;
   const supabase: any = c.get("supabase");
-  
+
   const body = await c.req.json().catch(() => ({}));
   const { library_item_id, time_pos, title } = body;
 
@@ -59,7 +59,7 @@ bookmarksRouter.patch("/:id", async (c) => {
   const user = c.get("user")!;
   const supabase: any = c.get("supabase");
   const id = c.req.param("id");
-  
+
   const body = await c.req.json().catch(() => ({}));
   const { time_pos, title } = body;
 

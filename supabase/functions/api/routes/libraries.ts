@@ -162,7 +162,7 @@ librariesRouter.get("/:id/items", async (c) => {
   try {
     const { data: items, error, count } = await supabase
       .from("library_items")
-      .select("*, books(*, book_authors(authors(*)), book_series(series(*)))", {
+      .select("*, book_authors(authors(*)), book_series(series(*))", {
         count: "exact",
       })
       .eq("library_id", libraryId)
@@ -228,7 +228,7 @@ librariesRouter.get("/:id/search", async (c) => {
 
   const { data: items, error } = await supabase
     .from("library_items")
-    .select("*, books(*, book_authors(authors(*)), book_series(series(*)))")
+    .select("*, book_authors(authors(*)), book_series(series(*))")
     .eq("library_id", libraryId)
     .ilike("title", `%${q}%`)
     .limit(limit);
@@ -286,7 +286,7 @@ librariesRouter.get("/:id/matchall", async (c) => {
       while (true) {
         const { data: items, error } = await supabase
           .from("library_items")
-          .select("id, title, books(book_authors(authors(name)))")
+          .select("id, title, book_authors(authors(name))")
           .eq("library_id", libraryId)
           .range(offset, offset + limit - 1)
           .order("id");
@@ -294,9 +294,7 @@ librariesRouter.get("/:id/matchall", async (c) => {
         if (error || !items || items.length === 0) break;
 
         for (const item of items) {
-          const bookItem = Array.isArray(item.books)
-            ? item.books[0]
-            : item.books;
+          const bookItem = item;
           const bookAuthors =
             ((bookItem as Record<string, unknown>)?.book_authors as Record<
               string,
@@ -311,7 +309,8 @@ librariesRouter.get("/:id/matchall", async (c) => {
           const result = await fetchBookMetadata(item.title || "", authorName);
 
           if (result && result.metadata) {
-            const updates: Database["public"]["Tables"]["books"]["Update"] = {};
+            const updates:
+              Database["public"]["Tables"]["library_items"]["Update"] = {};
             if (result.metadata.description) {
               updates.description = result.metadata.description;
             }
@@ -327,9 +326,9 @@ librariesRouter.get("/:id/matchall", async (c) => {
             if (result.metadata.genres) updates.genres = result.metadata.genres;
 
             if (Object.keys(updates).length > 0) {
-              await supabase.from("books").update(updates).eq(
+              await supabase.from("library_items").update(updates).eq(
                 "id",
-                (bookItem as Database["public"]["Tables"]["books"]["Row"]).id,
+                bookItem.id,
               );
             }
 
@@ -389,7 +388,7 @@ librariesRouter.get("/:id/series", async (c) => {
   const { data: seriesRows, error, count } = await supabase
     .from("series")
     .select(
-      "*, book_series(book_id, sequence, books(id, title, cover_path, duration, library_items(id, cover_path, updated_at, created_at)))",
+      "*, book_series(library_item_id, sequence, library_items(id, title, cover_path, duration, updated_at, created_at))",
       {
         count: "exact",
       },
@@ -402,17 +401,17 @@ librariesRouter.get("/:id/series", async (c) => {
 
   const results = (seriesRows || []).map((s) => {
     const books = (s.book_series || []).map((bs) => {
-      const book = Array.isArray(bs.books) ? bs.books[0] : bs.books;
+      const book = Array.isArray(bs.library_items)
+        ? bs.library_items[0]
+        : bs.library_items;
       // library_items is a one-to-many from books; take the first match
-      const libraryItem = Array.isArray(book?.library_items)
-        ? book.library_items[0]
-        : book?.library_items;
+      const libraryItem = book;
       // Return a LibraryItem-compatible shape so the frontend cover pipeline
       // (`getLibraryItemCoverSrc` → `GET /api/items/:id/cover`) resolves to the
       // correct `library_items.id` and the dynamic cover fetcher hits the right row.
       // Falling back to the books-table id keeps cards navigable when no
       // library_item exists, even though the cover would 404 in that case.
-      const itemId = libraryItem?.id || bs.book_id;
+      const itemId = libraryItem?.id || bs.library_item_id;
       const coverPath = libraryItem?.cover_path || book?.cover_path || null;
       const toMs = (v: unknown): number | undefined =>
         typeof v === "string" && v
@@ -422,7 +421,7 @@ librariesRouter.get("/:id/series", async (c) => {
         id: itemId,
         sequence: bs.sequence,
         title: book?.title || "",
-        addedAt: toMs(libraryItem?.added_at || libraryItem?.created_at),
+        addedAt: toMs(libraryItem?.created_at),
         updatedAt: toMs(libraryItem?.updated_at),
         media: {
           // books-table id — keys the per-book progress map on the frontend
@@ -515,7 +514,7 @@ librariesRouter.get("/:id/collections", async (c) => {
   const { data: collectionRows, error, count } = await supabase
     .from("collections")
     .select(
-      "*, collection_books(book_id, order, books(id, title, cover_path, duration, library_items(id, cover_path, updated_at, created_at)))",
+      "*, collection_items(library_item_id, order, library_items(id, title, cover_path, duration, updated_at, created_at))",
       { count: "exact" },
     )
     .eq("library_id", libraryId)
@@ -525,12 +524,12 @@ librariesRouter.get("/:id/collections", async (c) => {
   if (error) return c.json({ error: error.message }, 500);
 
   const results = (collectionRows || []).map((cObj) => {
-    const books = (cObj.collection_books || []).map((cb) => {
-      const book = Array.isArray(cb.books) ? cb.books[0] : cb.books;
-      const libraryItem = Array.isArray(book?.library_items)
-        ? book.library_items[0]
-        : book?.library_items;
-      const itemId = libraryItem?.id || cb.book_id;
+    const books = (cObj.collection_items || []).map((cb) => {
+      const book = Array.isArray(cb.library_items)
+        ? cb.library_items[0]
+        : cb.library_items;
+      const libraryItem = book;
+      const itemId = libraryItem?.id || cb.library_item_id;
       const coverPath = libraryItem?.cover_path || book?.cover_path || null;
       return {
         id: itemId,
@@ -586,7 +585,7 @@ librariesRouter.get("/:id/playlists", async (c) => {
   const { data: playlistRows, error, count } = await supabase
     .from("playlists")
     .select(
-      "*, playlist_media_items(media_item_id, order, books(id, title, cover_path, duration, library_items(id, cover_path, updated_at, created_at)))",
+      "*, playlist_media_items(media_item_id, order, library_items(id, title, cover_path, duration, updated_at, created_at))",
       { count: "exact" },
     )
     .eq("library_id", libraryId)
@@ -597,10 +596,10 @@ librariesRouter.get("/:id/playlists", async (c) => {
 
   const results = (playlistRows || []).map((pObj) => {
     const items = (pObj.playlist_media_items || []).map((pm) => {
-      const book = Array.isArray(pm.books) ? pm.books[0] : pm.books;
-      const libraryItem = Array.isArray(book?.library_items)
-        ? book.library_items[0]
-        : book?.library_items;
+      const book = Array.isArray(pm.library_items)
+        ? pm.library_items[0]
+        : pm.library_items;
+      const libraryItem = book;
       const itemId = libraryItem?.id || pm.media_item_id;
       const coverPath = libraryItem?.cover_path || book?.cover_path || null;
       return {
@@ -663,7 +662,7 @@ librariesRouter.get("/:id/personalized", async (c) => {
   // Fetch in a separate query so it stays a simple ORDER BY created_at scan.
   const { data: recentItems } = await supabase
     .from("library_items")
-    .select("*, books(*, book_authors(authors(*)), book_series(series(*)))")
+    .select("*, book_authors(authors(*)), book_series(series(*))")
     .eq("library_id", libraryId)
     .order("created_at", { ascending: false })
     .limit(10);
@@ -702,7 +701,7 @@ librariesRouter.get("/:id/personalized", async (c) => {
       supabase
         .from("media_progress")
         .select(
-          "*, library_items(*, books(*, book_authors(authors(*)), book_series(series(*))))",
+          "*, library_items(*, book_authors(authors(*)), book_series(series(*)))",
         )
         .eq("user_id", user.id)
         .in("library_item_id", libraryItemIds)
@@ -714,7 +713,7 @@ librariesRouter.get("/:id/personalized", async (c) => {
       supabase
         .from("media_progress")
         .select(
-          "*, library_items(*, books(*, book_authors(authors(*)), book_series(series(*))))",
+          "*, library_items(*, book_authors(authors(*)), book_series(series(*)))",
         )
         .eq("user_id", user.id)
         .in("library_item_id", libraryItemIds)

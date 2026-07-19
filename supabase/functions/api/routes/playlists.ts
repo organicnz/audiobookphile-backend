@@ -77,7 +77,7 @@ playlistsRouter.delete("/:id/items", async (c) => {
     "playlist_id",
     playlistId,
   ).eq("media_item_id", item.libraryItemId);
-  // If we had episode differentiation, we'd do it here, but media_item_id maps to book_id generally
+  // If we had episode differentiation, we'd do it here, but media_item_id maps to library_item_id generally
   await query;
 
   const { data, error } = await supabase.from("playlists").select(

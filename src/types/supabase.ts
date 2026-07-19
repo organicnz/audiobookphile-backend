@@ -14,35 +14,35 @@ export type Database = {
   };
   public: {
     Tables: {
-        search_history: {
-          Row: {
-            id: string
-            user_id: string
-            query: string
-            created_at: string
-          }
-          Insert: {
-            id?: string
-            user_id: string
-            query: string
-            created_at?: string
-          }
-          Update: {
-            id?: string
-            user_id?: string
-            query?: string
-            created_at?: string
-          }
-          Relationships: [
-            {
-              foreignKeyName: "search_history_user_id_fkey"
-              columns: ["user_id"]
-              isOneToOne: false
-              referencedRelation: "users"
-              referencedColumns: ["id"]
-            }
-          ]
-        }
+      search_history: {
+        Row: {
+          id: string;
+          user_id: string;
+          query: string;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          query: string;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          user_id?: string;
+          query?: string;
+          created_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "search_history_user_id_fkey";
+            columns: ["user_id"];
+            isOneToOne: false;
+            referencedRelation: "users";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       authors: {
         Row: {
           asin: string | null;
@@ -90,19 +90,19 @@ export type Database = {
       book_authors: {
         Row: {
           author_id: string;
-          book_id: string;
+          library_item_id: string;
           created_at: string | null;
           id: string;
         };
         Insert: {
           author_id: string;
-          book_id: string;
+          library_item_id: string;
           created_at?: string | null;
           id?: string;
         };
         Update: {
           author_id?: string;
-          book_id?: string;
+          library_item_id?: string;
           created_at?: string | null;
           id?: string;
         };
@@ -115,8 +115,8 @@ export type Database = {
             referencedColumns: ["id"];
           },
           {
-            foreignKeyName: "book_authors_book_id_fkey";
-            columns: ["book_id"];
+            foreignKeyName: "book_authors_library_item_id_fkey";
+            columns: ["library_item_id"];
             isOneToOne: false;
             referencedRelation: "books";
             referencedColumns: ["id"];
@@ -125,21 +125,21 @@ export type Database = {
       };
       book_series: {
         Row: {
-          book_id: string;
+          library_item_id: string;
           created_at: string | null;
           id: string;
           sequence: string | null;
           series_id: string;
         };
         Insert: {
-          book_id: string;
+          library_item_id: string;
           created_at?: string | null;
           id?: string;
           sequence?: string | null;
           series_id: string;
         };
         Update: {
-          book_id?: string;
+          library_item_id?: string;
           created_at?: string | null;
           id?: string;
           sequence?: string | null;
@@ -147,8 +147,8 @@ export type Database = {
         };
         Relationships: [
           {
-            foreignKeyName: "book_series_book_id_fkey";
-            columns: ["book_id"];
+            foreignKeyName: "book_series_library_item_id_fkey";
+            columns: ["library_item_id"];
             isOneToOne: false;
             referencedRelation: "books";
             referencedColumns: ["id"];
@@ -237,23 +237,23 @@ export type Database = {
         };
         Relationships: [];
       };
-      collection_books: {
+      collection_items: {
         Row: {
-          book_id: string | null;
+          library_item_id: string | null;
           collection_id: string | null;
           created_at: string;
           id: string;
           order: number | null;
         };
         Insert: {
-          book_id?: string | null;
+          library_item_id?: string | null;
           collection_id?: string | null;
           created_at?: string;
           id: string;
           order?: number | null;
         };
         Update: {
-          book_id?: string | null;
+          library_item_id?: string | null;
           collection_id?: string | null;
           created_at?: string;
           id?: string;
@@ -261,8 +261,8 @@ export type Database = {
         };
         Relationships: [
           {
-            foreignKeyName: "collection_books_book_id_fkey";
-            columns: ["book_id"];
+            foreignKeyName: "collection_books_library_item_id_fkey";
+            columns: ["library_item_id"];
             isOneToOne: false;
             referencedRelation: "books";
             referencedColumns: ["id"];
@@ -661,6 +661,24 @@ export type Database = {
           title: string | null;
           title_ignore_prefix: string | null;
           updated_at: string;
+
+          abridged: boolean | null;
+          asin: string | null;
+          audio_files: Json | null;
+          chapters: Json | null;
+          description: string | null;
+          duration: number | null;
+          ebook_file: Json | null;
+          explicit: boolean | null;
+          genres: Json | null;
+          isbn: string | null;
+          language: string | null;
+          narrators: Json | null;
+          published_date: string | null;
+          published_year: string | null;
+          publisher: string | null;
+          subtitle: string | null;
+          tags: Json | null;
         };
         Insert: {
           author_names_first_last?: string | null;
@@ -689,6 +707,24 @@ export type Database = {
           title?: string | null;
           title_ignore_prefix?: string | null;
           updated_at?: string;
+
+          abridged?: boolean | null;
+          asin?: string | null;
+          audio_files?: Json | null;
+          chapters?: Json | null;
+          description?: string | null;
+          duration?: number | null;
+          ebook_file?: Json | null;
+          explicit?: boolean | null;
+          genres?: Json | null;
+          isbn?: string | null;
+          language?: string | null;
+          narrators?: Json | null;
+          published_date?: string | null;
+          published_year?: string | null;
+          publisher?: string | null;
+          subtitle?: string | null;
+          tags?: Json | null;
         };
         Update: {
           author_names_first_last?: string | null;
@@ -717,6 +753,24 @@ export type Database = {
           title?: string | null;
           title_ignore_prefix?: string | null;
           updated_at?: string;
+
+          abridged?: boolean | null;
+          asin?: string | null;
+          audio_files?: Json | null;
+          chapters?: Json | null;
+          description?: string | null;
+          duration?: number | null;
+          ebook_file?: Json | null;
+          explicit?: boolean | null;
+          genres?: Json | null;
+          isbn?: string | null;
+          language?: string | null;
+          narrators?: Json | null;
+          published_date?: string | null;
+          published_year?: string | null;
+          publisher?: string | null;
+          subtitle?: string | null;
+          tags?: Json | null;
         };
         Relationships: [
           {

@@ -28,13 +28,14 @@ downloadsRouter.get("/:id/download", async (c) => {
   if (itemError || !item) {
     return c.json(
       { error: `Library item not found: ${itemError?.message || ""}` },
-      404
+      404,
     );
   }
 
   const book = Array.isArray(item.books) ? item.books[0] : item.books;
 
-  const audioFilesList = ((book as Record<string, unknown>)?.audio_files || []) as Record<
+  const audioFilesList =
+    ((book as Record<string, unknown>)?.audio_files || []) as Record<
       string,
       unknown
     >[];
@@ -43,8 +44,7 @@ downloadsRouter.get("/:id/download", async (c) => {
     return c.json({ error: "No audio files found for this item" }, 404);
   }
 
-  const totalBookDuration =
-    Number((book as any)?.duration) || 0;
+  const totalBookDuration = Number((book as any)?.duration) || 0;
 
   let totalFilesSize = 0;
   const sortedAudioFiles = [...audioFilesList].map((af) => {
@@ -63,17 +63,19 @@ downloadsRouter.get("/:id/download", async (c) => {
     };
   }).sort((a, b) => a.index - b.index);
 
-  const needsDurationEstimation = sortedAudioFiles.some((af) => af.duration === 0);
+  const needsDurationEstimation = sortedAudioFiles.some((af) =>
+    af.duration === 0
+  );
 
   // Storage provider
   const storage = new StorageRouter(supabase);
-  
+
   // 4 hour signed URLs for downloading
-  const DOWNLOAD_EXPIRY_SECONDS = 4 * 3600; 
-  
+  const DOWNLOAD_EXPIRY_SECONDS = 4 * 3600;
+
   const tracks = [];
   const missingTracks: string[] = [];
-  
+
   for (let i = 0; i < sortedAudioFiles.length; i++) {
     const af = sortedAudioFiles[i];
     const metadata = ((af as any).metadata as Record<string, unknown>) || {};
@@ -96,7 +98,10 @@ downloadsRouter.get("/:id/download", async (c) => {
     let isMissing = false;
 
     try {
-      finalSignedUrl = await storage.getSignedUrl(storagePath, DOWNLOAD_EXPIRY_SECONDS);
+      finalSignedUrl = await storage.getSignedUrl(
+        storagePath,
+        DOWNLOAD_EXPIRY_SECONDS,
+      );
     } catch (e: unknown) {
       const signErr = e as Error;
       console.warn(
@@ -123,15 +128,14 @@ downloadsRouter.get("/:id/download", async (c) => {
   if (tracks.length === 0) {
     return c.json(
       { error: "All audio files are missing from storage. Cannot download." },
-      404
+      404,
     );
   }
-  
+
   // Get Authors
   const bookAuthors = (book?.book_authors as Record<string, unknown>[]) || [];
-  const authors = bookAuthors.map((ba) =>
-    ba.authors as Record<string, unknown>
-  ).filter(Boolean);
+  const authors = bookAuthors.map((ba) => ba.authors as Record<string, unknown>)
+    .filter(Boolean);
   const authorNames = authors.map((a) => String(a.name));
   const authorName = authorNames.join(", ") || "Unknown Author";
 
@@ -139,7 +143,8 @@ downloadsRouter.get("/:id/download", async (c) => {
     libraryItemId,
     title: String(book?.title || item.title || "Unknown Title"),
     author: authorName,
-    duration: totalBookDuration || tracks.reduce((acc, t) => acc + t.duration, 0),
+    duration: totalBookDuration ||
+      tracks.reduce((acc, t) => acc + t.duration, 0),
     totalSize: totalFilesSize,
     tracks: tracks,
   };

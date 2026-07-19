@@ -66,16 +66,11 @@ export type Chapter = {
   end?: number;
 };
 
-type JoinedBook = BookRow & {
-  book_authors?: JoinedAuthor[] | null;
-  book_series?: JoinedSeries[] | null;
-};
-
 // Using typed intersection for join results; only add fields actually accessed
 export type LibraryItemWithBooks = LibraryItemRow & {
-  books?: JoinedBook | JoinedBook[] | null;
+  book_authors?: JoinedAuthor[] | null;
+  book_series?: JoinedSeries[] | null;
   folder_id?: string | null;
-  duration?: number | null;
   added_at?: string | null;
   mtime?: string | null;
   ctime?: string | null;
@@ -153,8 +148,7 @@ export function mapBookForMobile(
   item: LibraryItemWithBooks,
   progressRecord?: MediaProgressRow | null,
 ): MobileBook {
-  const book = Array.isArray(item.books) ? item.books[0] : item.books;
-  const bookRecord = book || ({} as Partial<JoinedBook>);
+  const bookRecord = item;
 
   // 1. Authors
   const authorsList = bookRecord.book_authors || [];

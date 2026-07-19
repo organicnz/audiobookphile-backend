@@ -82,7 +82,10 @@ authorsRouter.post("/:id/match", async (c) => {
     }
 
     const db = createClient(supabaseUrl, serviceRoleKey);
-    const storagePath = await fetchAuthorAvatar(db, { id: authorId, name: authorName });
+    const storagePath = await fetchAuthorAvatar(db, {
+      id: authorId,
+      name: authorName,
+    });
     if (storagePath) {
       updates.image_path = storagePath;
     }
@@ -101,8 +104,6 @@ authorsRouter.post("/:id/match", async (c) => {
     return c.json({ error: err.message }, 500);
   }
 });
-
-
 
 authorsRouter.post("/:id/image", async (c) => {
   const user = c.get("user")!;

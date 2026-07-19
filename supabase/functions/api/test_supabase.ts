@@ -9,7 +9,9 @@ const supabase = createClient(supabaseUrl, supabaseKey);
 async function test() {
   const { data, error: _error } = await supabase
     .from("series")
-    .select("*, book_series(book_id, sequence, library_items(id, title, cover_path))")
+    .select(
+      "*, book_series(book_id, sequence, library_items(id, title, cover_path))",
+    )
     .limit(1);
 
   console.log(JSON.stringify(data, null, 2));
