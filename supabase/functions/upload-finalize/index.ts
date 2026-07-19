@@ -311,11 +311,11 @@ Deno.serve(async (req) => {
       await db.from("book_authors").delete().eq("book_id", bookId);
 
       // Split on /, comma, or " & " / " and "
-      const rawAuthors = author.split(/\s*(?:\/|,|&|\band\b)\s*/i).map((a) =>
-        a.trim()
-      ).filter(Boolean);
+      const rawAuthors = author.split(/\s*(?:\/|,|&|\band\b)\s*/i).map((
+        a: string,
+      ) => a.trim()).filter(Boolean);
 
-      const cleanAuthors = rawAuthors.map((a) => {
+      const cleanAuthors = rawAuthors.map((a: string) => {
         let name = a;
         // Strip leaked titles if appended via " - "
         const dashSplit = name.split(" - ");
@@ -369,9 +369,9 @@ Deno.serve(async (req) => {
       await db.from("book_series").delete().eq("book_id", bookId);
 
       // Split series just in case, although less common
-      const rawSeries = series.split(/\s*(?:\/|,|&|\band\b)\s*/i).map((s) =>
-        s.trim()
-      ).filter(Boolean);
+      const rawSeries = series.split(/\s*(?:\/|,|&|\band\b)\s*/i).map((
+        s: string,
+      ) => s.trim()).filter(Boolean);
       const uniqueSeries = Array.from(new Set(rawSeries));
 
       for (const singleSeries of uniqueSeries) {
