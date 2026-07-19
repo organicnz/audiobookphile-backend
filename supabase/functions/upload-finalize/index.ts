@@ -311,22 +311,24 @@ Deno.serve(async (req) => {
       await db.from("book_authors").delete().eq("book_id", bookId);
 
       // Split on /, comma, or " & " / " and "
-      const rawAuthors = author.split(/\s*(?:\/|,|&|\band\b)\s*/i).map(a => a.trim()).filter(Boolean);
-      
-      const cleanAuthors = rawAuthors.map(a => {
+      const rawAuthors = author.split(/\s*(?:\/|,|&|\band\b)\s*/i).map((a) =>
+        a.trim()
+      ).filter(Boolean);
+
+      const cleanAuthors = rawAuthors.map((a) => {
         let name = a;
         // Strip leaked titles if appended via " - "
         const dashSplit = name.split(" - ");
         if (dashSplit.length > 1) {
           name = dashSplit[0];
         }
-        
+
         // Strip common degrees
         name = name.replace(/\b(Ph\.?D\.?|M\.?D\.?)\b/gi, "");
-        
+
         // Remove periods after initials
         name = name.replace(/([A-Za-z])\./g, "$1");
-        
+
         // Collapse spaces
         return name.replace(/\s+/g, " ").trim();
       }).filter(Boolean);
@@ -341,10 +343,11 @@ Deno.serve(async (req) => {
           library_id: libraryId,
         }, { onConflict: "library_id, name", ignoreDuplicates: true });
 
-        const { data: existingAuthor } = await db.from("authors").select("id").eq(
-          "name",
-          singleAuthor,
-        ).eq("library_id", libraryId).single();
+        const { data: existingAuthor } = await db.from("authors").select("id")
+          .eq(
+            "name",
+            singleAuthor,
+          ).eq("library_id", libraryId).single();
 
         const authorId = existingAuthor?.id;
         if (authorId) {
@@ -366,7 +369,9 @@ Deno.serve(async (req) => {
       await db.from("book_series").delete().eq("book_id", bookId);
 
       // Split series just in case, although less common
-      const rawSeries = series.split(/\s*(?:\/|,|&|\band\b)\s*/i).map(s => s.trim()).filter(Boolean);
+      const rawSeries = series.split(/\s*(?:\/|,|&|\band\b)\s*/i).map((s) =>
+        s.trim()
+      ).filter(Boolean);
       const uniqueSeries = Array.from(new Set(rawSeries));
 
       for (const singleSeries of uniqueSeries) {
@@ -376,10 +381,11 @@ Deno.serve(async (req) => {
           library_id: libraryId,
         }, { onConflict: "library_id, name", ignoreDuplicates: true });
 
-        const { data: existingSeries } = await db.from("series").select("id").eq(
-          "name",
-          singleSeries,
-        ).eq("library_id", libraryId).single();
+        const { data: existingSeries } = await db.from("series").select("id")
+          .eq(
+            "name",
+            singleSeries,
+          ).eq("library_id", libraryId).single();
 
         const seriesId = existingSeries?.id;
         if (seriesId) {

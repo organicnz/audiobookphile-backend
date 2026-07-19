@@ -17,7 +17,10 @@ Deno.serve(async (req) => {
   const authHeader = req.headers.get("Authorization");
   let isAdmin = false;
   const envCronSecret = Deno.env.get("CRON_SECRET");
-  const cronSecret = (typeof envCronSecret === "string" && envCronSecret.length > 0) ? envCronSecret : "fallback_secret";
+  const cronSecret =
+    (typeof envCronSecret === "string" && envCronSecret.length > 0)
+      ? envCronSecret
+      : "fallback_secret";
 
   if (authHeader === `Bearer ${cronSecret}`) {
     isAdmin = true;
@@ -72,27 +75,39 @@ Deno.serve(async (req) => {
         for (const author of authors) {
           if (!author.name) continue;
 
-          console.log(`[Sync Authors] Fetching avatar for: "${author.name}"...`);
+          console.log(
+            `[Sync Authors] Fetching avatar for: "${author.name}"...`,
+          );
           try {
             await sleep(1500); // Rate limit protection
             const storagePath = await fetchAuthorAvatar(adminClient, author);
 
             if (storagePath) {
-              await adminClient.from("authors").update({ image_path: storagePath }).eq("id", author.id);
+              await adminClient.from("authors").update({
+                image_path: storagePath,
+              }).eq("id", author.id);
               successCount++;
             } else {
               // If we thoroughly checked and no photo was found (even DiceBear failed), mark as missing
-              await adminClient.from("authors").update({ image_path: "missing" }).eq("id", author.id);
+              await adminClient.from("authors").update({
+                image_path: "missing",
+              }).eq("id", author.id);
               notFoundCount++;
-              console.log(`[Sync Authors] No avatar found for "${author.name}" - marked as missing.`);
+              console.log(
+                `[Sync Authors] No avatar found for "${author.name}" - marked as missing.`,
+              );
             }
-
           } catch (e: any) {
-            console.error(`[Sync Authors] Error processing ${author.name}:`, e.message);
+            console.error(
+              `[Sync Authors] Error processing ${author.name}:`,
+              e.message,
+            );
             errorCount++;
           }
         }
-        console.log(`[Sync Authors] Background task complete. Success: ${successCount}, Not Found: ${notFoundCount}, Errors: ${errorCount}`);
+        console.log(
+          `[Sync Authors] Background task complete. Success: ${successCount}, Not Found: ${notFoundCount}, Errors: ${errorCount}`,
+        );
       };
 
       // Offload actual fetching to background
