@@ -786,3 +786,19 @@ librariesRouter.get("/:id/personalized", async (c) => {
 
   return c.json(shelves);
 });
+
+librariesRouter.get("/:id/stats", async (c) => {
+  const supabase = c.get("supabase");
+  const libraryId = c.req.param("id");
+
+  const { data, error } = await (supabase.rpc as any)("get_library_stats", {
+    p_library_id: libraryId,
+  });
+
+  if (error) {
+    console.error("[get_library_stats] Error:", error);
+    return c.json({ error: error.message }, 500);
+  }
+
+  return c.json(data);
+});

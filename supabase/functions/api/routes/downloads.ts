@@ -146,3 +146,48 @@ downloadsRouter.get("/:id/download", async (c) => {
 
   return c.json(manifest);
 });
+
+downloadsRouter.get("/:id/file/:fileId/download", async (c) => {
+  const supabase = c.get("supabase");
+  const libraryItemId = c.req.param("id");
+  const fileId = c.req.param("fileId");
+
+  const { data: item, error: itemError } = await supabase
+    .from("library_items")
+    .select("audio_files")
+    .eq("id", libraryItemId)
+    .maybeSingle();
+
+  if (itemError || !item) {
+    return c.json({ error: "Item not found" }, 404);
+  }
+
+  const audioFiles = (item.audio_files as any[]) || [];
+  const file = audioFiles.find((f: any) =>
+    String(f.ino) === fileId || String(f.id) === fileId
+  );
+
+  if (!file) {
+    return c.json({ error: "File not found" }, 404);
+  }
+
+  const storagePath = String(
+    file.metadata?.path || file.storage_path || file.path || "",
+  );
+  if (!storagePath) {
+    return c.json({ error: "Storage path not found" }, 404);
+  }
+
+  const storage = new StorageRouter(supabase);
+  const DOWNLOAD_EXPIRY_SECONDS = 4 * 3600;
+
+  try {
+    const signedUrl = await storage.getSignedUrl(
+      storagePath,
+      DOWNLOAD_EXPIRY_SECONDS,
+    );
+    return c.json({ url: signedUrl });
+  } catch (e: unknown) {
+    return c.json({ error: (e as Error).message }, 500);
+  }
+});

@@ -1,10 +1,10 @@
-// ⚠️  AUTO-GENERATED — DO NOT EDIT DIRECTLY
-// Run `npm run gen:types` in audiobookphile-backend to regenerate from the live database.
-// This file is kept in sync with audiobookphile-web/src/types/supabase.ts via that script.
-
-export type Json = string | number | boolean | null | {
-  [key: string]: Json | undefined;
-} | Json[];
+export type Json =
+  | string
+  | number
+  | boolean
+  | null
+  | { [key: string]: Json | undefined }
+  | Json[];
 
 export type Database = {
   // Allows to automatically instantiate createClient with right options
@@ -14,155 +14,7 @@ export type Database = {
   };
   public: {
     Tables: {
-      search_history: {
-        Row: {
-          id: string;
-          user_id: string;
-          query: string;
-          created_at: string;
-        };
-        Insert: {
-          id?: string;
-          user_id: string;
-          query: string;
-          created_at?: string;
-        };
-        Update: {
-          id?: string;
-          user_id?: string;
-          query?: string;
-          created_at?: string;
-        };
-        Relationships: [
-          {
-            foreignKeyName: "search_history_user_id_fkey";
-            columns: ["user_id"];
-            isOneToOne: false;
-            referencedRelation: "users";
-            referencedColumns: ["id"];
-          },
-        ];
-      };
-      authors: {
-        Row: {
-          asin: string | null;
-          created_at: string;
-          description: string | null;
-          id: string;
-          image_path: string | null;
-          last_first: string | null;
-          library_id: string | null;
-          name: string | null;
-          updated_at: string;
-        };
-        Insert: {
-          asin?: string | null;
-          created_at?: string;
-          description?: string | null;
-          id: string;
-          image_path?: string | null;
-          last_first?: string | null;
-          library_id?: string | null;
-          name?: string | null;
-          updated_at?: string;
-        };
-        Update: {
-          asin?: string | null;
-          created_at?: string;
-          description?: string | null;
-          id?: string;
-          image_path?: string | null;
-          last_first?: string | null;
-          library_id?: string | null;
-          name?: string | null;
-          updated_at?: string;
-        };
-        Relationships: [
-          {
-            foreignKeyName: "authors_library_id_fkey";
-            columns: ["library_id"];
-            isOneToOne: false;
-            referencedRelation: "libraries";
-            referencedColumns: ["id"];
-          },
-        ];
-      };
-      book_authors: {
-        Row: {
-          author_id: string;
-          library_item_id: string;
-          created_at: string | null;
-          id: string;
-        };
-        Insert: {
-          author_id: string;
-          library_item_id: string;
-          created_at?: string | null;
-          id?: string;
-        };
-        Update: {
-          author_id?: string;
-          library_item_id?: string;
-          created_at?: string | null;
-          id?: string;
-        };
-        Relationships: [
-          {
-            foreignKeyName: "book_authors_author_id_fkey";
-            columns: ["author_id"];
-            isOneToOne: false;
-            referencedRelation: "authors";
-            referencedColumns: ["id"];
-          },
-          {
-            foreignKeyName: "book_authors_library_item_id_fkey";
-            columns: ["library_item_id"];
-            isOneToOne: false;
-            referencedRelation: "books";
-            referencedColumns: ["id"];
-          },
-        ];
-      };
-      book_series: {
-        Row: {
-          library_item_id: string;
-          created_at: string | null;
-          id: string;
-          sequence: string | null;
-          series_id: string;
-        };
-        Insert: {
-          library_item_id: string;
-          created_at?: string | null;
-          id?: string;
-          sequence?: string | null;
-          series_id: string;
-        };
-        Update: {
-          library_item_id?: string;
-          created_at?: string | null;
-          id?: string;
-          sequence?: string | null;
-          series_id?: string;
-        };
-        Relationships: [
-          {
-            foreignKeyName: "book_series_library_item_id_fkey";
-            columns: ["library_item_id"];
-            isOneToOne: false;
-            referencedRelation: "books";
-            referencedColumns: ["id"];
-          },
-          {
-            foreignKeyName: "book_series_series_id_fkey";
-            columns: ["series_id"];
-            isOneToOne: false;
-            referencedRelation: "series";
-            referencedColumns: ["id"];
-          },
-        ];
-      };
-      books: {
+      _backup_books_v1: {
         Row: {
           abridged: boolean | null;
           asin: string | null;
@@ -237,41 +89,160 @@ export type Database = {
         };
         Relationships: [];
       };
-      collection_items: {
+      authors: {
         Row: {
-          library_item_id: string | null;
-          collection_id: string | null;
+          asin: string | null;
           created_at: string;
+          description: string | null;
           id: string;
-          order: number | null;
+          image_path: string | null;
+          last_first: string | null;
+          library_id: string | null;
+          name: string | null;
+          updated_at: string;
         };
         Insert: {
-          library_item_id?: string | null;
-          collection_id?: string | null;
+          asin?: string | null;
           created_at?: string;
+          description?: string | null;
           id: string;
-          order?: number | null;
+          image_path?: string | null;
+          last_first?: string | null;
+          library_id?: string | null;
+          name?: string | null;
+          updated_at?: string;
         };
         Update: {
-          library_item_id?: string | null;
-          collection_id?: string | null;
+          asin?: string | null;
           created_at?: string;
+          description?: string | null;
           id?: string;
-          order?: number | null;
+          image_path?: string | null;
+          last_first?: string | null;
+          library_id?: string | null;
+          name?: string | null;
+          updated_at?: string;
         };
         Relationships: [
           {
-            foreignKeyName: "collection_books_library_item_id_fkey";
-            columns: ["library_item_id"];
+            foreignKeyName: "authors_library_id_fkey";
+            columns: ["library_id"];
             isOneToOne: false;
-            referencedRelation: "books";
+            referencedRelation: "libraries";
             referencedColumns: ["id"];
           },
+        ];
+      };
+      book_authors: {
+        Row: {
+          author_id: string;
+          created_at: string | null;
+          id: string;
+          library_item_id: string;
+        };
+        Insert: {
+          author_id: string;
+          created_at?: string | null;
+          id?: string;
+          library_item_id: string;
+        };
+        Update: {
+          author_id?: string;
+          created_at?: string | null;
+          id?: string;
+          library_item_id?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "book_authors_author_id_fkey";
+            columns: ["author_id"];
+            isOneToOne: false;
+            referencedRelation: "authors";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "book_authors_library_item_id_fkey";
+            columns: ["library_item_id"];
+            isOneToOne: false;
+            referencedRelation: "library_items";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      book_series: {
+        Row: {
+          created_at: string | null;
+          id: string;
+          library_item_id: string;
+          sequence: string | null;
+          series_id: string;
+        };
+        Insert: {
+          created_at?: string | null;
+          id?: string;
+          library_item_id: string;
+          sequence?: string | null;
+          series_id: string;
+        };
+        Update: {
+          created_at?: string | null;
+          id?: string;
+          library_item_id?: string;
+          sequence?: string | null;
+          series_id?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "book_series_library_item_id_fkey";
+            columns: ["library_item_id"];
+            isOneToOne: false;
+            referencedRelation: "library_items";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "book_series_series_id_fkey";
+            columns: ["series_id"];
+            isOneToOne: false;
+            referencedRelation: "series";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      collection_items: {
+        Row: {
+          collection_id: string | null;
+          created_at: string;
+          id: string;
+          library_item_id: string | null;
+          order: number | null;
+        };
+        Insert: {
+          collection_id?: string | null;
+          created_at?: string;
+          id: string;
+          library_item_id?: string | null;
+          order?: number | null;
+        };
+        Update: {
+          collection_id?: string | null;
+          created_at?: string;
+          id?: string;
+          library_item_id?: string | null;
+          order?: number | null;
+        };
+        Relationships: [
           {
             foreignKeyName: "collection_books_collection_id_fkey";
             columns: ["collection_id"];
             isOneToOne: false;
             referencedRelation: "collections";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "collection_items_library_item_id_fkey";
+            columns: ["library_item_id"];
+            isOneToOne: false;
+            referencedRelation: "library_items";
             referencedColumns: ["id"];
           },
         ];
@@ -635,18 +606,29 @@ export type Database = {
       };
       library_items: {
         Row: {
+          abridged: boolean | null;
+          asin: string | null;
+          audio_files: Json | null;
           author_names_first_last: string | null;
           author_names_last_first: string | null;
           birthtime: string | null;
+          chapters: Json | null;
           cover_path: string | null;
           created_at: string;
           ctime: string | null;
+          description: string | null;
+          duration: number | null;
+          ebook_file: Json | null;
+          explicit: boolean | null;
           extra_data: Json | null;
+          genres: Json | null;
           id: string;
           ino: string | null;
           is_file: boolean | null;
           is_invalid: boolean | null;
           is_missing: boolean | null;
+          isbn: string | null;
+          language: string | null;
           last_scan: string | null;
           last_scan_version: string | null;
           last_storage_check: string | null;
@@ -655,44 +637,43 @@ export type Database = {
           media_id: string | null;
           media_type: string | null;
           mtime: string | null;
-          path: string | null;
-          rel_path: string | null;
-          size: number | null;
-          title: string | null;
-          title_ignore_prefix: string | null;
-          updated_at: string;
-
-          abridged: boolean | null;
-          asin: string | null;
-          audio_files: Json | null;
-          chapters: Json | null;
-          description: string | null;
-          duration: number | null;
-          ebook_file: Json | null;
-          explicit: boolean | null;
-          genres: Json | null;
-          isbn: string | null;
-          language: string | null;
           narrators: Json | null;
+          path: string | null;
           published_date: string | null;
           published_year: string | null;
           publisher: string | null;
+          rel_path: string | null;
+          size: number | null;
           subtitle: string | null;
           tags: Json | null;
+          title: string | null;
+          title_ignore_prefix: string | null;
+          updated_at: string;
         };
         Insert: {
+          abridged?: boolean | null;
+          asin?: string | null;
+          audio_files?: Json | null;
           author_names_first_last?: string | null;
           author_names_last_first?: string | null;
           birthtime?: string | null;
+          chapters?: Json | null;
           cover_path?: string | null;
           created_at?: string;
           ctime?: string | null;
+          description?: string | null;
+          duration?: number | null;
+          ebook_file?: Json | null;
+          explicit?: boolean | null;
           extra_data?: Json | null;
+          genres?: Json | null;
           id: string;
           ino?: string | null;
           is_file?: boolean | null;
           is_invalid?: boolean | null;
           is_missing?: boolean | null;
+          isbn?: string | null;
+          language?: string | null;
           last_scan?: string | null;
           last_scan_version?: string | null;
           last_storage_check?: string | null;
@@ -701,44 +682,43 @@ export type Database = {
           media_id?: string | null;
           media_type?: string | null;
           mtime?: string | null;
+          narrators?: Json | null;
           path?: string | null;
+          published_date?: string | null;
+          published_year?: string | null;
+          publisher?: string | null;
           rel_path?: string | null;
           size?: number | null;
+          subtitle?: string | null;
+          tags?: Json | null;
           title?: string | null;
           title_ignore_prefix?: string | null;
           updated_at?: string;
-
+        };
+        Update: {
           abridged?: boolean | null;
           asin?: string | null;
           audio_files?: Json | null;
+          author_names_first_last?: string | null;
+          author_names_last_first?: string | null;
+          birthtime?: string | null;
           chapters?: Json | null;
+          cover_path?: string | null;
+          created_at?: string;
+          ctime?: string | null;
           description?: string | null;
           duration?: number | null;
           ebook_file?: Json | null;
           explicit?: boolean | null;
-          genres?: Json | null;
-          isbn?: string | null;
-          language?: string | null;
-          narrators?: Json | null;
-          published_date?: string | null;
-          published_year?: string | null;
-          publisher?: string | null;
-          subtitle?: string | null;
-          tags?: Json | null;
-        };
-        Update: {
-          author_names_first_last?: string | null;
-          author_names_last_first?: string | null;
-          birthtime?: string | null;
-          cover_path?: string | null;
-          created_at?: string;
-          ctime?: string | null;
           extra_data?: Json | null;
+          genres?: Json | null;
           id?: string;
           ino?: string | null;
           is_file?: boolean | null;
           is_invalid?: boolean | null;
           is_missing?: boolean | null;
+          isbn?: string | null;
+          language?: string | null;
           last_scan?: string | null;
           last_scan_version?: string | null;
           last_storage_check?: string | null;
@@ -747,30 +727,18 @@ export type Database = {
           media_id?: string | null;
           media_type?: string | null;
           mtime?: string | null;
-          path?: string | null;
-          rel_path?: string | null;
-          size?: number | null;
-          title?: string | null;
-          title_ignore_prefix?: string | null;
-          updated_at?: string;
-
-          abridged?: boolean | null;
-          asin?: string | null;
-          audio_files?: Json | null;
-          chapters?: Json | null;
-          description?: string | null;
-          duration?: number | null;
-          ebook_file?: Json | null;
-          explicit?: boolean | null;
-          genres?: Json | null;
-          isbn?: string | null;
-          language?: string | null;
           narrators?: Json | null;
+          path?: string | null;
           published_date?: string | null;
           published_year?: string | null;
           publisher?: string | null;
+          rel_path?: string | null;
+          size?: number | null;
           subtitle?: string | null;
           tags?: Json | null;
+          title?: string | null;
+          title_ignore_prefix?: string | null;
+          updated_at?: string;
         };
         Relationships: [
           {
@@ -778,13 +746,6 @@ export type Database = {
             columns: ["library_id"];
             isOneToOne: false;
             referencedRelation: "libraries";
-            referencedColumns: ["id"];
-          },
-          {
-            foreignKeyName: "library_items_media_id_fkey";
-            columns: ["media_id"];
-            isOneToOne: false;
-            referencedRelation: "books";
             referencedColumns: ["id"];
           },
         ];
@@ -1251,6 +1212,27 @@ export type Database = {
           },
         ];
       };
+      search_history: {
+        Row: {
+          created_at: string | null;
+          id: string;
+          query: string;
+          user_id: string;
+        };
+        Insert: {
+          created_at?: string | null;
+          id?: string;
+          query: string;
+          user_id: string;
+        };
+        Update: {
+          created_at?: string | null;
+          id?: string;
+          query?: string;
+          user_id?: string;
+        };
+        Relationships: [];
+      };
       sequelize_meta: {
         Row: {
           name: string;
@@ -1327,7 +1309,17 @@ export type Database = {
       [_ in never]: never;
     };
     Functions: {
-      [_ in never]: never;
+      get_library_stats: { Args: { p_library_id: string }; Returns: Json };
+      is_admin: { Args: never; Returns: boolean };
+      merge_authors: {
+        Args: {
+          p_library_id: string;
+          p_source_name: string;
+          p_target_name: string;
+        };
+        Returns: undefined;
+      };
+      sync_author_avatars: { Args: never; Returns: undefined };
     };
     Enums: {
       [_ in never]: never;
@@ -1371,20 +1363,22 @@ export type Tables<
     Row: infer R;
   } ? R
   : never
-  : DefaultSchemaTableNameOrOptions extends
-    keyof (DefaultSchema["Tables"] & DefaultSchema["Views"])
-    ? (DefaultSchema["Tables"] & DefaultSchema["Views"])[
-      DefaultSchemaTableNameOrOptions
-    ] extends {
+  : DefaultSchemaTableNameOrOptions extends keyof (
+    & DefaultSchema["Tables"]
+    & DefaultSchema["Views"]
+  ) ? (
+      & DefaultSchema["Tables"]
+      & DefaultSchema["Views"]
+    )[DefaultSchemaTableNameOrOptions] extends {
       Row: infer R;
     } ? R
     : never
   : never;
 
 export type TablesInsert<
-  DefaultSchemaTableNameOrOptions extends keyof DefaultSchema["Tables"] | {
-    schema: keyof DatabaseWithoutInternals;
-  },
+  DefaultSchemaTableNameOrOptions extends
+    | keyof DefaultSchema["Tables"]
+    | { schema: keyof DatabaseWithoutInternals },
   TableName extends DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals;
   } ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]][
@@ -1407,9 +1401,9 @@ export type TablesInsert<
   : never;
 
 export type TablesUpdate<
-  DefaultSchemaTableNameOrOptions extends keyof DefaultSchema["Tables"] | {
-    schema: keyof DatabaseWithoutInternals;
-  },
+  DefaultSchemaTableNameOrOptions extends
+    | keyof DefaultSchema["Tables"]
+    | { schema: keyof DatabaseWithoutInternals },
   TableName extends DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals;
   } ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]][
@@ -1432,9 +1426,9 @@ export type TablesUpdate<
   : never;
 
 export type Enums<
-  DefaultSchemaEnumNameOrOptions extends keyof DefaultSchema["Enums"] | {
-    schema: keyof DatabaseWithoutInternals;
-  },
+  DefaultSchemaEnumNameOrOptions extends
+    | keyof DefaultSchema["Enums"]
+    | { schema: keyof DatabaseWithoutInternals },
   EnumName extends DefaultSchemaEnumNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals;
   } ? keyof DatabaseWithoutInternals[DefaultSchemaEnumNameOrOptions["schema"]][
