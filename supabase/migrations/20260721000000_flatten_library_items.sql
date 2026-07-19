@@ -2,24 +2,24 @@
 
 -- 1. Add columns to `library_items`
 ALTER TABLE public.library_items
-ADD COLUMN abridged boolean,
-ADD COLUMN asin text,
-ADD COLUMN audio_files jsonb,
-ADD COLUMN chapters jsonb,
-ADD COLUMN description text,
-ADD COLUMN duration numeric,
-ADD COLUMN ebook_file jsonb,
-ADD COLUMN explicit boolean,
-ADD COLUMN genres jsonb,
-ADD COLUMN isbn text,
-ADD COLUMN language text,
-ADD COLUMN narrators jsonb,
-ADD COLUMN published_date text,
-ADD COLUMN published_year text,
-ADD COLUMN publisher text,
-ADD COLUMN subtitle text,
-ADD COLUMN tags jsonb,
-ADD COLUMN title text;
+ADD COLUMN IF NOT EXISTS abridged boolean,
+ADD COLUMN IF NOT EXISTS asin text,
+ADD COLUMN IF NOT EXISTS audio_files jsonb,
+ADD COLUMN IF NOT EXISTS chapters jsonb,
+ADD COLUMN IF NOT EXISTS description text,
+ADD COLUMN IF NOT EXISTS duration numeric,
+ADD COLUMN IF NOT EXISTS ebook_file jsonb,
+ADD COLUMN IF NOT EXISTS explicit boolean,
+ADD COLUMN IF NOT EXISTS genres jsonb,
+ADD COLUMN IF NOT EXISTS isbn text,
+ADD COLUMN IF NOT EXISTS language text,
+ADD COLUMN IF NOT EXISTS narrators jsonb,
+ADD COLUMN IF NOT EXISTS published_date text,
+ADD COLUMN IF NOT EXISTS published_year text,
+ADD COLUMN IF NOT EXISTS publisher text,
+ADD COLUMN IF NOT EXISTS subtitle text,
+ADD COLUMN IF NOT EXISTS tags jsonb,
+ADD COLUMN IF NOT EXISTS title text;
 
 -- 2. Migrate data from `books` to `library_items`
 UPDATE public.library_items
