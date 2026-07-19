@@ -22,17 +22,14 @@ export class PlaybackService {
       .from("library_items")
       .select(`
         *,
-        books (
-          *,
-          book_authors (
-            authors (
-              *
-            )
-          ),
-          book_series (
-            series (
-              *
-            )
+        book_authors (
+          authors (
+            *
+          )
+        ),
+        book_series (
+          series (
+            *
           )
         )
       `)
@@ -47,11 +44,8 @@ export class PlaybackService {
       );
     }
 
-    const book = Array.isArray(item.books)
-      ? (item.books as Record<string, unknown>[])[0]
-      : item.books as Record<string, unknown>;
-    const audioFilesList = (book?.audio_files ||
-      (item.books as Record<string, unknown>)?.audio_files || []) as Record<
+    const audioFilesList =
+      ((item as Record<string, unknown>)?.audio_files || []) as Record<
         string,
         unknown
       >[];
@@ -60,8 +54,7 @@ export class PlaybackService {
       throw new Error("No audio files found for this item");
     }
 
-    const totalBookDuration =
-      Number(book?.duration || (item as any).duration) || 0;
+    const totalBookDuration = Number((item as any).duration) || 0;
 
     let totalFilesSize = 0;
     const sortedAudioFiles = [...audioFilesList].map((af) => {
@@ -167,7 +160,7 @@ export class PlaybackService {
       : 0;
 
     // Get Authors
-    const bookAuthors = (book?.book_authors as Record<string, unknown>[]) || [];
+    const bookAuthors = (item?.book_authors as Record<string, unknown>[]) || [];
     const authors = bookAuthors.map((ba) =>
       ba.authors as Record<string, unknown>
     ).filter(Boolean);
@@ -175,7 +168,7 @@ export class PlaybackService {
     const authorName = authorNames.join(", ") || "Unknown Author";
 
     // Get Chapters
-    const chaptersList = (book?.chapters as Record<string, unknown>[]) || [];
+    const chaptersList = (item?.chapters as Record<string, unknown>[]) || [];
     const chapters = chaptersList.map((ch, index) => ({
       id: ch.chapter_index !== undefined
         ? Number(ch.chapter_index)
@@ -187,7 +180,7 @@ export class PlaybackService {
     })).sort((a, b) => Number(a.id) - Number(b.id));
 
     const nowMs = Date.now();
-    const totalDuration = Number(book?.duration || (item as any).duration) ||
+    const totalDuration = Number((item as any).duration) ||
       currentOffset;
     const sessionUuid = crypto.randomUUID();
 
@@ -198,9 +191,9 @@ export class PlaybackService {
       libraryItemId: libraryItemId,
       episodeId: episodeId || undefined,
 
-      displayTitle: book?.title || item.title || "Unknown Title",
+      displayTitle: item.title || "Unknown Title",
       displayAuthor: authorName,
-      coverPath: item.cover_path || book?.cover_path || null,
+      coverPath: item.cover_path || null,
 
       duration: totalDuration,
       playMethod: 0,

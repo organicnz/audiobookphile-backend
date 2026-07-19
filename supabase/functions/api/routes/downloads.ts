@@ -13,12 +13,9 @@ downloadsRouter.get("/:id/download", async (c) => {
     .from("library_items")
     .select(`
       *,
-      books (
-        *,
-        book_authors (
-          authors (
-            *
-          )
+      book_authors (
+        authors (
+          *
         )
       )
     `)
@@ -32,10 +29,8 @@ downloadsRouter.get("/:id/download", async (c) => {
     );
   }
 
-  const book = Array.isArray(item.books) ? item.books[0] : item.books;
-
   const audioFilesList =
-    ((book as Record<string, unknown>)?.audio_files || []) as Record<
+    ((item as Record<string, unknown>)?.audio_files || []) as Record<
       string,
       unknown
     >[];
@@ -44,7 +39,7 @@ downloadsRouter.get("/:id/download", async (c) => {
     return c.json({ error: "No audio files found for this item" }, 404);
   }
 
-  const totalBookDuration = Number((book as any)?.duration) || 0;
+  const totalBookDuration = Number((item as any)?.duration) || 0;
 
   let totalFilesSize = 0;
   const sortedAudioFiles = [...audioFilesList].map((af) => {
@@ -133,7 +128,7 @@ downloadsRouter.get("/:id/download", async (c) => {
   }
 
   // Get Authors
-  const bookAuthors = (book?.book_authors as Record<string, unknown>[]) || [];
+  const bookAuthors = (item?.book_authors as Record<string, unknown>[]) || [];
   const authors = bookAuthors.map((ba) => ba.authors as Record<string, unknown>)
     .filter(Boolean);
   const authorNames = authors.map((a) => String(a.name));
@@ -141,7 +136,7 @@ downloadsRouter.get("/:id/download", async (c) => {
 
   const manifest = {
     libraryItemId,
-    title: String(book?.title || item.title || "Unknown Title"),
+    title: String(item?.title || "Unknown Title"),
     author: authorName,
     duration: totalBookDuration ||
       tracks.reduce((acc, t) => acc + t.duration, 0),
