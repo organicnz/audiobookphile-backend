@@ -307,49 +307,87 @@ Deno.serve(async (req) => {
     // ------------------------------------------------
 
     if (author) {
-      const { data: existingAuthor } = await db.from("authors").select("id").eq(
-        "name",
-        author,
-      ).eq("library_id", libraryId).maybeSingle();
-      let authorId = existingAuthor?.id;
-      if (!authorId) {
-        authorId = crypto.randomUUID();
-        await db.from("authors").insert({
-          id: authorId,
-          name: author,
+      // Clear old author associations so re-uploads with different metadata remove the old associations
+      await db.from("book_authors").delete().eq("book_id", bookId);
+
+      // Split on /, comma, or " & " / " and "
+      const rawAuthors = author.split(/\s*(?:\/|,|&|\band\b)\s*/i).map(a => a.trim()).filter(Boolean);
+      
+      const cleanAuthors = rawAuthors.map(a => {
+        let name = a;
+        // Strip leaked titles if appended via " - "
+        const dashSplit = name.split(" - ");
+        if (dashSplit.length > 1) {
+          name = dashSplit[0];
+        }
+        
+        // Strip common degrees
+        name = name.replace(/\b(Ph\.?D\.?|M\.?D\.?)\b/gi, "");
+        
+        // Remove periods after initials
+        name = name.replace(/([A-Za-z])\./g, "$1");
+        
+        // Collapse spaces
+        return name.replace(/\s+/g, " ").trim();
+      }).filter(Boolean);
+
+      // Remove duplicates from the array
+      const uniqueAuthors = Array.from(new Set(cleanAuthors));
+
+      for (const singleAuthor of uniqueAuthors) {
+        await db.from("authors").upsert({
+          id: crypto.randomUUID(),
+          name: singleAuthor,
           library_id: libraryId,
-        });
+        }, { onConflict: "library_id, name", ignoreDuplicates: true });
+
+        const { data: existingAuthor } = await db.from("authors").select("id").eq(
+          "name",
+          singleAuthor,
+        ).eq("library_id", libraryId).single();
+
+        const authorId = existingAuthor?.id;
+        if (authorId) {
+          await db.from("book_authors").upsert({
+            book_id: bookId,
+            author_id: authorId,
+          }, { onConflict: "book_id, author_id", ignoreDuplicates: true });
+        }
       }
-      if (authorId) {
-        await db.from("book_authors").insert({
-          book_id: bookId,
-          author_id: authorId,
-        });
-        await db.from("library_items").update({
-          author_names_first_last: author,
-        }).eq("id", libraryItemId);
-      }
+
+      // Update library_items with the original raw string as a fallback for simple text fields
+      await db.from("library_items").update({
+        author_names_first_last: author,
+      }).eq("id", libraryItemId);
     }
 
     if (series) {
-      const { data: existingSeries } = await db.from("series").select("id").eq(
-        "name",
-        series,
-      ).eq("library_id", libraryId).maybeSingle();
-      let seriesId = existingSeries?.id;
-      if (!seriesId) {
-        seriesId = crypto.randomUUID();
-        await db.from("series").insert({
-          id: seriesId,
-          name: series,
+      // Clear old series associations so re-uploads with different metadata remove the old associations
+      await db.from("book_series").delete().eq("book_id", bookId);
+
+      // Split series just in case, although less common
+      const rawSeries = series.split(/\s*(?:\/|,|&|\band\b)\s*/i).map(s => s.trim()).filter(Boolean);
+      const uniqueSeries = Array.from(new Set(rawSeries));
+
+      for (const singleSeries of uniqueSeries) {
+        await db.from("series").upsert({
+          id: crypto.randomUUID(),
+          name: singleSeries,
           library_id: libraryId,
-        });
-      }
-      if (seriesId) {
-        await db.from("book_series").insert({
-          book_id: bookId,
-          series_id: seriesId,
-        });
+        }, { onConflict: "library_id, name", ignoreDuplicates: true });
+
+        const { data: existingSeries } = await db.from("series").select("id").eq(
+          "name",
+          singleSeries,
+        ).eq("library_id", libraryId).single();
+
+        const seriesId = existingSeries?.id;
+        if (seriesId) {
+          await db.from("book_series").upsert({
+            book_id: bookId,
+            series_id: seriesId,
+          }, { onConflict: "book_id, series_id", ignoreDuplicates: true });
+        }
       }
     }
 

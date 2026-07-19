@@ -14,6 +14,35 @@ export type Database = {
   };
   public: {
     Tables: {
+        search_history: {
+          Row: {
+            id: string
+            user_id: string
+            query: string
+            created_at: string
+          }
+          Insert: {
+            id?: string
+            user_id: string
+            query: string
+            created_at?: string
+          }
+          Update: {
+            id?: string
+            user_id?: string
+            query?: string
+            created_at?: string
+          }
+          Relationships: [
+            {
+              foreignKeyName: "search_history_user_id_fkey"
+              columns: ["user_id"]
+              isOneToOne: false
+              referencedRelation: "users"
+              referencedColumns: ["id"]
+            }
+          ]
+        }
       authors: {
         Row: {
           asin: string | null;

@@ -1,7 +1,8 @@
 import { Hono } from "hono";
 import { createClient } from "npm:@supabase/supabase-js@2.44.0";
-import { getProxyOrigin } from "../_shared/proxy.ts";
+// getProxyOrigin removed
 import { Variables } from "../_shared/types.ts";
+import { fetchAuthorAvatar } from "../../_shared/avatarFetcher.ts";
 
 export const authorsRouter = new Hono<{ Variables: Variables }>();
 
@@ -49,9 +50,9 @@ authorsRouter.post("/:id/match", async (c) => {
 
   try {
     const res = await fetch(
-      `https://openlibrary.org/search/authors.json?q=${
+      `https://openlibrary.org/search/authors.json?q="${
         encodeURIComponent(authorName)
-      }&limit=1`,
+      }"&limit=1`,
     );
     if (!res.ok) return c.json({ error: "Open Library search failed" }, 500);
 
@@ -63,7 +64,10 @@ authorsRouter.post("/:id/match", async (c) => {
 
     if (doc.key) {
       try {
-        const authorRes = await fetch(`https://openlibrary.org${doc.key}.json`);
+        const keyPath = doc.key.startsWith("/authors/")
+          ? doc.key
+          : `/authors/${doc.key}`;
+        const authorRes = await fetch(`https://openlibrary.org${keyPath}.json`);
         if (authorRes.ok) {
           const authorData = await authorRes.json();
           const bio = authorData.bio?.value || authorData.bio;
@@ -77,25 +81,10 @@ authorsRouter.post("/:id/match", async (c) => {
       } catch { /* ignore */ }
     }
 
-    if (doc.photos?.[0]) {
-      const photoId = doc.photos[0];
-      const photoUrl = `https://covers.openlibrary.org/a/id/${photoId}-L.jpg`;
-      try {
-        const imgRes = await fetch(photoUrl);
-        if (imgRes.ok) {
-          const buf = await imgRes.arrayBuffer();
-          if (buf.byteLength > 5000) {
-            const db = createClient(supabaseUrl, serviceRoleKey);
-            const storagePath = `authors/${authorId}/photo.jpg`;
-            const { error: uploadErr } = await db.storage.from("covers").upload(
-              storagePath,
-              buf,
-              { upsert: true, contentType: "image/jpeg" },
-            );
-            if (!uploadErr) updates.image_path = storagePath;
-          }
-        }
-      } catch { /* ignore */ }
+    const db = createClient(supabaseUrl, serviceRoleKey);
+    const storagePath = await fetchAuthorAvatar(db, { id: authorId, name: authorName });
+    if (storagePath) {
+      updates.image_path = storagePath;
     }
 
     if (Object.keys(updates).length === 0) {
@@ -113,120 +102,7 @@ authorsRouter.post("/:id/match", async (c) => {
   }
 });
 
-authorsRouter.get("/:id/image", async (c) => {
-  const supabaseUrl = c.get("supabaseUrl");
-  const serviceRoleKey = c.get("serviceRoleKey");
-  const authorId = c.req.param("id");
 
-  const adminClient = createClient(supabaseUrl, serviceRoleKey);
-  const { data: author } = await adminClient.from("authors").select(
-    "name, image_path",
-  ).eq("id", authorId).single();
-
-  if (!author) {
-    return new Response("Not found", { status: 404 });
-  }
-
-  let storagePath = author.image_path;
-
-  if (!storagePath || storagePath.startsWith("/")) {
-    let noPhotoFound = false;
-    if (author.name) {
-      try {
-        const res = await fetch(
-          `https://openlibrary.org/search/authors.json?q=${
-            encodeURIComponent(author.name)
-          }&limit=1`,
-        );
-        if (res.ok) {
-          const data = await res.json();
-          const doc = data?.docs?.[0];
-
-          if (doc?.key) {
-            const authorRes = await fetch(
-              `https://openlibrary.org${doc.key}.json`,
-            );
-            if (authorRes.ok) {
-              const authorData = await authorRes.json();
-              if (authorData?.photos?.[0]) {
-                const photoId = authorData.photos[0];
-                const photoUrl =
-                  `https://covers.openlibrary.org/a/id/${photoId}-L.jpg`;
-                const imgRes = await fetch(photoUrl);
-                if (imgRes.ok) {
-                  const buf = await imgRes.arrayBuffer();
-                  if (buf.byteLength > 5000) {
-                    storagePath = `authors/${authorId}/photo.jpg`;
-                    const { error: uploadErr } = await adminClient.storage.from(
-                      "covers",
-                    ).upload(
-                      storagePath,
-                      buf,
-                      { upsert: true, contentType: "image/jpeg" },
-                    );
-                    if (!uploadErr) {
-                      await adminClient.from("authors").update({
-                        image_path: storagePath,
-                      }).eq("id", authorId);
-                    } else {
-                      storagePath = null;
-                    }
-                  } else {
-                    noPhotoFound = true;
-                  }
-                }
-              } else {
-                noPhotoFound = true;
-              }
-            }
-          } else {
-            noPhotoFound = true;
-          }
-        }
-      } catch (_e) {
-        // ignore fetch errors
-      }
-    }
-
-    if (!storagePath && noPhotoFound) {
-      storagePath = "missing";
-      await adminClient.from("authors").update({ image_path: "missing" }).eq(
-        "id",
-        authorId,
-      );
-    }
-  }
-
-  if (
-    !storagePath || storagePath === "missing" || storagePath.startsWith("/")
-  ) {
-    return new Response("Not found", {
-      status: 404,
-      headers: {
-        "Cache-Control": "public, max-age=3600, stale-while-revalidate=86400",
-      },
-    });
-  }
-
-  const { data } = adminClient.storage.from("covers").getPublicUrl(storagePath);
-  let publicUrl = data.publicUrl;
-
-  if (
-    publicUrl.includes("127.0.0.1") || publicUrl.includes("localhost") ||
-    publicUrl.includes("host.docker.internal")
-  ) {
-    const origin = getProxyOrigin(c);
-    try {
-      const urlObj = new URL(publicUrl);
-      publicUrl = `${origin}${urlObj.pathname}`;
-    } catch (_e) {
-      // Ignore URL parse errors
-    }
-  }
-
-  c.header("Cache-Control", "public, max-age=31536000, immutable");
-  return c.redirect(publicUrl, 302);
-});
 
 authorsRouter.post("/:id/image", async (c) => {
   const user = c.get("user")!;

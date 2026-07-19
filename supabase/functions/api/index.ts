@@ -17,6 +17,9 @@ import { playlistsRouter } from "./routes/playlists.ts";
 import { collectionsRouter } from "./routes/collections.ts";
 import { authRouter } from "./routes/auth.ts";
 import { migrateBatchRouter } from "./routes/migrateBatch.ts";
+import { downloadsRouter } from "./routes/downloads.ts";
+import { bookmarksRouter } from "./routes/bookmarks.ts";
+import { searchRouter } from "./routes/search.ts";
 
 import { Variables } from "./_shared/types.ts";
 
@@ -119,6 +122,9 @@ app.route("/api/playlists", playlistsRouter);
 app.route("/api/collections", collectionsRouter);
 app.route("/api", authRouter);
 app.route("/api/migrate-batch", migrateBatchRouter);
+app.route("/api/items", downloadsRouter);
+app.route("/api/me/bookmarks", bookmarksRouter);
+app.route("/api/me/search", searchRouter);
 
 // Fallback 404
 app.all("*", (c) => {
