@@ -156,3 +156,25 @@ authorsRouter.delete("/:id/image", async (c) => {
   );
   return c.json({ success: true });
 });
+
+authorsRouter.get("/:id/image", async (c) => {
+  const supabase = c.get("supabase");
+  const authorId = c.req.param("id");
+
+  const { data: author } = await supabase
+    .from("authors")
+    .select("image_path")
+    .eq("id", authorId)
+    .single();
+
+  if (!author || !author.image_path) {
+    return c.redirect(
+      "https://raw.githubusercontent.com/lucide-icons/lucide/main/icons/user.svg",
+    );
+  }
+
+  const { data } = supabase.storage.from("covers").getPublicUrl(
+    author.image_path,
+  );
+  return c.redirect(data.publicUrl);
+});

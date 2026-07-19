@@ -470,7 +470,7 @@ librariesRouter.get("/:id/authors", async (c) => {
 
   const { data: authorRows, error, count } = await supabase
     .from("authors")
-    .select("*", { count: "exact" })
+    .select("*, book_authors(count)", { count: "exact" })
     .eq("library_id", libraryId)
     .order(dbSortField, { ascending: !desc })
     .range(offset, offset + limit - 1);
@@ -486,7 +486,7 @@ librariesRouter.get("/:id/authors", async (c) => {
     libraryId: a.library_id,
     addedAt: new Date(a.created_at).getTime(),
     updatedAt: new Date(a.updated_at || a.created_at).getTime(),
-    numBooks: 0,
+    numBooks: a.book_authors?.[0]?.count || 0,
   }));
 
   return c.json({
