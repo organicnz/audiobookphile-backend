@@ -120,18 +120,21 @@ itemsRouter.get("/:id/cover", async (c) => {
   const adminClient = createClient(supabaseUrl, serviceRoleKey);
   const { data: item, error: _itemError } = await adminClient.from(
     "library_items",
-  ).select("cover_path, books(title, book_authors(authors(name)))").eq(
+  ).select("cover_path, title, book_authors(authors(name))").eq(
     "id",
     itemId,
   ).single();
 
   let coverPath = item?.cover_path;
+  const force = c.req.query("force") === "1";
 
-  // If cover is null or legacy invalid, fetch dynamically
-  if (!coverPath || coverPath.startsWith("/")) {
-    const book = Array.isArray(item?.books) ? item?.books[0] : item?.books;
-    const title = book?.title;
-    const bookAuthors = book?.book_authors || [];
+  // If cover is null, legacy invalid, or we force a retry
+  if (
+    !coverPath || coverPath.startsWith("/") ||
+    (coverPath === "missing" && force)
+  ) {
+    const title = item?.title;
+    const bookAuthors = item?.book_authors || [];
     const authorArray = Array.isArray(bookAuthors)
       ? bookAuthors
       : [bookAuthors];
