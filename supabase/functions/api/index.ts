@@ -20,6 +20,7 @@ import { migrateBatchRouter } from "./routes/migrateBatch.ts";
 import { downloadsRouter } from "./routes/downloads.ts";
 import { bookmarksRouter } from "./routes/bookmarks.ts";
 import { searchRouter } from "./routes/search.ts";
+import { meRouter } from "./routes/me.ts";
 
 import { Variables } from "./_shared/types.ts";
 
@@ -125,6 +126,7 @@ app.route("/api/migrate-batch", migrateBatchRouter);
 app.route("/api/items", downloadsRouter);
 app.route("/api/me/bookmarks", bookmarksRouter);
 app.route("/api/me/search", searchRouter);
+app.route("/api/me", meRouter);
 
 // Fallback 404
 app.all("*", (c) => {
