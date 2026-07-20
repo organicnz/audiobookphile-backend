@@ -79,6 +79,51 @@ itemsRouter.get("/check-existing", async (c) => {
   }
 });
 
+itemsRouter.get("/:id/similar", async (c) => {
+  const supabase = c.get("supabase");
+  const itemId = c.req.param("id");
+
+  try {
+    const { data, error } = await (supabase as any).rpc("match_library_items", {
+      item_id: itemId,
+      match_threshold: 0.2,
+      match_count: 10,
+    });
+
+    if (error) {
+      console.error("[items] Failed to fetch similar items:", error);
+      return c.json({ error: "Failed to fetch similar items" }, 500);
+    }
+
+    if (!data || data.length === 0) {
+      return c.json({ similarItems: [] });
+    }
+
+    const ids = data.map((d: any) => d.id);
+
+    const { data: items, error: itemsErr } = await supabase
+      .from("library_items")
+      .select("*")
+      .in("id", ids);
+
+    if (itemsErr) {
+      console.error("[items] Failed to fetch similar items details:", itemsErr);
+      return c.json({ error: "Failed to fetch similar items details" }, 500);
+    }
+
+    const sortedItems = items?.sort((a: any, b: any) => {
+      const indexA = ids.indexOf(a.id);
+      const indexB = ids.indexOf(b.id);
+      return indexA - indexB;
+    }) || [];
+
+    return c.json({ similarItems: sortedItems });
+  } catch (err: any) {
+    console.error("[items] similar items failed:", err);
+    return c.json({ error: "Internal server error" }, 500);
+  }
+});
+
 itemsRouter.get("/:id", async (c) => {
   const user = c.get("user")!;
   const supabase = c.get("supabase");

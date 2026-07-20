@@ -3,6 +3,56 @@ import { Variables } from "../_shared/types.ts";
 
 export const meRouter = new Hono<{ Variables: Variables }>();
 
+meRouter.get("/", async (c) => {
+  const user = c.get("user")!;
+  const supabase = c.get("supabase");
+
+  try {
+    const { data: profile, error } = await supabase
+      .from("profiles")
+      .select("*")
+      .eq("id", user.id)
+      .single();
+
+    if (error && error.code !== "PGRST116") {
+      throw error;
+    }
+
+    const profileData = profile as any;
+
+    const userProfile = {
+      user: {
+        id: user.id,
+        username: profile?.username || user?.email?.split("@")[0] || "User",
+        email: user.email,
+        type: profile?.user_type || "user",
+        token: "",
+        isActive: true,
+        isLocked: false,
+        hasUpdateAvailable: false,
+        createdAt: new Date(user.created_at || Date.now()).getTime(),
+        lastSeen: new Date(
+          user.last_sign_in_at || user.created_at || Date.now(),
+        ).getTime(),
+        extra: {},
+        mediaProgress: [],
+        seriesHideFromContinueListening: [],
+        bookmarks: [],
+        permissions: profileData?.permissions || {},
+      },
+      userDefaultLibraryId: profile?.default_library_id || null,
+      serverSettings: null,
+      ereaderDevices: [],
+      Source: "local",
+    };
+
+    return c.json(userProfile);
+  } catch (err: any) {
+    console.error("[me] profile fetch failed:", err);
+    return c.json({ error: "Failed to fetch profile" }, 500);
+  }
+});
+
 meRouter.get("/stats", async (c) => {
   const user = c.get("user")!;
   const supabase = c.get("supabase");
