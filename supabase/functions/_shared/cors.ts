@@ -1,5 +1,6 @@
 export const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "POST, GET, OPTIONS, PUT, DELETE, PATCH",
   // x-refresh-token is required for the /authorize silent-refresh path used by
   // the iOS Audiobookshelf client to avoid daily re-authentication prompts.
   "Access-Control-Allow-Headers":

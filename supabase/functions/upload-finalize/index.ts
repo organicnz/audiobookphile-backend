@@ -16,12 +16,15 @@ Deno.serve(async (req) => {
     const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
 
+    const authHeader = req.headers.get("Authorization");
     const supabase = createClient(supabaseUrl, supabaseAnonKey, {
-      global: { headers: { Authorization: req.headers.get("Authorization")! } },
+      global: { headers: authHeader ? { Authorization: authHeader } : {} },
     });
     const db = createClient(supabaseUrl, serviceRoleKey);
 
-    const { data: { user } } = await supabase.auth.getUser();
+    const { data: { user } } = authHeader
+      ? await supabase.auth.getUser()
+      : { data: { user: null } };
     if (!user) {
       return new Response(JSON.stringify({ error: "Unauthorized" }), {
         status: 401,
