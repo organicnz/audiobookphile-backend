@@ -4,6 +4,8 @@ import * as mm from "music-metadata";
 import { corsHeaders } from "../_shared/cors.ts";
 import { StorageRouter } from "../_shared/storage-router.ts";
 
+import { parseTitleAndAuthor } from "../_shared/titleAuthorParser.ts";
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -41,13 +43,18 @@ Deno.serve(async (req) => {
     const body = await req.json();
     const {
       bookId,
-      title,
-      author = "",
+      title: rawTitle,
+      author: rawAuthor = "",
       series = "",
       library: libraryId,
       mediaType = "book",
       files,
     } = body;
+
+    const { cleanTitle: title, cleanAuthor: author } = parseTitleAndAuthor(
+      rawTitle,
+      rawAuthor,
+    );
 
     if (!bookId || !title || !libraryId || !files?.length) {
       return new Response(JSON.stringify({ error: "Missing fields" }), {
