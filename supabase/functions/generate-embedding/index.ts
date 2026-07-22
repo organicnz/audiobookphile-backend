@@ -1,6 +1,6 @@
 import { createClient } from "npm:@supabase/supabase-js@2.44.0";
 import { corsHeaders } from "../_shared/cors.ts";
-import { z } from "zod";
+import { z } from "npm:zod@3.23.8";
 
 // Note: Ensure `EdgeRuntime` is configured in the environment to allow async operations after response
 declare const EdgeRuntime: any;
@@ -22,6 +22,18 @@ Deno.serve(async (req) => {
     const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
     const openAiApiKey = Deno.env.get("OPENAI_API_KEY") ?? "";
+    const zaiApiKey = Deno.env.get("ZAI_API_KEY") ??
+      Deno.env.get("ZHIPU_API_KEY") ?? "";
+
+    if (!zaiApiKey && !openAiApiKey) {
+      return new Response(
+        JSON.stringify({
+          error:
+            "Neither ZAI_API_KEY nor OPENAI_API_KEY is configured on the server",
+        }),
+        { status: 500, headers: corsHeaders },
+      );
+    }
 
     // Auth client with service role key to bypass RLS
     const supabase = createClient(supabaseUrl, supabaseServiceKey, {
@@ -68,15 +80,6 @@ Deno.serve(async (req) => {
       );
     }
     const { libraryItemId } = parsed.data;
-
-    if (!openAiApiKey) {
-      return new Response(
-        JSON.stringify({
-          error: "OPENAI_API_KEY is not configured on the server",
-        }),
-        { status: 500, headers: corsHeaders },
-      );
-    }
 
     // Process embedding asynchronously
     const generateAndSaveEmbedding = async () => {
@@ -128,17 +131,32 @@ Deno.serve(async (req) => {
 
         console.log(`Generating embedding for: ${title} by ${authorName}`);
 
-        const res = await fetch("https://api.openai.com/v1/embeddings", {
-          method: "POST",
-          headers: {
-            "Authorization": `Bearer ${openAiApiKey}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            input: textToEmbed,
-            model: "text-embedding-3-small",
-          }),
-        });
+        let res: Response;
+        if (zaiApiKey) {
+          res = await fetch("https://open.bigmodel.cn/api/paas/v4/embeddings", {
+            method: "POST",
+            headers: {
+              "Authorization": `Bearer ${zaiApiKey}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              input: textToEmbed,
+              model: "embedding-3",
+            }),
+          });
+        } else {
+          res = await fetch("https://api.openai.com/v1/embeddings", {
+            method: "POST",
+            headers: {
+              "Authorization": `Bearer ${openAiApiKey}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              input: textToEmbed,
+              model: "text-embedding-3-small",
+            }),
+          });
+        }
 
         if (!res.ok) {
           const errText = await res.text();

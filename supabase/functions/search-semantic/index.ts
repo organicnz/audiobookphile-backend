@@ -1,6 +1,6 @@
 import { createClient } from "npm:@supabase/supabase-js@2.44.0";
 import { corsHeaders } from "../_shared/cors.ts";
-import { z } from "zod";
+import { z } from "npm:zod@3.23.8";
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -19,6 +19,18 @@ Deno.serve(async (req) => {
     const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
     const openAiApiKey = Deno.env.get("OPENAI_API_KEY") ?? "";
+    const zaiApiKey = Deno.env.get("ZAI_API_KEY") ??
+      Deno.env.get("ZHIPU_API_KEY") ?? "";
+
+    if (!zaiApiKey && !openAiApiKey) {
+      return new Response(
+        JSON.stringify({
+          error:
+            "Neither ZAI_API_KEY nor OPENAI_API_KEY is configured on the server",
+        }),
+        { status: 500, headers: corsHeaders },
+      );
+    }
 
     // Auth client with service role key to bypass RLS for DB but we will check user auth first
     const supabase = createClient(supabaseUrl, supabaseServiceKey, {
@@ -64,39 +76,59 @@ Deno.serve(async (req) => {
       );
     }
 
-    if (!openAiApiKey) {
-      return new Response(
-        JSON.stringify({
-          error: "OPENAI_API_KEY is not configured on the server",
-        }),
-        { status: 500, headers: corsHeaders },
+    // 1. Generate embedding using Z.ai or OpenAI
+    let queryEmbedding: number[] = [];
+
+    if (zaiApiKey) {
+      const res = await fetch(
+        "https://open.bigmodel.cn/api/paas/v4/embeddings",
+        {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${zaiApiKey}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            input: query,
+            model: "embedding-3",
+          }),
+        },
       );
+
+      if (!res.ok) {
+        const errText = await res.text();
+        throw new Error(`Failed to fetch from Z.ai API: ${errText}`);
+      }
+
+      const data = await res.json();
+      if (!data.data || data.data.length === 0 || !data.data[0].embedding) {
+        throw new Error("No embedding returned from Z.ai API.");
+      }
+      queryEmbedding = data.data[0].embedding;
+    } else {
+      const res = await fetch("https://api.openai.com/v1/embeddings", {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${openAiApiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          input: query,
+          model: "text-embedding-3-small",
+        }),
+      });
+
+      if (!res.ok) {
+        const errText = await res.text();
+        throw new Error(`Failed to fetch from OpenAI API: ${errText}`);
+      }
+
+      const data = await res.json();
+      if (!data.data || data.data.length === 0 || !data.data[0].embedding) {
+        throw new Error("No embedding returned from OpenAI API.");
+      }
+      queryEmbedding = data.data[0].embedding;
     }
-
-    // 1. Generate embedding for the search query using OpenAI
-    const res = await fetch("https://api.openai.com/v1/embeddings", {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${openAiApiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        input: query,
-        model: "text-embedding-3-small",
-      }),
-    });
-
-    if (!res.ok) {
-      const errText = await res.text();
-      throw new Error(`Failed to fetch from OpenAI API: ${errText}`);
-    }
-
-    const data = await res.json();
-    if (!data.data || data.data.length === 0 || !data.data[0].embedding) {
-      throw new Error("No embedding returned from OpenAI.");
-    }
-
-    const queryEmbedding = data.data[0].embedding;
 
     // 2. Perform vector search in Supabase using the RPC
     const { data: matches, error: matchError } = await supabase.rpc(
