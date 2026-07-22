@@ -1,6 +1,3 @@
-import { createClient } from "npm:@supabase/supabase-js@2.44.0";
-
-import * as mm from "music-metadata";
 import { corsHeaders } from "../_shared/cors.ts";
 import { StorageRouter } from "../_shared/storage-router.ts";
 
@@ -269,6 +266,12 @@ Deno.serve(async (req) => {
     const processDurationsAsync = async () => {
       try {
         const storageRouter = new StorageRouter(db);
+        let mm: any = null;
+        try {
+          mm = await import("npm:music-metadata@10.8.0");
+        } catch (_err) {
+          console.warn("[upload-finalize] Could not load music-metadata");
+        }
 
         const metadataPromises = files.map(async (file: any, i: number) => {
           const existingAf = audioFilesJson[i];
@@ -278,7 +281,7 @@ Deno.serve(async (req) => {
               file.storagePath,
               60,
             );
-            if (signedUrl) {
+            if (signedUrl && mm) {
               const res = await fetch(signedUrl);
               if (res.body) {
                 const metadata = await mm.parseWebStream(
@@ -286,7 +289,7 @@ Deno.serve(async (req) => {
                   { mimeType: file.type, size: file.size },
                   { duration: true, skipCovers: true, skipPostHeaders: true },
                 );
-                duration = metadata.format.duration || 0;
+                duration = metadata.format?.duration || 0;
 
                 // Immediately cancel the stream to save bandwidth and memory!
                 try {

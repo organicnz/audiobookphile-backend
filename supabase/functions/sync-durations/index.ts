@@ -1,5 +1,4 @@
 import { createClient } from "npm:@supabase/supabase-js@2.44.0";
-import * as mm from "music-metadata";
 import { corsHeaders } from "../_shared/cors.ts";
 import { StorageRouter } from "../_shared/storage-router.ts";
 
@@ -13,6 +12,13 @@ Deno.serve(async (req) => {
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
     const db = createClient(supabaseUrl, serviceRoleKey);
     const storageRouter = new StorageRouter(db);
+
+    let mm: any = null;
+    try {
+      mm = await import("npm:music-metadata@10.8.0");
+    } catch (_err) {
+      console.warn("[sync-durations] Could not load music-metadata");
+    }
 
     // Auth check
     const authHeader = req.headers.get("Authorization");
