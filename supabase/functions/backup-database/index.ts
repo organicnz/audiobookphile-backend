@@ -1,12 +1,18 @@
 import { createClient } from "npm:@supabase/supabase-js@2.44.0";
 import { Database } from "../../../src/types/supabase.ts";
+import { corsHeaders } from "../_shared/cors.ts";
 
 Deno.serve(async (req) => {
+  if (req.method === "OPTIONS") {
+    return new Response("ok", { headers: corsHeaders });
+  }
+
   try {
     const authHeader = req.headers.get("Authorization");
     if (!authHeader) {
       return new Response(JSON.stringify({ error: "Unauthorized" }), {
         status: 401,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
@@ -34,6 +40,7 @@ Deno.serve(async (req) => {
       if (userError || !user) {
         return new Response(JSON.stringify({ error: "Unauthorized" }), {
           status: 401,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
 
@@ -46,6 +53,7 @@ Deno.serve(async (req) => {
       if (!profile || !["admin", "root"].includes(profile.user_type ?? "")) {
         return new Response(JSON.stringify({ error: "Forbidden" }), {
           status: 403,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
     }
@@ -115,7 +123,7 @@ Deno.serve(async (req) => {
       JSON.stringify({ success: true, message: "Backup created", filename }),
       {
         status: 200,
-        headers: { "Content-Type": "application/json" },
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
       },
     );
   } catch (e: unknown) {
@@ -123,7 +131,7 @@ Deno.serve(async (req) => {
     console.error("Backup failed:", err);
     return new Response(JSON.stringify({ error: err.message }), {
       status: 500,
-      headers: { "Content-Type": "application/json" },
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
 });
