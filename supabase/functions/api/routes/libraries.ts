@@ -470,24 +470,27 @@ librariesRouter.get("/:id/authors", async (c) => {
 
   const { data: authorRows, error, count } = await supabase
     .from("authors")
-    .select("*, book_authors(count)", { count: "exact" })
+    .select("*, book_authors(library_item_id)", { count: "exact" })
     .eq("library_id", libraryId)
     .order(dbSortField, { ascending: !desc })
     .range(offset, offset + limit - 1);
 
   if (error) return c.json({ error: error.message }, 500);
 
-  const authors = (authorRows || []).map((a) => ({
-    id: a.id,
-    name: a.name,
-    asin: a.asin || null,
-    description: a.description || null,
-    imagePath: a.image_path || null,
-    libraryId: a.library_id,
-    addedAt: new Date(a.created_at).getTime(),
-    updatedAt: new Date(a.updated_at || a.created_at).getTime(),
-    numBooks: a.book_authors?.[0]?.count || 0,
-  }));
+  const authors = (authorRows || []).map((a) => {
+    const bookAuthorsList = (a.book_authors || []) as Record<string, unknown>[];
+    return {
+      id: a.id,
+      name: a.name,
+      asin: a.asin || null,
+      description: a.description || null,
+      imagePath: a.image_path || null,
+      libraryId: a.library_id,
+      addedAt: new Date(a.created_at).getTime(),
+      updatedAt: new Date(a.updated_at || a.created_at).getTime(),
+      numBooks: bookAuthorsList.length,
+    };
+  });
 
   return c.json({
     authors,
@@ -801,4 +804,20 @@ librariesRouter.get("/:id/stats", async (c) => {
   }
 
   return c.json(data);
+});
+
+librariesRouter.get("/:id/narrators", async (c) => {
+  const supabase = c.get("supabase");
+  const libraryId = c.req.param("id");
+
+  try {
+    const { data } = await supabase.from("narrators").select("id, name").eq(
+      "library_id",
+      libraryId,
+    );
+    return c.json({ narrators: data ?? [] });
+  } catch (error: any) {
+    console.error("[libraries] Failed to fetch narrators:", error);
+    return c.json({ narrators: [] }); // Fallback to empty array just like the old page did
+  }
 });

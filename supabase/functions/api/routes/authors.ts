@@ -167,7 +167,7 @@ authorsRouter.get("/:id/image", async (c) => {
     .eq("id", authorId)
     .single();
 
-  if (!author || !author.image_path) {
+  if (!author || !author.image_path || author.image_path === "missing") {
     return c.redirect(
       "https://raw.githubusercontent.com/lucide-icons/lucide/main/icons/user.svg",
     );

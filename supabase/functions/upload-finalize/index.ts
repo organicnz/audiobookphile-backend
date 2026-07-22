@@ -308,7 +308,10 @@ Deno.serve(async (req) => {
 
     if (author) {
       // Clear old author associations so re-uploads with different metadata remove the old associations
-      await db.from("book_authors").delete().eq("book_id", bookId);
+      await db.from("book_authors").delete().eq(
+        "library_item_id",
+        libraryItemId,
+      );
 
       // Split on /, comma, or " & " / " and "
       const rawAuthors = author.split(/\s*(?:\/|,|&|\band\b)\s*/i).map((
@@ -352,9 +355,12 @@ Deno.serve(async (req) => {
         const authorId = existingAuthor?.id;
         if (authorId) {
           await db.from("book_authors").upsert({
-            book_id: bookId,
+            library_item_id: libraryItemId,
             author_id: authorId,
-          }, { onConflict: "book_id, author_id", ignoreDuplicates: true });
+          }, {
+            onConflict: "library_item_id, author_id",
+            ignoreDuplicates: true,
+          });
         }
       }
 
@@ -366,7 +372,10 @@ Deno.serve(async (req) => {
 
     if (series) {
       // Clear old series associations so re-uploads with different metadata remove the old associations
-      await db.from("book_series").delete().eq("book_id", bookId);
+      await db.from("book_series").delete().eq(
+        "library_item_id",
+        libraryItemId,
+      );
 
       // Split series just in case, although less common
       const rawSeries = series.split(/\s*(?:\/|,|&|\band\b)\s*/i).map((
@@ -390,9 +399,12 @@ Deno.serve(async (req) => {
         const seriesId = existingSeries?.id;
         if (seriesId) {
           await db.from("book_series").upsert({
-            book_id: bookId,
+            library_item_id: libraryItemId,
             series_id: seriesId,
-          }, { onConflict: "book_id, series_id", ignoreDuplicates: true });
+          }, {
+            onConflict: "library_item_id, series_id",
+            ignoreDuplicates: true,
+          });
         }
       }
     }

@@ -380,3 +380,41 @@ const handleCoverUpload = async (c: Context) => {
 
 itemsRouter.post("/:id/cover", handleCoverUpload);
 itemsRouter.patch("/:id/cover", handleCoverUpload);
+
+itemsRouter.delete("/:id/audio-files/:ino", async (c) => {
+  const user = c.get("user")!;
+  if (!user) return new Response("Unauthorized", { status: 401 });
+
+  const supabase = c.get("supabase");
+  const { data: profile } = await supabase.from("profiles").select("user_type")
+    .eq("id", user.id).single();
+  if (profile?.user_type !== "admin" && profile?.user_type !== "root") {
+    return new Response("Forbidden", { status: 403 });
+  }
+
+  const supabaseUrl = c.get("supabaseUrl");
+  const serviceRoleKey = c.get("serviceRoleKey");
+  const itemId = c.req.param("id");
+  const fileIno = c.req.param("ino");
+
+  const adminClient = createClient(supabaseUrl, serviceRoleKey);
+  const { data: item } = await adminClient.from("library_items").select(
+    "audio_files",
+  ).eq("id", itemId).single();
+  if (!item) return new Response("Not found", { status: 404 });
+
+  const audioFiles = (item?.audio_files as any[]) || [];
+  const fileToDelete = audioFiles.find((f: any) => f.ino === fileIno);
+
+  if (fileToDelete?.metadata?.path) {
+    await adminClient.storage.from("audio-files").remove([
+      fileToDelete.metadata.path,
+    ]);
+  }
+
+  const updatedFiles = audioFiles.filter((f: any) => f.ino !== fileIno);
+  await adminClient.from("library_items").update({ audio_files: updatedFiles })
+    .eq("id", itemId);
+
+  return new Response(null, { status: 204 });
+});

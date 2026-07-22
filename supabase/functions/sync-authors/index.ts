@@ -17,12 +17,8 @@ Deno.serve(async (req) => {
   const authHeader = req.headers.get("Authorization");
   let isAdmin = false;
   const envCronSecret = Deno.env.get("CRON_SECRET");
-  const cronSecret =
-    (typeof envCronSecret === "string" && envCronSecret.length > 0)
-      ? envCronSecret
-      : "fallback_secret";
 
-  if (authHeader === `Bearer ${cronSecret}`) {
+  if (envCronSecret && authHeader === `Bearer ${envCronSecret}`) {
     isAdmin = true;
   } else if (authHeader) {
     const token = authHeader.replace("Bearer ", "");
