@@ -81,7 +81,7 @@ Deno.serve(async (req) => {
     const totalSize = files.reduce((sum: number, f: any) => sum + f.size, 0);
 
     // Fetch existing book to merge files if it already exists
-    const { data: existingBook } = await db.from("books").select(
+    const { data: existingBook } = await db.from("library_items").select(
       "audio_files, duration",
     ).eq("id", bookId).maybeSingle();
 
@@ -132,13 +132,13 @@ Deno.serve(async (req) => {
       // Re-index the files nicely
       deduplicatedFiles.forEach((af, idx) => af.index = idx + 1);
 
-      const res = await db.from("books").update({
+      const res = await db.from("library_items").update({
         audio_files: deduplicatedFiles,
         duration: currentDuration,
       }).eq("id", bookId);
       bookError = res.error;
     } else {
-      const res = await db.from("books").insert({
+      const res = await db.from("library_items").insert({
         id: bookId,
         title,
         audio_files: finalAudioFiles,
@@ -201,7 +201,9 @@ Deno.serve(async (req) => {
         library_files: newLibraryFiles,
       });
       if (itemError) {
-        if (!existingBook) await db.from("books").delete().eq("id", bookId);
+        if (!existingBook) {
+          await db.from("library_items").delete().eq("id", bookId);
+        }
         throw itemError;
       }
     }
@@ -278,7 +280,7 @@ Deno.serve(async (req) => {
         );
 
         // Update database with new durations
-        await db.from("books").update({
+        await db.from("library_items").update({
           audio_files: deduplicatedMergedFiles,
           duration: totalDuration,
         }).eq("id", bookId);

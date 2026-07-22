@@ -101,13 +101,16 @@ Deno.serve(async (req) => {
     const _all = [...sb, ...b2];
 
     // get DB paths
-    const { data: books } = await adminClient.from("books").select(
-      "cover_path, audio_files(ino)",
+    const { data: books } = await adminClient.from("library_items").select(
+      "cover_path, audio_files",
     );
     const dbPaths = new Set<string>();
-    books?.forEach((b) => {
+    books?.forEach((b: any) => {
       if (b.cover_path) dbPaths.add(b.cover_path);
-      b.audio_files?.forEach((af) => dbPaths.add(af.ino));
+      const audioFiles = Array.isArray(b.audio_files) ? b.audio_files : [];
+      audioFiles.forEach((af: any) => {
+        if (af.ino) dbPaths.add(af.ino);
+      });
     });
 
     const orphanedGroups: any[] = [];

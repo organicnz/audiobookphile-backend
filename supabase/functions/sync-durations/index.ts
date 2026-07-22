@@ -46,7 +46,7 @@ Deno.serve(async (req) => {
     const url = new URL(req.url);
     const bookId = url.searchParams.get("bookId");
 
-    let query = db.from("books").select("*");
+    let query = db.from("library_items").select("*");
     if (bookId) query = query.eq("id", bookId);
 
     const { data: books, error } = await query;
@@ -113,7 +113,7 @@ Deno.serve(async (req) => {
         0,
       );
 
-      await db.from("books").update({
+      await db.from("library_items").update({
         audio_files: updatedAudioFilesJson,
         duration: totalDuration,
       }).eq("id", book.id);

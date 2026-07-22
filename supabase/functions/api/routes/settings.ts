@@ -86,13 +86,15 @@ settingsRouter.delete("/genres/:genre", async (c) => {
   const supabase = c.get("supabase");
   const genre = c.req.param("genre");
 
-  const { data: books } = await supabase.from("books").select("id, genres");
+  const { data: books } = await supabase.from("library_items").select(
+    "id, genres",
+  );
   let numItemsUpdated = 0;
   for (const book of books ?? []) {
     const genres = book.genres as string[] | null;
     if (Array.isArray(genres) && genres.includes(genre)) {
       const newGenres = genres.filter((g) => g !== genre);
-      await supabase.from("books").update({ genres: newGenres }).eq(
+      await supabase.from("library_items").update({ genres: newGenres }).eq(
         "id",
         book.id,
       );
@@ -107,7 +109,9 @@ settingsRouter.put("/genres/:genre", async (c) => {
   const genre = c.req.param("genre");
   const { newGenreName } = await c.req.json();
 
-  const { data: books } = await supabase.from("books").select("id, genres");
+  const { data: books } = await supabase.from("library_items").select(
+    "id, genres",
+  );
   let numItemsUpdated = 0;
   let genreMerged = false;
   for (const book of books ?? []) {
@@ -120,7 +124,9 @@ settingsRouter.put("/genres/:genre", async (c) => {
       ) {
         genreMerged = true;
       }
-      await supabase.from("books").update({ genres: [...new Set(newGenres)] })
+      await supabase.from("library_items").update({
+        genres: [...new Set(newGenres)],
+      })
         .eq("id", book.id);
       numItemsUpdated++;
     }
@@ -133,13 +139,18 @@ settingsRouter.delete("/tags/:tag", async (c) => {
   const supabase = c.get("supabase");
   const tag = c.req.param("tag");
 
-  const { data: books } = await supabase.from("books").select("id, tags");
+  const { data: books } = await supabase.from("library_items").select(
+    "id, tags",
+  );
   let numItemsUpdated = 0;
   for (const book of books ?? []) {
     const tags = book.tags as string[] | null;
     if (Array.isArray(tags) && tags.includes(tag)) {
       const newTags = tags.filter((t) => t !== tag);
-      await supabase.from("books").update({ tags: newTags }).eq("id", book.id);
+      await supabase.from("library_items").update({ tags: newTags }).eq(
+        "id",
+        book.id,
+      );
       numItemsUpdated++;
     }
   }
@@ -151,7 +162,9 @@ settingsRouter.put("/tags/:tag", async (c) => {
   const tag = c.req.param("tag");
   const { newTagName } = await c.req.json();
 
-  const { data: books } = await supabase.from("books").select("id, tags");
+  const { data: books } = await supabase.from("library_items").select(
+    "id, tags",
+  );
   let numItemsUpdated = 0;
   let tagMerged = false;
   for (const book of books ?? []) {
@@ -161,7 +174,9 @@ settingsRouter.put("/tags/:tag", async (c) => {
       if (newTags.filter((t) => t === newTagName).length > 1) {
         tagMerged = true;
       }
-      await supabase.from("books").update({ tags: [...new Set(newTags)] }).eq(
+      await supabase.from("library_items").update({
+        tags: [...new Set(newTags)],
+      }).eq(
         "id",
         book.id,
       );

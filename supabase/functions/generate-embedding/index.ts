@@ -98,16 +98,11 @@ Deno.serve(async (req) => {
         let description = "";
         let genresStr = "";
 
-        if (item.media_type === "book" && item.media_id) {
-          const { data: book } = await supabase.from("books").select(
-            "title, description, genres",
-          ).eq("id", item.media_id).single();
-          if (book) {
-            title = book.title || title;
-            description = book.description || "";
-            if (book.genres && Array.isArray(book.genres)) {
-              genresStr = book.genres.join(", ");
-            }
+        if (item.media_type === "book") {
+          title = item.title || title;
+          description = (item as any).description || "";
+          if ((item as any).genres && Array.isArray((item as any).genres)) {
+            genresStr = (item as any).genres.join(", ");
           }
         } else if (item.media_type === "podcast" && item.media_id) {
           const { data: podcast } = await supabase.from("podcasts").select(

@@ -83,7 +83,7 @@ Deno.serve(async (req) => {
     }
 
     const { data: book, error: bookErr } = await supabase
-      .from("books")
+      .from("library_items")
       .select("title, description, genres, published_year")
       .eq("id", item.media_id)
       .single();
@@ -152,7 +152,7 @@ Deno.serve(async (req) => {
               `Found missing metadata, patching books id: ${item.media_id}`,
             );
             const { error: updateErr } = await supabase
-              .from("books")
+              .from("library_items")
               .update(updates)
               .eq("id", item.media_id);
 

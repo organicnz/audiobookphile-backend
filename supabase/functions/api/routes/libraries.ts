@@ -811,7 +811,9 @@ librariesRouter.get("/:id/narrators", async (c) => {
   const libraryId = c.req.param("id");
 
   try {
-    const { data } = await supabase.from("narrators").select("id, name").eq(
+    const { data } = await (supabase as any).from("narrators").select(
+      "id, name",
+    ).eq(
       "library_id",
       libraryId,
     );

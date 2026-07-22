@@ -11,7 +11,7 @@ type LibraryWithFolders = LibraryRow & {
 };
 
 type LibraryItemRow = Database["public"]["Tables"]["library_items"]["Row"];
-type BookRow = Database["public"]["Tables"]["books"]["Row"];
+type BookRow = LibraryItemRow;
 type MediaProgressRow = Database["public"]["Tables"]["media_progress"]["Row"];
 type BookAuthorRow = Database["public"]["Tables"]["book_authors"]["Row"];
 type AuthorRow = Database["public"]["Tables"]["authors"]["Row"];
