@@ -56,10 +56,55 @@ Deno.serve(async (req) => {
       files,
     } = body;
 
-    const { cleanTitle: title, cleanAuthor: author } = parseTitleAndAuthor(
+    let { cleanTitle: title, cleanAuthor: author } = parseTitleAndAuthor(
       rawTitle,
       rawAuthor,
     );
+
+    // AI title/author extraction fallback via Z.ai GLM-4 if author is unknown or title is ambiguous
+    if ((!author || author === "Unknown Author" || !title) && rawTitle) {
+      const zaiApiKey = Deno.env.get("ZAI_API_KEY") ??
+        Deno.env.get("ZHIPU_API_KEY") ?? "";
+      if (zaiApiKey) {
+        try {
+          const aiRes = await fetch(
+            "https://open.bigmodel.cn/api/paas/v4/chat/completions",
+            {
+              method: "POST",
+              headers: {
+                "Authorization": `Bearer ${zaiApiKey}`,
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({
+                model: "glm-4-flash",
+                messages: [{
+                  role: "user",
+                  content:
+                    `Extract the exact book title and author name from this filename/text: "${rawTitle}". Return ONLY a JSON object: {"title": "...", "author": "..."}`,
+                }],
+                temperature: 0.1,
+              }),
+            },
+          );
+          if (aiRes.ok) {
+            const aiData = await aiRes.json();
+            const content = aiData.choices?.[0]?.message?.content || "";
+            const match = content.match(/\{[\s\S]*\}/);
+            if (match) {
+              const parsed = JSON.parse(match[0]);
+              if (parsed.title) title = parsed.title;
+              if (parsed.author) author = parsed.author;
+            }
+          }
+        } catch (e: unknown) {
+          const err = e as Error;
+          console.error(
+            "[upload-finalize] Z.ai GLM-4 fallback error:",
+            err.message,
+          );
+        }
+      }
+    }
 
     if (!bookId || !title || !libraryId || !files?.length) {
       return new Response(JSON.stringify({ error: "Missing fields" }), {

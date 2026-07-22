@@ -165,6 +165,66 @@ Deno.serve(async (req) => {
         } else {
           console.log("No matches found on Google Books.");
         }
+
+        // Z.ai GLM-4 AI metadata enrichment fallback if description or genres are still missing
+        const zaiApiKey = Deno.env.get("ZAI_API_KEY") ??
+          Deno.env.get("ZHIPU_API_KEY") ?? "";
+        if (
+          (!book.description ||
+            (!book.genres || book.genres.length === 0)) && zaiApiKey
+        ) {
+          console.log(`Enriching metadata with Z.ai GLM-4 for: ${title}`);
+          const aiRes = await fetch(
+            "https://open.bigmodel.cn/api/paas/v4/chat/completions",
+            {
+              method: "POST",
+              headers: {
+                "Authorization": `Bearer ${zaiApiKey}`,
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({
+                model: "glm-4-flash",
+                messages: [{
+                  role: "user",
+                  content:
+                    `Provide accurate metadata for the audiobook "${title}" by "${
+                      authorName ||
+                      "Unknown"
+                    }". Return ONLY a valid JSON object with keys: {"description": "concise synopsis (max 3 sentences)", "genres": ["Genre1", "Genre2"], "publishedYear": "YYYY"}.`,
+                }],
+                temperature: 0.2,
+              }),
+            },
+          );
+          if (aiRes.ok) {
+            const aiData = await aiRes.json();
+            const content = aiData.choices?.[0]?.message?.content || "";
+            const match = content.match(/\{[\s\S]*\}/);
+            if (match) {
+              const parsed = JSON.parse(match[0]);
+              const aiUpdates: any = {};
+              if (!book.description && parsed.description) {
+                aiUpdates.description = parsed.description;
+              }
+              if (
+                (!book.genres || book.genres.length === 0) && parsed.genres
+              ) {
+                aiUpdates.genres = parsed.genres;
+              }
+              if (!book.published_year && parsed.publishedYear) {
+                aiUpdates.published_year = String(parsed.publishedYear)
+                  .substring(0, 4);
+              }
+
+              if (Object.keys(aiUpdates).length > 0) {
+                await supabase.from("library_items").update(aiUpdates).eq(
+                  "id",
+                  item.media_id,
+                );
+              }
+            }
+          }
+        }
       } catch (e) {
         console.error("Scraping error:", e);
       }
