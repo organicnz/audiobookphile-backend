@@ -156,9 +156,14 @@ export function mapBookForMobile(
     Boolean,
   ) as AuthorRow[];
   const authorNames = authors.map((a) => String(a.name));
-  const authorName = authorNames.join(", ") || "Unknown Author";
+  const rawAuthorFallback = String(
+    (bookRecord as any).author_names_first_last || "",
+  ).trim();
+  const authorName = authorNames.join(", ") || rawAuthorFallback ||
+    "Unknown Author";
   const authorNameLF =
     authors.map((a) => String(a.last_first || a.name)).join(", ") ||
+    rawAuthorFallback ||
     "Unknown Author";
 
   // 2. Narrators
