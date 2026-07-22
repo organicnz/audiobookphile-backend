@@ -37,7 +37,7 @@ export function parseTitleAndAuthor(
 
   // 2. Handle "Last, First -- Title" or "Last, First - Title" (e.g., "Sagan, Carl -- The Demon-Haunted World")
   const lastFirstMatch = title.match(
-    /^([A-Z][a-zA-Z'\-]+),\s*([A-Z][a-zA-Z'\-\.]+)\s*(?:--|-)\s*(.+)$/,
+    /^([\p{Lu}\p{Lt}][\p{L}'\-]+),\s*([\p{Lu}\p{Lt}][\p{L}'\-\.]+)\s*(?:--|-)\s*(.+)$/u,
   );
   if (lastFirstMatch) {
     const lastName = lastFirstMatch[1].trim();
@@ -50,6 +50,10 @@ export function parseTitleAndAuthor(
     }
   }
 
+  // Author name pattern: 1-4 words starting with uppercase or initials, optional particles (de, van, von, etc.)
+  const authorNamePattern =
+    /^[\p{Lu}\p{Lt}][\p{L}'\-.]*(?:\s+(?:de|van|der|von|di|da|del|dos|du|[\p{Lu}\p{Lt}][\p{L}'\-.]*)){1,4}$/u;
+
   // 3. Handle "Author - Year - Title" or "Author - Title" (e.g. "Alexei Navalny - 2024 - Patriot", "Christopher Hitchens - Hitch-22")
   if (!author || title.includes(" - ") || title.includes(" -- ")) {
     const parts = title.split(/\s*(?:--|-)\s*/).map((p) => p.trim()).filter(
@@ -60,9 +64,7 @@ export function parseTitleAndAuthor(
       const secondPart = parts[1];
       const isYear = /^(19|20)\d{2}$/.test(secondPart);
 
-      // Check if firstPart looks like an Author Name (2-3 words, no numbers, capitalized)
-      const isFirstPartAuthor =
-        /^[A-Z][a-zA-Z'\-.]+(?:\s+[A-Z][a-zA-Z'\-.]+){1,3}$/.test(firstPart);
+      const isFirstPartAuthor = authorNamePattern.test(firstPart);
 
       if (isFirstPartAuthor) {
         if (!author) author = firstPart;
@@ -71,10 +73,9 @@ export function parseTitleAndAuthor(
         } else {
           title = parts.slice(1).join(" - ");
         }
-      } else if (parts.length >= 2) {
+      } else {
         const lastPart = parts[parts.length - 1];
-        const isLastPartAuthor =
-          /^[A-Z][a-zA-Z'\-.]+(?:\s+[A-Z][a-zA-Z'\-.]+){1,3}$/.test(lastPart);
+        const isLastPartAuthor = authorNamePattern.test(lastPart);
         if (isLastPartAuthor && !author) {
           author = lastPart;
           title = parts.slice(0, parts.length - 1).join(" - ");
@@ -85,7 +86,7 @@ export function parseTitleAndAuthor(
 
   // 4. Handle "Title by Author" (e.g. "Essential CISSP by Phil Martin")
   const byMatch = title.match(
-    /^(.+?)\s+by\s+([A-Z][a-zA-Z'\-.]+(?:\s+[A-Z][a-zA-Z'\-.]+)+)$/i,
+    /^(.+?)\s+by\s+([\p{Lu}\p{Lt}][\p{L}'\-.]*(?:\s+(?:de|van|der|von|di|da|del|dos|du|[\p{Lu}\p{Lt}][\p{L}'\-.]*))+)$/iu,
   );
   if (byMatch) {
     title = byMatch[1].trim();

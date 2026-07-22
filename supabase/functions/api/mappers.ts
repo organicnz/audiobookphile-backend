@@ -3,6 +3,7 @@ import {
   MobileBookModel as MobileBook,
   MobileLibraryModel as MobileLibrary,
 } from "../../../src/types/schemas.ts";
+import { parseTitleAndAuthor } from "../_shared/titleAuthorParser.ts";
 
 type LibraryRow = Database["public"]["Tables"]["libraries"]["Row"];
 type LibraryFolderRow = Database["public"]["Tables"]["library_folders"]["Row"];
@@ -150,7 +151,7 @@ export function mapBookForMobile(
 ): MobileBook {
   const bookRecord = item;
 
-  // 1. Authors
+  // 1. Authors & Title
   const authorsList = bookRecord.book_authors || [];
   const authors = authorsList.map((ba) => ba.authors).filter(
     Boolean,
@@ -159,12 +160,23 @@ export function mapBookForMobile(
   const rawAuthorFallback = String(
     (bookRecord as any).author_names_first_last || "",
   ).trim();
-  const authorName = authorNames.join(", ") || rawAuthorFallback ||
-    "Unknown Author";
+
+  let finalTitle = String(bookRecord.title || item.title || "Unknown Title");
+  let authorName = authorNames.join(", ") || rawAuthorFallback;
+
+  if (!authorName || authorName === "Unknown Author") {
+    const parsed = parseTitleAndAuthor(finalTitle);
+    if (parsed.cleanAuthor && parsed.cleanAuthor !== "Unknown Author") {
+      authorName = parsed.cleanAuthor;
+      finalTitle = parsed.cleanTitle;
+    } else {
+      authorName = "Unknown Author";
+    }
+  }
+
   const authorNameLF =
     authors.map((a) => String(a.last_first || a.name)).join(", ") ||
-    rawAuthorFallback ||
-    "Unknown Author";
+    authorName;
 
   // 2. Narrators
   const narrators = bookRecord.narrators || [];
@@ -359,7 +371,7 @@ export function mapBookForMobile(
         })
         : null,
       metadata: {
-        title: String(bookRecord.title || item.title || "Unknown Title"),
+        title: finalTitle,
         subtitle: bookRecord.subtitle ? String(bookRecord.subtitle) : null,
         authorName: authorName,
         authorNameLF: authorNameLF,
