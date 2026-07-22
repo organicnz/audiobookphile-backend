@@ -63,7 +63,73 @@ Deno.serve(async (req) => {
         .select("*", { count: "exact", head: true })
         .is("image_path", null);
 
+      const matchUnlinkedAuthorsAsync = async () => {
+        const { data: items } = await adminClient
+          .from("library_items")
+          .select(
+            "id, library_id, author_names_first_last, book_authors(author_id)",
+          )
+          .not("author_names_first_last", "is", null);
+
+        if (!items) return;
+        const unlinkedItems = items.filter(
+          (item: any) => !item.book_authors || item.book_authors.length === 0,
+        );
+
+        for (const item of unlinkedItems) {
+          const rawAuthorStr = item.author_names_first_last?.trim();
+          if (!rawAuthorStr || !item.library_id) continue;
+
+          const rawAuthors = rawAuthorStr.split(/\s*(?:\/|,|&|\band\b)\s*/i)
+            .map((a: string) => a.trim()).filter(Boolean);
+          const cleanAuthors = rawAuthors.map((a: string) => {
+            let name = a;
+            const dashSplit = name.split(" - ");
+            if (dashSplit.length > 1) name = dashSplit[0];
+            name = name.replace(/\b(Ph\.?D\.?|M\.?D\.?)\b/gi, "");
+            name = name.replace(/([A-Za-z])\./g, "$1");
+            return name.replace(/\s+/g, " ").trim();
+          }).filter(Boolean);
+
+          const uniqueAuthors = Array.from(new Set(cleanAuthors));
+
+          for (const singleAuthor of uniqueAuthors) {
+            await adminClient.from("authors").upsert({
+              id: crypto.randomUUID(),
+              name: singleAuthor,
+              library_id: item.library_id,
+            }, { onConflict: "library_id, name", ignoreDuplicates: true });
+
+            const { data: existingAuthor } = await adminClient
+              .from("authors")
+              .select("id")
+              .eq("name", singleAuthor)
+              .eq("library_id", item.library_id)
+              .maybeSingle();
+
+            if (existingAuthor?.id) {
+              await adminClient.from("book_authors").upsert({
+                library_item_id: item.id,
+                author_id: existingAuthor.id,
+              }, {
+                onConflict: "library_item_id, author_id",
+                ignoreDuplicates: true,
+              });
+            }
+          }
+        }
+      };
+
       const processAuthorsAsync = async () => {
+        try {
+          await matchUnlinkedAuthorsAsync();
+        } catch (e: any) {
+          console.error(
+            "[Sync Authors] Unlinked author matching error:",
+            e.message,
+          );
+        }
+
         let successCount = 0;
         let errorCount = 0;
         let notFoundCount = 0;
