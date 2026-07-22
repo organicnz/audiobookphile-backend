@@ -151,13 +151,27 @@ librariesRouter.get("/:id/items", async (c) => {
   const queryParams = new URL(c.req.raw.url).searchParams;
   const limit = parseInt(queryParams.get("limit") || "50", 10);
   const page = parseInt(queryParams.get("page") || "0", 10);
-  const sort = queryParams.get("sort") || "addedAt";
-  const desc = queryParams.get("desc") !== "0";
+  const sortParam = (queryParams.get("sort") || "addedAt").toLowerCase();
+  const isDesc = queryParams.get("desc") === "1" ||
+    queryParams.get("desc") === "true";
   const offset = page * limit;
 
-  const dbSortField = sort === "addedAt"
-    ? "created_at"
-    : (sort === "media.metadata.title" ? "title" : "created_at");
+  let dbSortField = "created_at";
+  if (sortParam.includes("author")) {
+    dbSortField = "author_names_first_last";
+  } else if (sortParam.includes("title") || sortParam.includes("name")) {
+    dbSortField = "title";
+  } else if (sortParam.includes("pub") || sortParam.includes("year")) {
+    dbSortField = "published_year";
+  } else if (sortParam.includes("update")) {
+    dbSortField = "updated_at";
+  } else if (sortParam.includes("duration")) {
+    dbSortField = "duration";
+  } else if (sortParam.includes("size")) {
+    dbSortField = "size";
+  } else {
+    dbSortField = "created_at";
+  }
 
   try {
     const { data: items, error, count } = await supabase
@@ -166,7 +180,7 @@ librariesRouter.get("/:id/items", async (c) => {
         count: "exact",
       })
       .eq("library_id", libraryId)
-      .order(dbSortField, { ascending: !desc })
+      .order(dbSortField, { ascending: !isDesc })
       .range(offset, offset + limit - 1);
 
     if (error) {
@@ -175,6 +189,30 @@ librariesRouter.get("/:id/items", async (c) => {
         details: error.details,
         hint: error.hint,
       }, 500);
+    }
+
+    // Natural in-memory sort refinement for title & author
+    if (items && items.length > 1) {
+      items.sort((a, b) => {
+        let valA = "";
+        let valB = "";
+
+        if (dbSortField === "author_names_first_last") {
+          valA = a.author_names_first_last || "";
+          valB = b.author_names_first_last || "";
+        } else if (dbSortField === "title") {
+          valA = (a.title || "").replace(/^(the|a|an)\s+/i, "");
+          valB = (b.title || "").replace(/^(the|a|an)\s+/i, "");
+        } else {
+          return 0;
+        }
+
+        const comp = valA.localeCompare(valB, undefined, {
+          numeric: true,
+          sensitivity: "base",
+        });
+        return isDesc ? -comp : comp;
+      });
     }
 
     const itemIds = items.map((i) => i.id);
@@ -202,8 +240,8 @@ librariesRouter.get("/:id/items", async (c) => {
       total: count || 0,
       limit,
       page: offset / limit,
-      sortBy: sort,
-      sortDesc: desc,
+      sortBy: sortParam,
+      sortDesc: isDesc,
     };
 
     return c.json(response);
@@ -214,6 +252,73 @@ librariesRouter.get("/:id/items", async (c) => {
       message: err.message,
       stack: err.stack,
     }, 500);
+  }
+});
+
+librariesRouter.post("/:id/smart-sort", async (c) => {
+  const supabase = c.get("supabase");
+  const libraryId = c.req.param("id");
+  const body = await c.req.json().catch(() => ({}));
+  const criteria = body.criteria || "chronological reading order";
+
+  const { data: items, error } = await supabase
+    .from("library_items")
+    .select("id, title, author_names_first_last, published_year")
+    .eq("library_id", libraryId);
+
+  if (error || !items || items.length === 0) {
+    return c.json({ sortedIds: [] });
+  }
+
+  const zaiApiKey = Deno.env.get("ZAI_API_KEY") ??
+    Deno.env.get("ZHIPU_API_KEY") ?? "";
+  if (!zaiApiKey) {
+    const sorted = [...items].sort((a, b) =>
+      (a.title || "").localeCompare(b.title || "", undefined, { numeric: true })
+    );
+    return c.json({ sortedIds: sorted.map((s) => s.id), provider: "local" });
+  }
+
+  try {
+    const prompt =
+      `Given the following list of audiobooks (JSON format with id, title, author, year):
+${JSON.stringify(items)}
+
+Sort them intelligently by: ${criteria}.
+Return ONLY a valid JSON array of string IDs representing the sorted order, like: ["id1", "id2", "id3"].`;
+
+    const res = await fetch(
+      "https://open.bigmodel.cn/api/paas/v4/chat/completions",
+      {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${zaiApiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: "glm-4-flash",
+          messages: [{ role: "user", content: prompt }],
+          temperature: 0.1,
+        }),
+      },
+    );
+
+    if (!res.ok) {
+      throw new Error(`Z.ai GLM-4 returned status ${res.status}`);
+    }
+
+    const data = await res.json();
+    const content = data.choices?.[0]?.message?.content || "";
+    const jsonMatch = content.match(/\[[\s\S]*\]/);
+    const sortedIds: string[] = jsonMatch
+      ? JSON.parse(jsonMatch[0])
+      : items.map((i) => i.id);
+
+    return c.json({ sortedIds, provider: "z.ai-glm-4" });
+  } catch (err: unknown) {
+    const e = err as Error;
+    console.error("[smart-sort] Error:", e.message);
+    return c.json({ error: e.message }, 500);
   }
 });
 
