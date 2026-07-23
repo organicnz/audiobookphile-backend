@@ -44,11 +44,58 @@ export class PlaybackService {
       );
     }
 
-    const audioFilesList =
+    let audioFilesList =
       ((item as Record<string, unknown>)?.audio_files || []) as Record<
         string,
         unknown
       >[];
+
+    // Fallback: If audio_files is empty, extract audio files from library_files
+    if (!audioFilesList.length) {
+      const libraryFiles =
+        ((item as Record<string, unknown>)?.library_files || []) as Record<
+          string,
+          unknown
+        >[];
+      const audioExts = [
+        ".mp3",
+        ".m4b",
+        ".m4a",
+        ".aac",
+        ".flac",
+        ".ogg",
+        ".opus",
+        ".wma",
+      ];
+      const extracted = libraryFiles
+        .filter((lf) => {
+          const metadata = (lf.metadata as Record<string, unknown>) || {};
+          const ext = String(metadata.ext || "").toLowerCase();
+          const relPath = String(
+            metadata.relPath || metadata.filename || lf.path || "",
+          ).toLowerCase();
+          return audioExts.some((e) => ext.endsWith(e) || relPath.endsWith(e));
+        })
+        .map((lf, idx) => {
+          const metadata = (lf.metadata as Record<string, unknown>) || {};
+          return {
+            index: idx,
+            ino: lf.ino,
+            metadata: metadata,
+            size: Number(lf.size) || Number(metadata.size) || 0,
+            duration: Number(lf.duration) || Number(metadata.duration) || 0,
+            mime_type: String(metadata.mimeType || "audio/mpeg"),
+            codec: String(metadata.codec || "mp3"),
+            filename: String(
+              metadata.filename || metadata.relPath || `Track ${idx + 1}`,
+            ),
+          };
+        });
+
+      if (extracted.length > 0) {
+        audioFilesList = extracted;
+      }
+    }
 
     if (!audioFilesList.length) {
       throw new Error("No audio files found for this item");

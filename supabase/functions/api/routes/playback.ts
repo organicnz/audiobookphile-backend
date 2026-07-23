@@ -50,18 +50,28 @@ playbackRouter.post("/items/:id/play", async (c) => {
   const forceTranscode = body.forceTranscode ?? false;
   const supportedMimeTypes = body.supportedMimeTypes || [];
 
-  const session = await PlaybackService.startSession(
-    supabase,
-    user.id,
-    itemId,
-    null,
-    deviceInfo,
-    supportedMimeTypes,
-    forceDirectPlay,
-    forceTranscode,
-  );
-
-  return c.json(session);
+  try {
+    const session = await PlaybackService.startSession(
+      supabase,
+      user.id,
+      itemId,
+      null,
+      deviceInfo,
+      supportedMimeTypes,
+      forceDirectPlay,
+      forceTranscode,
+    );
+    return c.json(session);
+  } catch (err: unknown) {
+    const e = err as Error;
+    const isNotFound = e.message.includes("not found") ||
+      e.message.includes("does not exist");
+    const status = isNotFound ? 404 : 400;
+    return c.json(
+      { success: false, error: { message: e.message } },
+      status,
+    );
+  }
 });
 
 playbackRouter.post("/items/:id/play/:episodeId", async (c) => {
@@ -87,18 +97,28 @@ playbackRouter.post("/items/:id/play/:episodeId", async (c) => {
   const forceTranscode = body.forceTranscode ?? false;
   const supportedMimeTypes = body.supportedMimeTypes || [];
 
-  const session = await PlaybackService.startSession(
-    supabase,
-    user.id,
-    itemId,
-    episodeId,
-    deviceInfo,
-    supportedMimeTypes,
-    forceDirectPlay,
-    forceTranscode,
-  );
-
-  return c.json(session);
+  try {
+    const session = await PlaybackService.startSession(
+      supabase,
+      user.id,
+      itemId,
+      episodeId,
+      deviceInfo,
+      supportedMimeTypes,
+      forceDirectPlay,
+      forceTranscode,
+    );
+    return c.json(session);
+  } catch (err: unknown) {
+    const e = err as Error;
+    const isNotFound = e.message.includes("not found") ||
+      e.message.includes("does not exist");
+    const status = isNotFound ? 404 : 400;
+    return c.json(
+      { success: false, error: { message: e.message } },
+      status,
+    );
+  }
 });
 
 playbackRouter.post("/session/:id/sync", async (c) => {
