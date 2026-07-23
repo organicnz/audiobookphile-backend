@@ -130,18 +130,19 @@ Deno.serve(async (req) => {
       queryEmbedding = data.data[0].embedding;
     }
 
-    // 2. Perform vector search in Supabase using the RPC
+    // 2. Perform hybrid vector & text search in Supabase using the match_library_items_hybrid RPC
     const { data: matches, error: matchError } = await supabase.rpc(
-      "search_library_items_by_embedding",
+      "match_library_items_hybrid",
       {
-        query_embedding: queryEmbedding,
-        match_threshold: 0.1, // low threshold to allow fuzzy matches
-        match_count: 10,
+        query_text: query,
+        query_embedding: queryEmbedding.length > 0 ? queryEmbedding : null,
+        match_threshold: 0.1,
+        match_count: 20,
       },
     );
 
     if (matchError) {
-      throw new Error(`Failed to execute vector search: ${matchError.message}`);
+      throw new Error(`Failed to execute hybrid search: ${matchError.message}`);
     }
 
     if (!matches || matches.length === 0) {
