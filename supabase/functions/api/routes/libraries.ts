@@ -149,12 +149,14 @@ librariesRouter.get("/:id/items", async (c) => {
   const libraryId = c.req.param("id");
 
   const queryParams = new URL(c.req.raw.url).searchParams;
-  const limit = parseInt(queryParams.get("limit") || "50", 10);
+  const rawLimit = queryParams.get("limit");
+  const limit = rawLimit !== null ? parseInt(rawLimit, 10) : 50;
   const page = parseInt(queryParams.get("page") || "0", 10);
   const sortParam = (queryParams.get("sort") || "addedAt").toLowerCase();
   const isDesc = queryParams.get("desc") === "1" ||
     queryParams.get("desc") === "true";
-  const offset = page * limit;
+  const isFetchAll = limit === 0;
+  const offset = isFetchAll ? 0 : page * limit;
 
   let dbSortField = "created_at";
   if (sortParam.includes("author")) {
@@ -174,14 +176,19 @@ librariesRouter.get("/:id/items", async (c) => {
   }
 
   try {
-    const { data: items, error, count } = await supabase
+    let query = supabase
       .from("library_items")
       .select("*, book_authors(authors(*)), book_series(series(*))", {
         count: "exact",
       })
       .eq("library_id", libraryId)
-      .order(dbSortField, { ascending: !isDesc })
-      .range(offset, offset + limit - 1);
+      .order(dbSortField, { ascending: !isDesc });
+
+    if (!isFetchAll) {
+      query = query.range(offset, offset + limit - 1);
+    }
+
+    const { data: items, error, count } = await query;
 
     if (error) {
       return c.json({
