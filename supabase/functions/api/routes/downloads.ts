@@ -29,11 +29,53 @@ downloadsRouter.get("/:id/download", async (c) => {
     );
   }
 
-  const audioFilesList =
+  let audioFilesList =
     ((item as Record<string, unknown>)?.audio_files || []) as Record<
       string,
       unknown
     >[];
+
+  if (
+    !audioFilesList.length &&
+    Array.isArray((item as Record<string, unknown>)?.library_files)
+  ) {
+    const libraryFiles = (item as Record<string, unknown>)
+      .library_files as Record<string, unknown>[];
+    const audioExtensions = [
+      ".mp3",
+      ".m4b",
+      ".m4a",
+      ".aac",
+      ".flac",
+      ".ogg",
+      ".opus",
+      ".wma",
+    ];
+    audioFilesList = libraryFiles
+      .filter((lf) => {
+        const metadata = (lf.metadata as Record<string, unknown>) || {};
+        const ext = String(metadata.ext || "").toLowerCase();
+        const relPath = String(
+          metadata.relPath || metadata.filename || lf.path || "",
+        ).toLowerCase();
+        return audioExtensions.some((e) =>
+          ext.endsWith(e) || relPath.endsWith(e)
+        );
+      })
+      .map((lf, idx) => {
+        const metadata = (lf.metadata as Record<string, unknown>) || {};
+        return {
+          ino: lf.ino,
+          index: idx,
+          track_index: idx,
+          duration: Number(lf.duration) || Number(metadata.duration) || 0,
+          size: Number(lf.size) || Number(metadata.size) || 0,
+          mimeType: String(metadata.mimeType || "audio/mpeg"),
+          codec: String(metadata.codec || "mp3"),
+          metadata: metadata,
+        };
+      });
+  }
 
   if (!audioFilesList.length) {
     return c.json({ error: "No audio files found for this item" }, 404);
