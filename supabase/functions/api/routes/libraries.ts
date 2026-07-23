@@ -235,11 +235,14 @@ librariesRouter.get("/:id/items", async (c) => {
       )
     );
 
+    const safeLimit = limit > 0 ? limit : 0;
+    const safePage = limit > 0 ? Math.floor(offset / limit) : page;
+
     const response = {
       results: mappedItems,
       total: count || 0,
-      limit,
-      page: offset / limit,
+      limit: safeLimit,
+      page: safePage,
       sortBy: sortParam,
       sortDesc: isDesc,
     };
