@@ -270,15 +270,37 @@ export function mapBookForMobile(
   }).sort((a, b) => Number(a.index || 0) - Number(b.index || 0)) || [];
 
   // 5. Chapters
-  const chaptersList = (bookRecord.chapters as Chapter[]) || [];
-  const chapters = chaptersList.map((ch) => ({
-    id: ch.chapter_index !== undefined
-      ? Number(ch.chapter_index)
-      : (typeof ch.id === "number" ? ch.id : parseInt(String(ch.id)) || 0),
-    title: String(ch.title || ""),
-    start: Number(ch.start_time !== undefined ? ch.start_time : ch.start) || 0,
-    end: Number(ch.end_time !== undefined ? ch.end_time : ch.end) || 0,
-  })).sort((a, b) => a.id - b.id) || [];
+  let chaptersList = (bookRecord.chapters as Chapter[]) || [];
+  let chapters: { id: number; title: string; start: number; end: number }[] =
+    [];
+  if (chaptersList.length > 0) {
+    chapters = chaptersList.map((ch) => ({
+      id: ch.chapter_index !== undefined
+        ? Number(ch.chapter_index)
+        : (typeof ch.id === "number" ? ch.id : parseInt(String(ch.id)) || 0),
+      title: String(ch.title || ""),
+      start: Number(ch.start_time !== undefined ? ch.start_time : ch.start) ||
+        0,
+      end: Number(ch.end_time !== undefined ? ch.end_time : ch.end) || 0,
+    })).sort((a, b) => a.id - b.id);
+  } else if (audioFiles.length > 0) {
+    let currentStart = 0;
+    chapters = audioFiles.map((af, idx) => {
+      const dur = Number(af.duration) || 0;
+      const start = currentStart;
+      currentStart += dur;
+      const meta = af.metadata || {};
+      const rawName = af.filename || meta.filename || `Track ${idx + 1}`;
+      const cleanTitle = rawName.split("/").pop()?.replace(/\.[^/.]+$/, "") ||
+        rawName;
+      return {
+        id: idx + 1,
+        title: cleanTitle,
+        start: start,
+        end: currentStart,
+      };
+    });
+  }
 
   // 6. User Media Progress
   const userMediaProgress = progressRecord
