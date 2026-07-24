@@ -139,63 +139,84 @@ Deno.serve(async (req) => {
     // --- SMART REBINDING & DUPLICATE PREVENTION ---
     let existingItem: any = null;
 
+    const normalizeTitle = (s: string) => {
+      if (!s) return "";
+      let v = s.toLowerCase().trim();
+      v = v.replace(
+        /\[(audiobook|unabridged|abridged|mp3)\]|\((audiobook|unabridged|abridged|mp3)\)/gi,
+        "",
+      );
+      v = v.replace(/\b(cd|disc|part|vol|volume)\s*\d+\b/gi, "");
+      return v.replace(/[^\p{L}\p{N}]/gu, "");
+    };
+
     // 1. Try matching directly by bookId or media_id
-    const { data: itemById } = await db.from("library_items")
+    const { data: itemsById } = await db.from("library_items")
       .select(
         "id, media_id, size, library_files, audio_files, duration, author_names_first_last, title",
       )
       .or(`id.eq.${bookId},media_id.eq.${bookId}`)
       .eq("library_id", libraryId)
-      .maybeSingle();
+      .limit(1);
 
-    if (itemById) {
-      existingItem = itemById;
+    if (itemsById && itemsById.length > 0) {
+      existingItem = itemsById[0];
     } else if (title) {
-      // 2. Try exact title match in same library
-      const { data: itemByTitle } = await db.from("library_items")
+      // Fetch all items in library for exact, normalized, and Z.AI matching
+      const { data: allLibItems } = await db.from("library_items")
         .select(
           "id, media_id, size, library_files, audio_files, duration, author_names_first_last, title",
         )
-        .eq("library_id", libraryId)
-        .ilike("title", title.trim())
-        .maybeSingle();
+        .eq("library_id", libraryId);
 
-      if (itemByTitle) {
-        existingItem = itemByTitle;
-      } else {
-        // Fetch all items in library for normalized and Z.AI matching
-        const { data: allLibItems } = await db.from("library_items")
-          .select(
-            "id, media_id, size, library_files, audio_files, duration, author_names_first_last, title",
-          )
-          .eq("library_id", libraryId);
+      if (allLibItems?.length) {
+        const normTitle = normalizeTitle(title);
 
-        if (allLibItems?.length) {
-          // 3. Try normalized fuzzy title match
-          const normalize = (s: string) =>
-            s.toLowerCase().replace(/[^a-z0-9]/g, "");
-          const normTitle = normalize(title);
-
-          for (const item of allLibItems) {
-            const normItemTitle = normalize(item.title || "");
-            if (normItemTitle && normItemTitle === normTitle) {
+        // 2. Try exact title, normalized fuzzy title match, or prefix title + matching author
+        for (const item of allLibItems) {
+          const itemTitle = (item.title || "").trim();
+          if (itemTitle.toLowerCase() === title.trim().toLowerCase()) {
+            existingItem = item;
+            break;
+          }
+          const normItemTitle = normalizeTitle(itemTitle);
+          if (normItemTitle && normItemTitle === normTitle) {
+            existingItem = item;
+            break;
+          }
+          if (
+            normItemTitle && normTitle &&
+            (normItemTitle.startsWith(normTitle) ||
+              normTitle.startsWith(normItemTitle))
+          ) {
+            const itemAuthor = (item.author_names_first_last || "")
+              .toLowerCase().replace(/[^\p{L}\p{N}]/gu, "");
+            const uploadAuthor = (author || "").toLowerCase().replace(
+              /[^\p{L}\p{N}]/gu,
+              "",
+            );
+            if (
+              !itemAuthor || !uploadAuthor ||
+              itemAuthor.includes(uploadAuthor) ||
+              uploadAuthor.includes(itemAuthor)
+            ) {
               existingItem = item;
               break;
             }
           }
+        }
 
-          // 4. Try Z.AI AI Semantic/Fuzzy Match if normalized match didn't find item
-          if (!existingItem && zaiApiKey) {
-            const matchedId = await matchExistingBookWithZAI(
-              title,
-              author,
-              allLibItems,
-              zaiApiKey,
-            );
-            if (matchedId) {
-              existingItem = allLibItems.find((i) => i.id === matchedId) ||
-                null;
-            }
+        // 3. Try Z.AI AI Semantic/Fuzzy Match if normalized match didn't find item
+        if (!existingItem && zaiApiKey) {
+          const matchedId = await matchExistingBookWithZAI(
+            title,
+            author,
+            allLibItems,
+            zaiApiKey,
+          );
+          if (matchedId) {
+            existingItem = allLibItems.find((i) => i.id === matchedId) ||
+              null;
           }
         }
       }
