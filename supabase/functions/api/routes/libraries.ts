@@ -254,6 +254,61 @@ librariesRouter.get("/:id/items", async (c) => {
       sortDesc: isDesc,
     };
 
+    // Non-blocking background auto-deduplication
+    const runAutoDeduplicate = async () => {
+      try {
+        const { data: allItems } = await supabase.from("library_items")
+          .select("id, title, audio_files, library_files, created_at")
+          .eq("library_id", libraryId);
+
+        if (!allItems || allItems.length <= 1) return;
+
+        const groups = new Map<string, any[]>();
+        for (const item of allItems) {
+          const norm = (item.title || "").toLowerCase().replace(
+            /[^a-z0-9]/g,
+            "",
+          ).trim();
+          if (!norm) continue;
+          const list = groups.get(norm) || [];
+          list.push(item);
+          groups.set(norm, list);
+        }
+
+        for (const [_, group] of groups.entries()) {
+          if (group.length <= 1) continue;
+          group.sort((a: any, b: any) =>
+            (b.audio_files || []).length - (a.audio_files || []).length
+          );
+          const primary = group[0];
+          const duplicates = group.slice(1);
+
+          for (const dup of duplicates) {
+            await supabase.from("media_progress").update({
+              library_item_id: primary.id,
+            }).eq("library_item_id", dup.id);
+            await supabase.from("bookmarks").update({
+              library_item_id: primary.id,
+            }).eq("library_item_id", dup.id);
+            await supabase.from("library_items").delete().eq("id", dup.id);
+          }
+        }
+      } catch (_e) {
+        // Silent background cleanup
+      }
+    };
+
+    // @ts-ignore
+    if (
+      typeof (globalThis as any).EdgeRuntime !== "undefined" &&
+      typeof (globalThis as any).EdgeRuntime.waitUntil === "function"
+    ) {
+      // @ts-ignore
+      (globalThis as any).EdgeRuntime.waitUntil(runAutoDeduplicate());
+    } else {
+      runAutoDeduplicate().catch(() => {});
+    }
+
     return c.json(response);
   } catch (e: unknown) {
     const err = e as Error;

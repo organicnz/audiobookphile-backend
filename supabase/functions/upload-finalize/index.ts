@@ -544,6 +544,64 @@ Deno.serve(async (req) => {
       }
     }
 
+    // --- Z.AI AUTOMATED METADATA ENRICHMENT ---
+    if (title && zaiApiKey) {
+      const enrichAsync = async () => {
+        try {
+          const aiRes = await fetch(
+            "https://open.bigmodel.cn/api/paas/v4/chat/completions",
+            {
+              method: "POST",
+              headers: {
+                "Authorization": `Bearer ${zaiApiKey}`,
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({
+                model: "glm-4-flash",
+                messages: [{
+                  role: "user",
+                  content:
+                    `Generate a concise executive summary (description), top 3 genres/tags, and published year for the audiobook "${title}" by ${
+                      author || "Unknown Author"
+                    }. Return ONLY a JSON object: {"description": "...", "genres": ["..."], "publishedYear": "YYYY"}`,
+                }],
+                temperature: 0.2,
+              }),
+            },
+          );
+          if (aiRes.ok) {
+            const aiData = await aiRes.json();
+            const text = aiData.choices?.[0]?.message?.content || "";
+            const match = text.match(/\{[\s\S]*\}/);
+            if (match) {
+              const enriched = JSON.parse(match[0]);
+              await db.from("library_items").update({
+                description: enriched.description || undefined,
+                genres: enriched.genres || undefined,
+                published_year: enriched.publishedYear || undefined,
+              }).eq("id", libraryItemId);
+              console.log(
+                `[upload-finalize] Z.AI successfully enriched metadata for "${title}"`,
+              );
+            }
+          }
+        } catch (_err) {
+          // Silent enrichment fallback
+        }
+      };
+
+      // @ts-ignore
+      if (
+        typeof (globalThis as any).EdgeRuntime !== "undefined" &&
+        typeof (globalThis as any).EdgeRuntime.waitUntil === "function"
+      ) {
+        // @ts-ignore
+        (globalThis as any).EdgeRuntime.waitUntil(enrichAsync());
+      } else {
+        enrichAsync().catch(() => {});
+      }
+    }
+
     return new Response(
       JSON.stringify({ success: true, libraryItemId, bookId }),
       {
