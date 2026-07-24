@@ -121,6 +121,59 @@ metadataRouter.post("/match-book", async (c) => {
       }
     }
 
+    // Z.AI GLM-4 Fallback Matcher
+    if (results.length === 0) {
+      const zaiApiKey = Deno.env.get("ZAI_API_KEY") ??
+        Deno.env.get("ZHIPU_API_KEY") ?? "";
+      if (zaiApiKey) {
+        try {
+          const aiRes = await fetch(
+            "https://open.bigmodel.cn/api/paas/v4/chat/completions",
+            {
+              method: "POST",
+              headers: {
+                "Authorization": `Bearer ${zaiApiKey}`,
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({
+                model: "glm-4-flash",
+                messages: [{
+                  role: "user",
+                  content:
+                    `Provide accurate metadata for the audiobook "${title}" by "${
+                      author || "Unknown"
+                    }". Return ONLY a JSON object: {"title": "...", "author": "...", "description": "...", "genres": ["..."], "publishedYear": "YYYY"}`,
+                }],
+                temperature: 0.1,
+              }),
+            },
+          );
+          if (aiRes.ok) {
+            const aiData = await aiRes.json();
+            const text = aiData.choices?.[0]?.message?.content || "";
+            const match = text.match(/\{[\s\S]*\}/);
+            if (match) {
+              const parsed = JSON.parse(match[0]);
+              results.push({
+                title: parsed.title || title,
+                author: parsed.author || author || "",
+                description: parsed.description || "",
+                cover: undefined,
+                series: [],
+                genres: parsed.genres || [],
+                tags: [],
+                publishedYear: parsed.publishedYear || undefined,
+                explicit: false,
+                abridged: false,
+              });
+            }
+          }
+        } catch (_e) {
+          // Ignore
+        }
+      }
+    }
+
     return c.json({ results });
   } catch (err: any) {
     console.error("[metadata] match-book failed:", err);
