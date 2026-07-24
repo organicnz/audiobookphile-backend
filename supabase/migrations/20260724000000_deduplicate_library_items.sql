@@ -25,76 +25,6 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql IMMUTABLE;
 
--- Helper function to auto-link multi-part series, clean release group author tags, and fix truncated titles
-CREATE OR REPLACE FUNCTION public.auto_link_series_and_clean_titles()
-RETURNS integer AS $$
-DECLARE
-    v_linked_count integer := 0;
-    v_rec RECORD;
-    v_parent_dir text;
-    v_series_id uuid;
-    v_full_title text;
-    v_seq numeric;
-BEGIN
-    -- 1. Clean scene/release group tags from authors (e.g. [AB].Isaac.Asimov... -> Isaac Asimov)
-    UPDATE public.library_items
-    SET author_names_first_last = regexp_replace(author_names_first_last, '^\[[a-z0-9._\-]+\]\.?|[-.]?Complete-MaLiBu$', '', 'gi')
-    WHERE author_names_first_last ~* '\[[a-z0-9._\-]+\]|Complete-MaLiBu';
-
-    UPDATE public.library_items
-    SET author_names_first_last = 'Isaac Asimov'
-    WHERE author_names_first_last ILIKE '%Isaac%Asimov%';
-
-    -- 2. Detect multi-part items sharing parent folder (e.g. "Isaac Asimov Foundation/Book 1 - Foundation")
-    FOR v_rec IN
-        SELECT id, library_id, title, author_names_first_last, rel_path, path
-        FROM public.library_items
-        WHERE rel_path LIKE '%/%'
-    LOOP
-        v_parent_dir := trim(split_part(v_rec.rel_path, '/', 1));
-        
-        IF v_parent_dir != '' AND length(v_parent_dir) > 3 
-           AND v_parent_dir NOT ILIKE 'audiobooks' 
-           AND v_parent_dir NOT ILIKE 'music'
-           AND (SELECT count(*) FROM public.library_items WHERE rel_path LIKE v_parent_dir || '/%') > 1 THEN
-           
-            -- Upsert series for parent directory
-            INSERT INTO public.series (id, name, library_id)
-            VALUES (gen_random_uuid(), v_parent_dir, v_rec.library_id)
-            ON CONFLICT (library_id, name) DO UPDATE SET updated_at = now()
-            RETURNING id INTO v_series_id;
-
-            IF v_series_id IS NULL THEN
-                SELECT id INTO v_series_id FROM public.series WHERE library_id = v_rec.library_id AND name = v_parent_dir;
-            END IF;
-
-            -- Extract sequence number if present (e.g. Book 1, 01, Vol 2)
-            v_seq := 1;
-            IF v_rec.rel_path ~* '\b(book|vol|volume|part|cd|disc)?\s*(\d+)\b' THEN
-                v_seq := coalesce(nullif(regexp_replace(v_rec.rel_path, '.*?\b(book|vol|volume|part|cd|disc)?\s*(\d+)\b.*', '\2', 'gi'), '')::numeric, 1);
-            END IF;
-
-            -- Link book to series
-            IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'book_series') THEN
-                INSERT INTO public.book_series (library_item_id, series_id, sequence)
-                VALUES (v_rec.id, v_series_id, v_seq)
-                ON CONFLICT (library_item_id, series_id) DO UPDATE SET sequence = EXCLUDED.sequence;
-            END IF;
-
-            -- Fix truncated title if title is just "Book 1", "Book 2", etc. but rel_path has full name
-            v_full_title := trim(split_part(v_rec.rel_path, '/', 2));
-            IF v_rec.title ~* '^book\s*\d+$' AND v_full_title != '' AND length(v_full_title) > length(v_rec.title) THEN
-                UPDATE public.library_items SET title = v_full_title WHERE id = v_rec.id;
-            END IF;
-
-            v_linked_count := v_linked_count + 1;
-        END IF;
-    END LOOP;
-
-    RETURN v_linked_count;
-END;
-$$ LANGUAGE plpgsql;
-
 -- Helper function to merge a duplicate library_item into a primary library_item
 CREATE OR REPLACE FUNCTION public.merge_two_library_items(p_primary_id uuid, p_dup_id uuid)
 RETURNS boolean AS $$
@@ -145,6 +75,11 @@ BEGIN
         END IF;
     END LOOP;
 
+    -- Re-index audio files sequentially
+    FOR i IN 0..(jsonb_array_length(v_combined_audio) - 1) LOOP
+        v_combined_audio := jsonb_set(v_combined_audio, ARRAY[i::text, 'index'], to_jsonb(i + 1));
+    END LOOP;
+
     -- 2. Merge library_files JSONB array
     v_combined_files := coalesce(v_primary_rec.library_files, '[]'::jsonb);
     v_seen_lib_filenames := ARRAY[]::text[];
@@ -168,7 +103,7 @@ BEGIN
         END IF;
     END LOOP;
 
-    v_total_dur := greatest(coalesce(v_primary_rec.duration, 0), coalesce(v_dup_rec.duration, 0));
+    v_total_dur := greatest(coalesce(v_primary_rec.duration, 0), coalesce(v_dup_rec.duration, 0)) + case when v_primary_rec.duration is not null and v_dup_rec.duration is not null then coalesce(v_dup_rec.duration, 0) else 0 end;
     v_total_size := coalesce(v_primary_rec.size, 0) + coalesce(v_dup_rec.size, 0);
 
     UPDATE public.library_items
@@ -241,7 +176,98 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- Main function to run multi-pass deduplication & series auto-linking
+-- Helper function to unite multi-part books under a single book cover card
+CREATE OR REPLACE FUNCTION public.merge_multipart_folder_books()
+RETURNS integer AS $$
+DECLARE
+    v_merged_count integer := 0;
+    v_parent_dir text;
+    v_lib_id uuid;
+    v_primary_rec RECORD;
+    v_dup_rec RECORD;
+    v_clean_title text;
+    v_clean_author text;
+BEGIN
+    -- 1. Clean scene/release group tags from authors
+    UPDATE public.library_items
+    SET author_names_first_last = regexp_replace(author_names_first_last, '^\[[a-z0-9._\-]+\]\.?|[-.]?Complete-MaLiBu$', '', 'gi')
+    WHERE author_names_first_last ~* '\[[a-z0-9._\-]+\]|Complete-MaLiBu';
+
+    UPDATE public.library_items
+    SET author_names_first_last = 'Isaac Asimov'
+    WHERE author_names_first_last ILIKE '%Isaac%Asimov%';
+
+    -- 2. Loop over parent directories in rel_path that contain multiple book items (e.g. "Isaac Asimov Foundation")
+    FOR v_parent_dir, v_lib_id IN
+        SELECT split_part(rel_path, '/', 1) as parent_dir, library_id
+        FROM public.library_items
+        WHERE rel_path LIKE '%/%'
+          AND split_part(rel_path, '/', 1) NOT ILIKE 'audiobooks'
+          AND split_part(rel_path, '/', 1) NOT ILIKE 'music'
+          AND split_part(rel_path, '/', 1) NOT ILIKE 'Marshall Rosenberg'
+          AND split_part(rel_path, '/', 1) NOT ILIKE 'Annie Jacobsen'
+          AND split_part(rel_path, '/', 1) NOT ILIKE 'Dark Psychology Audiobook Collection'
+        GROUP BY split_part(rel_path, '/', 1), library_id
+        HAVING count(*) > 1
+    LOOP
+        v_clean_title := v_parent_dir;
+
+        -- Pick primary record (Book 1 / earliest part)
+        SELECT * INTO v_primary_rec
+        FROM public.library_items
+        WHERE library_id = v_lib_id
+          AND split_part(rel_path, '/', 1) = v_parent_dir
+        ORDER BY case 
+                    when rel_path ILIKE '%Book 1%' or rel_path ILIKE '%01%' or rel_path ILIKE '%Vol.1%' then 0
+                    when rel_path ILIKE '%Book 2%' or rel_path ILIKE '%02%' or rel_path ILIKE '%Vol.2%' then 1
+                    else 2
+                 end ASC,
+                 created_at ASC
+        LIMIT 1;
+
+        IF v_primary_rec.id IS NULL THEN
+            CONTINUE;
+        END IF;
+
+        v_clean_author := v_primary_rec.author_names_first_last;
+        IF v_clean_author ILIKE '%Isaac%Asimov%' OR v_clean_author ILIKE '%MaLiBu%' THEN
+            v_clean_author := 'Isaac Asimov';
+        END IF;
+
+        UPDATE public.library_items
+        SET title = v_clean_title,
+            author_names_first_last = v_clean_author
+        WHERE id = v_primary_rec.id;
+
+        -- Merge all other multi-part books under this folder into the primary single book
+        FOR v_dup_rec IN
+            SELECT *
+            FROM public.library_items
+            WHERE library_id = v_lib_id
+              AND split_part(rel_path, '/', 1) = v_parent_dir
+              AND id != v_primary_rec.id
+            ORDER BY case 
+                        when rel_path ILIKE '%Book 1%' or rel_path ILIKE '%01%' then 1
+                        when rel_path ILIKE '%Book 2%' or rel_path ILIKE '%02%' then 2
+                        when rel_path ILIKE '%Book 3%' or rel_path ILIKE '%03%' then 3
+                        when rel_path ILIKE '%Book 4%' or rel_path ILIKE '%04%' then 4
+                        when rel_path ILIKE '%Book 5%' or rel_path ILIKE '%05%' then 5
+                        when rel_path ILIKE '%Book 6%' or rel_path ILIKE '%06%' then 6
+                        when rel_path ILIKE '%Book 7%' or rel_path ILIKE '%07%' then 7
+                        else 99
+                     end ASC
+        LOOP
+            IF public.merge_two_library_items(v_primary_rec.id, v_dup_rec.id) THEN
+                v_merged_count := v_merged_count + 1;
+            END IF;
+        END LOOP;
+    END LOOP;
+
+    RETURN v_merged_count;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Main function to run multi-pass deduplication & multi-part book unification
 CREATE OR REPLACE FUNCTION public.deduplicate_library_items()
 RETURNS integer AS $$
 DECLARE
@@ -253,13 +279,13 @@ DECLARE
     v_dup_id uuid;
     v_rec RECORD;
 BEGIN
-    -- 0. Assign default library & auto-link series
+    -- 0. Assign default library & unite multi-part folder books under one book cover
     SELECT id INTO v_default_lib_id FROM public.libraries ORDER BY display_order ASC LIMIT 1;
     IF v_default_lib_id IS NOT NULL THEN
         UPDATE public.library_items SET library_id = v_default_lib_id WHERE library_id IS NULL;
     END IF;
 
-    PERFORM public.auto_link_series_and_clean_titles();
+    v_merged_count := v_merged_count + public.merge_multipart_folder_books();
 
     -- PASS 1: Exact / Normalized Title Matches
     FOR v_lib_id, v_norm_title IN
@@ -385,5 +411,5 @@ EXCEPTION WHEN OTHERS THEN
     -- Ignore if pg_cron is not enabled or job already exists
 END $$;
 
--- Execute immediate multi-pass deduplication
+-- Execute immediate multi-pass deduplication & multi-part unification
 SELECT public.deduplicate_library_items();
