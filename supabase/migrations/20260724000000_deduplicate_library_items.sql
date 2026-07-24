@@ -25,6 +25,76 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql IMMUTABLE;
 
+-- Helper function to auto-link multi-part series, clean release group author tags, and fix truncated titles
+CREATE OR REPLACE FUNCTION public.auto_link_series_and_clean_titles()
+RETURNS integer AS $$
+DECLARE
+    v_linked_count integer := 0;
+    v_rec RECORD;
+    v_parent_dir text;
+    v_series_id uuid;
+    v_full_title text;
+    v_seq numeric;
+BEGIN
+    -- 1. Clean scene/release group tags from authors (e.g. [AB].Isaac.Asimov... -> Isaac Asimov)
+    UPDATE public.library_items
+    SET author_names_first_last = regexp_replace(author_names_first_last, '^\[[a-z0-9._\-]+\]\.?|[-.]?Complete-MaLiBu$', '', 'gi')
+    WHERE author_names_first_last ~* '\[[a-z0-9._\-]+\]|Complete-MaLiBu';
+
+    UPDATE public.library_items
+    SET author_names_first_last = 'Isaac Asimov'
+    WHERE author_names_first_last ILIKE '%Isaac%Asimov%';
+
+    -- 2. Detect multi-part items sharing parent folder (e.g. "Isaac Asimov Foundation/Book 1 - Foundation")
+    FOR v_rec IN
+        SELECT id, library_id, title, author_names_first_last, rel_path, path
+        FROM public.library_items
+        WHERE rel_path LIKE '%/%'
+    LOOP
+        v_parent_dir := trim(split_part(v_rec.rel_path, '/', 1));
+        
+        IF v_parent_dir != '' AND length(v_parent_dir) > 3 
+           AND v_parent_dir NOT ILIKE 'audiobooks' 
+           AND v_parent_dir NOT ILIKE 'music'
+           AND (SELECT count(*) FROM public.library_items WHERE rel_path LIKE v_parent_dir || '/%') > 1 THEN
+           
+            -- Upsert series for parent directory
+            INSERT INTO public.series (id, name, library_id)
+            VALUES (gen_random_uuid(), v_parent_dir, v_rec.library_id)
+            ON CONFLICT (library_id, name) DO UPDATE SET updated_at = now()
+            RETURNING id INTO v_series_id;
+
+            IF v_series_id IS NULL THEN
+                SELECT id INTO v_series_id FROM public.series WHERE library_id = v_rec.library_id AND name = v_parent_dir;
+            END IF;
+
+            -- Extract sequence number if present (e.g. Book 1, 01, Vol 2)
+            v_seq := 1;
+            IF v_rec.rel_path ~* '\b(book|vol|volume|part|cd|disc)?\s*(\d+)\b' THEN
+                v_seq := coalesce(nullif(regexp_replace(v_rec.rel_path, '.*?\b(book|vol|volume|part|cd|disc)?\s*(\d+)\b.*', '\2', 'gi'), '')::numeric, 1);
+            END IF;
+
+            -- Link book to series
+            IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'book_series') THEN
+                INSERT INTO public.book_series (library_item_id, series_id, sequence)
+                VALUES (v_rec.id, v_series_id, v_seq)
+                ON CONFLICT (library_item_id, series_id) DO UPDATE SET sequence = EXCLUDED.sequence;
+            END IF;
+
+            -- Fix truncated title if title is just "Book 1", "Book 2", etc. but rel_path has full name
+            v_full_title := trim(split_part(v_rec.rel_path, '/', 2));
+            IF v_rec.title ~* '^book\s*\d+$' AND v_full_title != '' AND length(v_full_title) > length(v_rec.title) THEN
+                UPDATE public.library_items SET title = v_full_title WHERE id = v_rec.id;
+            END IF;
+
+            v_linked_count := v_linked_count + 1;
+        END IF;
+    END LOOP;
+
+    RETURN v_linked_count;
+END;
+$$ LANGUAGE plpgsql;
+
 -- Helper function to merge a duplicate library_item into a primary library_item
 CREATE OR REPLACE FUNCTION public.merge_two_library_items(p_primary_id uuid, p_dup_id uuid)
 RETURNS boolean AS $$
@@ -171,7 +241,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- Main function to run 4-pass deduplication
+-- Main function to run multi-pass deduplication & series auto-linking
 CREATE OR REPLACE FUNCTION public.deduplicate_library_items()
 RETURNS integer AS $$
 DECLARE
@@ -183,11 +253,13 @@ DECLARE
     v_dup_id uuid;
     v_rec RECORD;
 BEGIN
-    -- 0. Assign default library to any orphaned library_items with NULL library_id
+    -- 0. Assign default library & auto-link series
     SELECT id INTO v_default_lib_id FROM public.libraries ORDER BY display_order ASC LIMIT 1;
     IF v_default_lib_id IS NOT NULL THEN
         UPDATE public.library_items SET library_id = v_default_lib_id WHERE library_id IS NULL;
     END IF;
+
+    PERFORM public.auto_link_series_and_clean_titles();
 
     -- PASS 1: Exact / Normalized Title Matches
     FOR v_lib_id, v_norm_title IN
