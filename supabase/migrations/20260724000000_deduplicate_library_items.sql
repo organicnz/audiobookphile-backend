@@ -197,7 +197,7 @@ BEGIN
     SET author_names_first_last = 'Isaac Asimov'
     WHERE author_names_first_last ILIKE '%Isaac%Asimov%';
 
-    -- 2. Loop over parent directories in rel_path that contain multiple book items (e.g. "Isaac Asimov Foundation")
+    -- 2. Loop over parent directories in rel_path that contain multiple book items (e.g. "Isaac Asimov Foundation", "Dark Psychology Audiobook Collection")
     FOR v_parent_dir, v_lib_id IN
         SELECT split_part(rel_path, '/', 1) as parent_dir, library_id
         FROM public.library_items
@@ -206,7 +206,6 @@ BEGIN
           AND split_part(rel_path, '/', 1) NOT ILIKE 'music'
           AND split_part(rel_path, '/', 1) NOT ILIKE 'Marshall Rosenberg'
           AND split_part(rel_path, '/', 1) NOT ILIKE 'Annie Jacobsen'
-          AND split_part(rel_path, '/', 1) NOT ILIKE 'Dark Psychology Audiobook Collection'
         GROUP BY split_part(rel_path, '/', 1), library_id
         HAVING count(*) > 1
     LOOP
