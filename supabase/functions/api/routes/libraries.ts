@@ -203,7 +203,7 @@ librariesRouter.get("/:id/items", async (c) => {
 
         if (search) {
           batchQuery = batchQuery.or(
-            `title.ilike.%${search}%,author_names_first_last.ilike.%${search}%`,
+            `title.ilike.%${search}%,author_names_first_last.ilike.%${search}%,description.ilike.%${search}%,narrator_names.ilike.%${search}%,subtitle.ilike.%${search}%,publisher.ilike.%${search}%`,
           );
         }
         if (authorId) {
@@ -248,7 +248,7 @@ librariesRouter.get("/:id/items", async (c) => {
 
       if (search) {
         query = query.or(
-          `title.ilike.%${search}%,author_names_first_last.ilike.%${search}%`,
+          `title.ilike.%${search}%,author_names_first_last.ilike.%${search}%,description.ilike.%${search}%,narrator_names.ilike.%${search}%,subtitle.ilike.%${search}%,publisher.ilike.%${search}%`,
         );
       }
       if (authorId) {
@@ -385,23 +385,67 @@ librariesRouter.post("/:id/smart-sort", async (c) => {
   return c.json({ sortedIds, provider: zaiApiKey ? "z.ai-glm-4" : "local" });
 });
 
+function sanitizeSearchToken(input: string): string {
+  return input.replace(/[,():%.*]/g, "").trim();
+}
+
 librariesRouter.get("/:id/search", async (c) => {
   const supabase = c.get("supabase");
   const libraryId = c.req.param("id");
-  const q = new URL(c.req.raw.url).searchParams.get("q") || "";
+  const qParam = new URL(c.req.raw.url).searchParams.get("q") || "";
+  const queryText = qParam.trim();
   const limit = parseInt(
     new URL(c.req.raw.url).searchParams.get("limit") || "12",
     10,
   );
 
-  const { data: items, error } = await supabase
+  if (!queryText) {
+    return c.json({
+      results: [],
+      book: [],
+      podcast: [],
+      authors: [],
+      series: [],
+      tags: [],
+      genres: [],
+      narrators: [],
+      episodes: [],
+    });
+  }
+
+  // 1. Fetch library items across all searchable fields using sanitized tokenized multi-word matching
+  const tokens = queryText
+    .split(/\s+/)
+    .map(sanitizeSearchToken)
+    .filter((t) => t.length > 0);
+
+  let itemsQuery = supabase
     .from("library_items")
     .select("*, book_authors(authors(*)), book_series(series(*))")
-    .eq("library_id", libraryId)
-    .ilike("title", `%${q}%`)
-    .limit(limit);
+    .eq("library_id", libraryId);
 
-  if (error) throw error;
+  for (const token of tokens) {
+    itemsQuery = itemsQuery.or(
+      `title.ilike.%${token}%,author_names_first_last.ilike.%${token}%,description.ilike.%${token}%,subtitle.ilike.%${token}%,publisher.ilike.%${token}%`,
+    );
+  }
+
+  let { data: items, error: itemsError } = await itemsQuery.limit(limit * 2);
+
+  const cleanQueryText = sanitizeSearchToken(queryText);
+  if ((!items || items.length === 0) && cleanQueryText) {
+    const fallbackRes = await supabase
+      .from("library_items")
+      .select("*, book_authors(authors(*)), book_series(series(*))")
+      .eq("library_id", libraryId)
+      .or(
+        `title.ilike.%${cleanQueryText}%,author_names_first_last.ilike.%${cleanQueryText}%,description.ilike.%${cleanQueryText}%,subtitle.ilike.%${cleanQueryText}%,publisher.ilike.%${cleanQueryText}%`,
+      )
+      .limit(limit * 2);
+    if (fallbackRes.data) items = fallbackRes.data;
+  }
+
+  if (itemsError) throw itemsError;
 
   const user = c.get("user");
   const itemIds = (items || []).map((i) => i.id);
@@ -417,16 +461,186 @@ librariesRouter.get("/:id/search", async (c) => {
     );
   }
 
-  const results = items.map((item) => ({
-    libraryItem: mapBookForMobile(
+  const qLower = queryText.toLowerCase();
+
+  const formattedItems = (items || []).map((item) => {
+    const mapped = mapBookForMobile(
       item as unknown as LibraryItemWithBooks,
       progressMap.get(item.id),
-    ),
-    matchKey: "title",
-    matchText: item.title || "",
+    );
+
+    let matchKey = "title";
+    let matchText = item.title || "";
+
+    const narratorsStr = Array.isArray(item.narrators)
+      ? item.narrators.join(", ")
+      : typeof item.narrators === "string"
+      ? item.narrators
+      : "";
+
+    if (item.title && item.title.toLowerCase().includes(qLower)) {
+      matchKey = "title";
+      matchText = item.title;
+    } else if (
+      item.author_names_first_last &&
+      item.author_names_first_last.toLowerCase().includes(qLower)
+    ) {
+      matchKey = "authorName";
+      matchText = item.author_names_first_last;
+    } else if (
+      narratorsStr &&
+      narratorsStr.toLowerCase().includes(qLower)
+    ) {
+      matchKey = "narratorName";
+      matchText = narratorsStr;
+    } else if (
+      item.description &&
+      item.description.toLowerCase().includes(qLower)
+    ) {
+      matchKey = "description";
+      matchText = item.description;
+    }
+
+    return {
+      libraryItem: mapped,
+      matchKey,
+      matchText,
+    };
+  });
+
+  const bookResults = formattedItems
+    .filter((i) => i.libraryItem.mediaType !== "podcast")
+    .slice(0, limit);
+  const podcastResults = formattedItems
+    .filter((i) => i.libraryItem.mediaType === "podcast")
+    .slice(0, limit);
+
+  const searchPattern = cleanQueryText || queryText;
+
+  // 2. Query matching authors
+  const { data: authorsData } = await supabase
+    .from("authors")
+    .select("*, book_authors(library_item_id)")
+    .eq("library_id", libraryId)
+    .ilike("name", `%${searchPattern}%`)
+    .limit(limit);
+
+  const authorResults = (authorsData || []).map((a) => ({
+    id: a.id,
+    name: a.name,
+    asin: a.asin || null,
+    description: a.description || null,
+    imagePath: a.image_path || null,
+    libraryId: a.library_id,
+    addedAt: new Date(a.created_at).getTime(),
+    updatedAt: new Date(a.updated_at || a.created_at).getTime(),
+    numBooks: Array.isArray(a.book_authors) ? a.book_authors.length : 0,
   }));
 
-  return c.json({ results });
+  // 3. Query matching series
+  const { data: seriesData } = await supabase
+    .from("series")
+    .select(
+      "*, book_series(sequence, library_items(id, title, cover_path, duration, updated_at, created_at))",
+    )
+    .eq("library_id", libraryId)
+    .ilike("name", `%${searchPattern}%`)
+    .limit(limit);
+
+  const seriesResults = (seriesData || []).map((s) => {
+    const books = (s.book_series || []).map((bs: any) => {
+      const book = Array.isArray(bs.library_items)
+        ? bs.library_items[0]
+        : bs.library_items;
+      return {
+        id: book?.id || bs.library_item_id,
+        sequence: bs.sequence,
+        title: book?.title || "",
+        addedAt: book?.created_at
+          ? new Date(book.created_at).getTime()
+          : undefined,
+        updatedAt: book?.updated_at
+          ? new Date(book.updated_at).getTime()
+          : undefined,
+        media: {
+          id: book?.id,
+          coverPath: book?.cover_path || null,
+          duration: Number(book?.duration) || undefined,
+        },
+        cover: book?.cover_path || null,
+      };
+    });
+
+    return {
+      series: {
+        id: s.id,
+        name: s.name,
+        nameIgnorePrefix: s.name_ignore_prefix || s.name,
+        description: s.description || null,
+        libraryId: s.library_id,
+        addedAt: new Date(s.created_at).getTime(),
+        updatedAt: new Date(s.updated_at || s.created_at).getTime(),
+        books,
+        numBooks: books.length,
+      },
+      books,
+    };
+  });
+
+  // 4. Tags, Genres, Narrators aggregation from library items
+  const tagsMap = new Map<string, number>();
+  const genresMap = new Map<string, number>();
+  const narratorsMap = new Map<string, number>();
+
+  (items || []).forEach((item) => {
+    if (Array.isArray(item.tags)) {
+      (item.tags as unknown[]).forEach((t) => {
+        const tag = typeof t === "string" ? t : "";
+        if (tag && tag.toLowerCase().includes(qLower)) {
+          tagsMap.set(tag, (tagsMap.get(tag) || 0) + 1);
+        }
+      });
+    }
+    if (Array.isArray(item.genres)) {
+      (item.genres as unknown[]).forEach((g) => {
+        const genre = typeof g === "string" ? g : "";
+        if (genre && genre.toLowerCase().includes(qLower)) {
+          genresMap.set(genre, (genresMap.get(genre) || 0) + 1);
+        }
+      });
+    }
+    const narratorsStr = Array.isArray(item.narrators)
+      ? item.narrators.join(", ")
+      : typeof item.narrators === "string"
+      ? item.narrators
+      : "";
+    if (narratorsStr && narratorsStr.toLowerCase().includes(qLower)) {
+      narratorsMap.set(narratorsStr, (narratorsMap.get(narratorsStr) || 0) + 1);
+    }
+  });
+
+  const tagResults = Array.from(tagsMap.entries()).map(([name, numItems]) => ({
+    name,
+    numItems,
+  }));
+  const genreResults = Array.from(genresMap.entries()).map(
+    ([name, numItems]) => ({ name, numItems }),
+  );
+  const narratorResults = Array.from(narratorsMap.entries()).map(
+    ([name, numBooks]) => ({ name, numBooks }),
+  );
+
+  return c.json({
+    results: formattedItems,
+    book: bookResults,
+    podcast: podcastResults,
+    authors: authorResults,
+    series: seriesResults,
+    tags: tagResults,
+    genres: genreResults,
+    narrators: narratorResults,
+    episodes: [],
+  });
 });
 
 librariesRouter.get("/:id/filterdata", (c) => {

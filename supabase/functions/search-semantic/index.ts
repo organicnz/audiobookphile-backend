@@ -1,6 +1,7 @@
 import { createClient } from "npm:@supabase/supabase-js@2.44.0";
 import { corsHeaders } from "../_shared/cors.ts";
 import { z } from "npm:zod@3.23.8";
+import { LibraryItemWithBooks, mapBookForMobile } from "../api/mappers.ts";
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -154,10 +155,10 @@ Deno.serve(async (req) => {
 
     const ids = matches.map((m: any) => m.id);
 
-    // 3. Fetch full items
+    // 3. Fetch full items with authors & series relations
     const { data: items, error: itemsError } = await supabase
       .from("library_items")
-      .select("*, media:media(*)")
+      .select("*, book_authors(authors(*)), book_series(series(*))")
       .in("id", ids);
 
     if (itemsError) {
@@ -165,11 +166,15 @@ Deno.serve(async (req) => {
     }
 
     // Sort items based on the similarity rank
-    const sortedItems = items.sort((a, b) =>
+    const sortedItems = (items || []).sort((a, b) =>
       ids.indexOf(a.id) - ids.indexOf(b.id)
     );
 
-    return new Response(JSON.stringify({ results: sortedItems }), {
+    const formattedResults = sortedItems.map((item) =>
+      mapBookForMobile(item as unknown as LibraryItemWithBooks)
+    );
+
+    return new Response(JSON.stringify({ results: formattedResults }), {
       status: 200,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });

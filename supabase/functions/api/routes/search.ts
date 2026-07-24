@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { Variables } from "../_shared/types.ts";
+import { LibraryItemWithBooks, mapBookForMobile } from "../mappers.ts";
 
 export const searchRouter = new Hono<{ Variables: Variables }>();
 
@@ -130,11 +131,15 @@ searchRouter.post("/smart", async (c) => {
 
   const term = (searchIntent.terms?.[0] || queryText).trim();
   dbQuery = dbQuery.or(
-    `title.ilike.%${term}%,author_names_first_last.ilike.%${term}%,description.ilike.%${term}%`,
+    `title.ilike.%${term}%,author_names_first_last.ilike.%${term}%,description.ilike.%${term}%,subtitle.ilike.%${term}%,publisher.ilike.%${term}%`,
   );
 
   const { data: results, error } = await dbQuery.limit(50);
   if (error) return c.json({ error: error.message }, 500);
 
-  return c.json({ results: results || [], searchIntent });
+  const formattedResults = (results || []).map((item) =>
+    mapBookForMobile(item as unknown as LibraryItemWithBooks)
+  );
+
+  return c.json({ results: formattedResults, searchIntent });
 });
