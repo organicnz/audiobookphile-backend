@@ -418,3 +418,43 @@ itemsRouter.delete("/:id/audio-files/:ino", async (c) => {
 
   return new Response(null, { status: 204 });
 });
+
+itemsRouter.post("/batch", async (c) => {
+  const user = c.get("user")!;
+  const supabase = c.get("supabase");
+  const body = await c.req.json().catch(() => ({}));
+  const itemIds: string[] = Array.isArray(body.itemIds)
+    ? body.itemIds.slice(0, 50)
+    : [];
+
+  if (itemIds.length === 0) {
+    return c.json({ items: [] });
+  }
+
+  const { data: items, error } = await supabase
+    .from("library_items")
+    .select("*, book_authors(authors(*)), book_series(series(*))")
+    .in("id", itemIds);
+
+  if (error || !items) {
+    return c.json({ items: [] });
+  }
+
+  const { data: progressData } = await supabase
+    .from("media_progress")
+    .select("*")
+    .eq("user_id", user.id)
+    .in("library_item_id", itemIds)
+    .is("episode_id", null);
+
+  const progressMap = new Map(
+    (progressData || []).map((p) => [p.library_item_id, p]),
+  );
+
+  const mappedItems = items.map((item) =>
+    mapBookForMobile(item as any, progressMap.get(item.id))
+  );
+
+  c.header("Cache-Control", "private, max-age=30");
+  return c.json({ items: mappedItems });
+});

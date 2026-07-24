@@ -358,7 +358,10 @@ export function mapBookForMobile(
       duration: Number(bookRecord.duration || Number(item.duration)) ||
         totalCalculatedDuration,
       size: Number(item.size) || 0,
-      coverPath: item.cover_path || String(bookRecord.cover_path || "") || null,
+      coverPath: _formatCoverPath(
+        item.cover_path || String(bookRecord.cover_path || "") || null,
+        item.id,
+      ),
       tags: (bookRecord.tags as string[]) || [],
       audioFiles: audioFiles,
       tracks: audioFiles,

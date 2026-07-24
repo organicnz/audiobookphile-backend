@@ -1,5 +1,6 @@
 import { createClient } from "npm:@supabase/supabase-js@2.44.0";
 import { corsHeaders } from "../_shared/cors.ts";
+import { generateChapterAIInsights } from "../_shared/zai.ts";
 import { z } from "npm:zod@3.23.8";
 
 Deno.serve(async (req) => {
@@ -66,56 +67,15 @@ Deno.serve(async (req) => {
 
     const { title, author, chapterTitle, chapterIndex } = parsed.data;
 
-    // Call Z.AI GLM-4 API
-    const prompt = `You are an expert literary scholar and audiobook companion. 
-Provide a concise, high-level executive summary and key takeaways for Chapter ${
-      chapterIndex ?? ""
-    }: "${chapterTitle}" from the audiobook "${title}" by ${
-      author || "Unknown Author"
-    }.
-
-Format response in valid JSON with key "summary" (2-3 sentences), "keyTakeaways" (array of 3 bullet strings), and "mood" (string).`;
-
-    const res = await fetch(
-      "https://open.bigmodel.cn/api/paas/v4/chat/completions",
-      {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${zaiApiKey}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          model: "glm-4-flash",
-          messages: [
-            {
-              role: "system",
-              content: "You respond strictly in valid JSON format.",
-            },
-            { role: "user", content: prompt },
-          ],
-          temperature: 0.5,
-        }),
-      },
+    const insights = await generateChapterAIInsights(
+      title,
+      author || "Unknown Author",
+      chapterTitle,
+      chapterIndex,
+      zaiApiKey,
     );
 
-    if (!res.ok) {
-      const errText = await res.text();
-      throw new Error(`Failed to call Z.AI API: ${errText}`);
-    }
-
-    const zaiData = await res.json();
-    const rawContent = zaiData.choices?.[0]?.message?.content ?? "{}";
-
-    let jsonResult = {};
-    try {
-      jsonResult = JSON.parse(
-        rawContent.replace(/```json\n?|\n?```/g, "").trim(),
-      );
-    } catch {
-      jsonResult = { summary: rawContent, keyTakeaways: [], mood: "Engaging" };
-    }
-
-    return new Response(JSON.stringify({ insights: jsonResult }), {
+    return new Response(JSON.stringify({ insights }), {
       status: 200,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });

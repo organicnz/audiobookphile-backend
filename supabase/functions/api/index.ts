@@ -26,6 +26,21 @@ import { Variables } from "./_shared/types.ts";
 
 const app = new Hono<{ Variables: Variables }>();
 
+app.get("/api/health", (c) => {
+  const zaiConfigured = Boolean(
+    Deno.env.get("ZAI_API_KEY") || Deno.env.get("ZHIPU_API_KEY"),
+  );
+  return c.json({
+    status: "ok",
+    timestamp: new Date().toISOString(),
+    version: "2026.07.24",
+    services: {
+      database: "connected",
+      zai: zaiConfigured ? "configured" : "unconfigured",
+    },
+  });
+});
+
 app.use(
   "*",
   cors({

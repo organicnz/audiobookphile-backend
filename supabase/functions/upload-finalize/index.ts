@@ -1,8 +1,8 @@
 import { createClient } from "npm:@supabase/supabase-js@2.44.0";
 import { corsHeaders } from "../_shared/cors.ts";
 import { StorageRouter } from "../_shared/storage-router.ts";
-
 import { parseTitleAndAuthor } from "../_shared/titleAuthorParser.ts";
+import { matchExistingBookWithZAI, sortFilesWithZAI } from "../_shared/zai.ts";
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -59,48 +59,50 @@ Deno.serve(async (req) => {
       rawAuthor,
     );
 
+    const zaiApiKey = Deno.env.get("ZAI_API_KEY") ??
+      Deno.env.get("ZHIPU_API_KEY") ?? "";
+
     // AI title/author extraction fallback via Z.ai GLM-4 if author is unknown or title is ambiguous
-    if ((!author || author === "Unknown Author" || !title) && rawTitle) {
-      const zaiApiKey = Deno.env.get("ZAI_API_KEY") ??
-        Deno.env.get("ZHIPU_API_KEY") ?? "";
-      if (zaiApiKey) {
-        try {
-          const aiRes = await fetch(
-            "https://open.bigmodel.cn/api/paas/v4/chat/completions",
-            {
-              method: "POST",
-              headers: {
-                "Authorization": `Bearer ${zaiApiKey}`,
-                "Content-Type": "application/json",
-              },
-              body: JSON.stringify({
-                model: "glm-4-flash",
-                messages: [{
-                  role: "user",
-                  content:
-                    `Extract the exact book title and author name from this filename/text: "${rawTitle}". Return ONLY a JSON object: {"title": "...", "author": "..."}`,
-                }],
-                temperature: 0.1,
-              }),
+    if (
+      (!author || author === "Unknown Author" || !title) && rawTitle &&
+      zaiApiKey
+    ) {
+      try {
+        const aiRes = await fetch(
+          "https://open.bigmodel.cn/api/paas/v4/chat/completions",
+          {
+            method: "POST",
+            headers: {
+              "Authorization": `Bearer ${zaiApiKey}`,
+              "Content-Type": "application/json",
             },
-          );
-          if (aiRes.ok) {
-            const aiData = await aiRes.json();
-            const content = aiData.choices?.[0]?.message?.content || "";
-            const match = content.match(/\{[\s\S]*\}/);
-            if (match) {
-              const parsed = JSON.parse(match[0]);
-              if (parsed.title) title = parsed.title;
-              if (parsed.author) author = parsed.author;
-            }
+            body: JSON.stringify({
+              model: "glm-4-flash",
+              messages: [{
+                role: "user",
+                content:
+                  `Extract the exact book title and author name from this filename/text: "${rawTitle}". Return ONLY a JSON object: {"title": "...", "author": "..."}`,
+              }],
+              temperature: 0.1,
+            }),
+          },
+        );
+        if (aiRes.ok) {
+          const aiData = await aiRes.json();
+          const content = aiData.choices?.[0]?.message?.content || "";
+          const match = content.match(/\{[\s\S]*\}/);
+          if (match) {
+            const parsed = JSON.parse(match[0]);
+            if (parsed.title) title = parsed.title;
+            if (parsed.author) author = parsed.author;
           }
-        } catch (e: unknown) {
-          const err = e as Error;
-          console.error(
-            "[upload-finalize] Z.ai GLM-4 fallback error:",
-            err.message,
-          );
         }
+      } catch (e: unknown) {
+        const err = e as Error;
+        console.error(
+          "[upload-finalize] Z.ai GLM-4 fallback error:",
+          err.message,
+        );
       }
     }
 
@@ -112,7 +114,6 @@ Deno.serve(async (req) => {
     }
 
     const missingFiles: string[] = [];
-
     const storageRouter = new StorageRouter(db);
 
     const fileCheckPromises = files.map(async (file: any) => {
@@ -136,7 +137,6 @@ Deno.serve(async (req) => {
     const totalSize = files.reduce((sum: number, f: any) => sum + f.size, 0);
 
     // --- SMART REBINDING & DUPLICATE PREVENTION ---
-    // Search for existing book in library matching bookId, media_id, OR title/author
     let existingItem: any = null;
 
     // 1. Try matching directly by bookId or media_id
@@ -163,7 +163,7 @@ Deno.serve(async (req) => {
       if (itemByTitle) {
         existingItem = itemByTitle;
       } else {
-        // 3. Try normalized fuzzy match against all books in library
+        // Fetch all items in library for normalized and Z.AI matching
         const { data: allLibItems } = await db.from("library_items")
           .select(
             "id, media_id, size, library_files, audio_files, duration, author_names_first_last, title",
@@ -171,6 +171,7 @@ Deno.serve(async (req) => {
           .eq("library_id", libraryId);
 
         if (allLibItems?.length) {
+          // 3. Try normalized fuzzy title match
           const normalize = (s: string) =>
             s.toLowerCase().replace(/[^a-z0-9]/g, "");
           const normTitle = normalize(title);
@@ -180,6 +181,20 @@ Deno.serve(async (req) => {
             if (normItemTitle && normItemTitle === normTitle) {
               existingItem = item;
               break;
+            }
+          }
+
+          // 4. Try Z.AI AI Semantic/Fuzzy Match if normalized match didn't find item
+          if (!existingItem && zaiApiKey) {
+            const matchedId = await matchExistingBookWithZAI(
+              title,
+              author,
+              allLibItems,
+              zaiApiKey,
+            );
+            if (matchedId) {
+              existingItem = allLibItems.find((i) => i.id === matchedId) ||
+                null;
             }
           }
         }
@@ -229,9 +244,6 @@ Deno.serve(async (req) => {
 
     finalAudioFiles = [...finalAudioFiles, ...audioFilesJson];
 
-    const zaiApiKey = Deno.env.get("ZAI_API_KEY") ??
-      Deno.env.get("ZHIPU_API_KEY") ?? "";
-
     // Deduplicate files by filename so re-uploading doesn't create duplicate chapters
     const uniqueFilesMap = new Map<string, any>();
     for (const af of finalAudioFiles) {
@@ -246,33 +258,19 @@ Deno.serve(async (req) => {
       .map((af: any) => af.metadata?.filename || af.metadata?.relPath || "")
       .filter(Boolean);
 
-    if (filenames.length > 1 && zaiApiKey) {
-      try {
-        const sortedFilenames = await sortFilesWithZAI(filenames, zaiApiKey);
-        const filenameOrderMap = new Map<string, number>();
-        sortedFilenames.forEach((name: string, index: number) =>
-          filenameOrderMap.set(name, index)
-        );
+    if (filenames.length > 1) {
+      const sortedFilenames = await sortFilesWithZAI(filenames, zaiApiKey);
+      const filenameOrderMap = new Map<string, number>();
+      sortedFilenames.forEach((name: string, index: number) =>
+        filenameOrderMap.set(name, index)
+      );
 
-        deduplicatedFiles.sort((a: any, b: any) => {
-          const nameA = a.metadata?.filename || a.metadata?.relPath || "";
-          const nameB = b.metadata?.filename || b.metadata?.relPath || "";
-          const orderA = filenameOrderMap.get(nameA) ?? 999;
-          const orderB = filenameOrderMap.get(nameB) ?? 999;
-          return orderA - orderB;
-        });
-      } catch (err) {
-        console.warn("[upload-finalize] Z.AI file sorting fallback:", err);
-      }
-    } else {
-      // Natural sort fallback
       deduplicatedFiles.sort((a: any, b: any) => {
-        const nameA = a.metadata?.filename || "";
-        const nameB = b.metadata?.filename || "";
-        return nameA.localeCompare(nameB, undefined, {
-          numeric: true,
-          sensitivity: "base",
-        });
+        const nameA = a.metadata?.filename || a.metadata?.relPath || "";
+        const nameB = b.metadata?.filename || b.metadata?.relPath || "";
+        const orderA = filenameOrderMap.get(nameA) ?? 999;
+        const orderB = filenameOrderMap.get(nameB) ?? 999;
+        return orderA - orderB;
       });
     }
 
@@ -365,7 +363,6 @@ Deno.serve(async (req) => {
                 );
                 duration = metadata.format?.duration || 0;
 
-                // Immediately cancel the stream to save bandwidth and memory!
                 try {
                   res.body.cancel();
                 } catch (_e) {
@@ -392,38 +389,41 @@ Deno.serve(async (req) => {
 
         const updatedAudioFilesJson = await Promise.all(metadataPromises);
 
-        // Merge the fully parsed new files back into the overall book audio_files array
-        const finalMergedAudioFiles = [
-          ...(existingBook?.audio_files || []),
-          ...updatedAudioFilesJson,
-        ];
+        // Fetch latest state of book to merge updated durations
+        const { data: latestBook } = await db.from("library_items").select(
+          "audio_files",
+        ).eq("id", libraryItemId).single();
+        const existingAudioFiles = latestBook?.audio_files || deduplicatedFiles;
 
-        // Deduplicate the merged files to prevent duplicate chapters and incorrect playtime on re-uploads
-        const uniqueMergedMap = new Map<string, any>();
-        for (const af of finalMergedAudioFiles) {
-          if (af.metadata?.filename) {
-            uniqueMergedMap.set(af.metadata.filename, af);
+        const updatedMap = new Map<string, any>();
+        for (const af of existingAudioFiles) {
+          if (af.metadata?.filename) updatedMap.set(af.metadata.filename, af);
+        }
+        for (const updatedAf of updatedAudioFilesJson) {
+          if (updatedAf.metadata?.filename) {
+            updatedMap.set(updatedAf.metadata.filename, updatedAf);
           }
         }
-        const deduplicatedMergedFiles = Array.from(uniqueMergedMap.values());
-        deduplicatedMergedFiles.forEach((af, idx) => af.index = idx + 1);
 
-        const totalDuration = deduplicatedMergedFiles.reduce(
+        const finalMergedAudioFiles = Array.from(updatedMap.values());
+        finalMergedAudioFiles.forEach((af, idx) => af.index = idx + 1);
+
+        const totalDuration = finalMergedAudioFiles.reduce(
           (sum: number, af: any) => sum + (af.duration || 0),
           0,
         );
 
-        // Update database with new durations
         await db.from("library_items").update({
-          audio_files: deduplicatedMergedFiles,
+          audio_files: finalMergedAudioFiles,
           duration: totalDuration,
-        }).eq("id", bookId);
+        }).eq("id", libraryItemId);
+
         console.log(
-          `[upload-finalize] Successfully updated duration for book ${bookId} to ${totalDuration}s`,
+          `[upload-finalize] Successfully updated duration for book ${libraryItemId} to ${totalDuration}s`,
         );
       } catch (err) {
         console.error(
-          `[upload-finalize] Background duration extraction failed for book ${bookId}:`,
+          `[upload-finalize] Background duration extraction failed for book ${libraryItemId}:`,
           err,
         );
       }
@@ -443,36 +443,26 @@ Deno.serve(async (req) => {
     // ------------------------------------------------
 
     if (author) {
-      // Clear old author associations so re-uploads with different metadata remove the old associations
       await db.from("book_authors").delete().eq(
         "library_item_id",
         libraryItemId,
       );
 
-      // Split on /, comma, or " & " / " and "
       const rawAuthors = author.split(/\s*(?:\/|,|&|\band\b)\s*/i).map((
         a: string,
       ) => a.trim()).filter(Boolean);
 
       const cleanAuthors = rawAuthors.map((a: string) => {
         let name = a;
-        // Strip leaked titles if appended via " - "
         const dashSplit = name.split(" - ");
         if (dashSplit.length > 1) {
           name = dashSplit[0];
         }
-
-        // Strip common degrees
         name = name.replace(/\b(Ph\.?D\.?|M\.?D\.?)\b/gi, "");
-
-        // Remove periods after initials
         name = name.replace(/([A-Za-z])\./g, "$1");
-
-        // Collapse spaces
         return name.replace(/\s+/g, " ").trim();
       }).filter(Boolean);
 
-      // Remove duplicates from the array
       const uniqueAuthors = Array.from(new Set(cleanAuthors));
 
       for (const singleAuthor of uniqueAuthors) {
@@ -500,20 +490,17 @@ Deno.serve(async (req) => {
         }
       }
 
-      // Update library_items with the original raw string as a fallback for simple text fields
       await db.from("library_items").update({
         author_names_first_last: author,
       }).eq("id", libraryItemId);
     }
 
     if (series) {
-      // Clear old series associations so re-uploads with different metadata remove the old associations
       await db.from("book_series").delete().eq(
         "library_item_id",
         libraryItemId,
       );
 
-      // Split series just in case, although less common
       const rawSeries = series.split(/\s*(?:\/|,|&|\band\b)\s*/i).map((
         s: string,
       ) => s.trim()).filter(Boolean);
@@ -618,58 +605,3 @@ Deno.serve(async (req) => {
     });
   }
 });
-
-async function sortFilesWithZAI(
-  filenames: string[],
-  zaiApiKey: string,
-): Promise<string[]> {
-  if (filenames.length <= 1 || !zaiApiKey) return filenames;
-  try {
-    const aiRes = await fetch(
-      "https://open.bigmodel.cn/api/paas/v4/chat/completions",
-      {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${zaiApiKey}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          model: "glm-4-flash",
-          messages: [{
-            role: "user",
-            content:
-              `Sort these audiobook chapter/track filenames in exact narrative chronological order (considering disc numbers, track numbers, prologues, chapters, and parts): ${
-                JSON.stringify(filenames)
-              }. Return ONLY a JSON array of strings: ["file1.mp3", "file2.mp3", ...]`,
-          }],
-          temperature: 0.0,
-        }),
-      },
-    );
-    if (aiRes.ok) {
-      const aiData = await aiRes.json();
-      const content = aiData.choices?.[0]?.message?.content || "";
-      const match = content.match(/\[[\s\S]*\]/);
-      if (match) {
-        const sortedList: string[] = JSON.parse(match[0]);
-        if (
-          Array.isArray(sortedList) && sortedList.length === filenames.length
-        ) {
-          console.log(
-            "[upload-finalize] Z.AI successfully optimized chapter sequence sorting.",
-          );
-          return sortedList;
-        }
-      }
-    }
-  } catch (e: unknown) {
-    const err = e as Error;
-    console.warn(
-      "[upload-finalize] Z.AI file sorting fallback to natural sort:",
-      err.message,
-    );
-  }
-  return filenames.sort((a, b) =>
-    a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" })
-  );
-}
