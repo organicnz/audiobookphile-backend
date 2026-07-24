@@ -938,3 +938,99 @@ librariesRouter.get("/:id/narrators", async (c) => {
     return c.json({ narrators: [] }); // Fallback to empty array just like the old page did
   }
 });
+
+librariesRouter.post("/:id/deduplicate", async (c) => {
+  const supabase = c.get("supabase");
+  const libraryId = c.req.param("id");
+
+  try {
+    const { data: items } = await supabase.from("library_items")
+      .select("id, title, media_id, audio_files, library_files, created_at")
+      .eq("library_id", libraryId);
+
+    if (!items || items.length <= 1) {
+      return c.json({ success: true, mergedCount: 0, removedCount: 0 });
+    }
+
+    const titleGroups = new Map<string, any[]>();
+    for (const item of items) {
+      const normTitle = (item.title || "").toLowerCase().replace(
+        /[^a-z0-9]/g,
+        "",
+      ).trim();
+      if (!normTitle) continue;
+      const group = titleGroups.get(normTitle) || [];
+      group.push(item);
+      titleGroups.set(normTitle, group);
+    }
+
+    let mergedCount = 0;
+    let removedCount = 0;
+
+    for (const [_normTitle, group] of titleGroups.entries()) {
+      if (group.length <= 1) continue;
+
+      // Primary item is the one with the most audio_files or created earliest
+      group.sort((a: any, b: any) => {
+        const lenA = (a.audio_files || []).length;
+        const lenB = (b.audio_files || []).length;
+        if (lenA !== lenB) return lenB - lenA;
+        return (a.created_at || "").localeCompare(b.created_at || "");
+      });
+
+      const primary = group[0];
+      const duplicates = group.slice(1);
+
+      const mergedAudioFiles = [...(primary.audio_files || [])];
+      const mergedLibraryFiles = [...(primary.library_files || [])];
+
+      for (const dup of duplicates) {
+        if (dup.audio_files?.length) {
+          mergedAudioFiles.push(...dup.audio_files);
+        }
+        if (dup.library_files?.length) {
+          mergedLibraryFiles.push(...dup.library_files);
+        }
+
+        // Re-link progress and bookmarks to primary item
+        await supabase.from("media_progress")
+          .update({ library_item_id: primary.id })
+          .eq("library_item_id", dup.id);
+
+        await supabase.from("bookmarks")
+          .update({ library_item_id: primary.id })
+          .eq("library_item_id", dup.id);
+
+        // Delete duplicate row
+        await supabase.from("library_items").delete().eq("id", dup.id);
+        removedCount++;
+      }
+
+      // Deduplicate merged files by filename
+      const uniqueAudioMap = new Map<string, any>();
+      for (const af of mergedAudioFiles) {
+        if (af.metadata?.filename) uniqueAudioMap.set(af.metadata.filename, af);
+      }
+      const finalAudioFiles = Array.from(uniqueAudioMap.values());
+      finalAudioFiles.forEach((af, idx) => af.index = idx + 1);
+
+      const uniqueLibMap = new Map<string, any>();
+      for (const lf of mergedLibraryFiles) {
+        if (lf.metadata?.filename) uniqueLibMap.set(lf.metadata.filename, lf);
+      }
+      const finalLibFiles = Array.from(uniqueLibMap.values());
+
+      await supabase.from("library_items").update({
+        audio_files: finalAudioFiles,
+        library_files: finalLibFiles,
+      }).eq("id", primary.id);
+
+      mergedCount++;
+    }
+
+    return c.json({ success: true, mergedCount, removedCount });
+  } catch (err: any) {
+    console.error("[deduplicate] Failed:", err);
+    return c.json({ error: err.message || err }, 500);
+  }
+});

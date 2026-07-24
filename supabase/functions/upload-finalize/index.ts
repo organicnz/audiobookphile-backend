@@ -228,6 +228,9 @@ Deno.serve(async (req) => {
 
     finalAudioFiles = [...finalAudioFiles, ...audioFilesJson];
 
+    const zaiApiKey = Deno.env.get("ZAI_API_KEY") ??
+      Deno.env.get("ZHIPU_API_KEY") ?? "";
+
     // Deduplicate files by filename so re-uploading doesn't create duplicate chapters
     const uniqueFilesMap = new Map<string, any>();
     for (const af of finalAudioFiles) {
@@ -235,8 +238,44 @@ Deno.serve(async (req) => {
         uniqueFilesMap.set(af.metadata.filename, af);
       }
     }
-    const deduplicatedFiles = Array.from(uniqueFilesMap.values());
-    deduplicatedFiles.forEach((af, idx) => af.index = idx + 1);
+    let deduplicatedFiles = Array.from(uniqueFilesMap.values());
+
+    // --- Z.AI AI-OPTIMIZED SEQUENCE SORTING ---
+    const filenames = deduplicatedFiles
+      .map((af: any) => af.metadata?.filename || af.metadata?.relPath || "")
+      .filter(Boolean);
+
+    if (filenames.length > 1 && zaiApiKey) {
+      try {
+        const sortedFilenames = await sortFilesWithZAI(filenames, zaiApiKey);
+        const filenameOrderMap = new Map<string, number>();
+        sortedFilenames.forEach((name: string, index: number) =>
+          filenameOrderMap.set(name, index)
+        );
+
+        deduplicatedFiles.sort((a: any, b: any) => {
+          const nameA = a.metadata?.filename || a.metadata?.relPath || "";
+          const nameB = b.metadata?.filename || b.metadata?.relPath || "";
+          const orderA = filenameOrderMap.get(nameA) ?? 999;
+          const orderB = filenameOrderMap.get(nameB) ?? 999;
+          return orderA - orderB;
+        });
+      } catch (err) {
+        console.warn("[upload-finalize] Z.AI file sorting fallback:", err);
+      }
+    } else {
+      // Natural sort fallback
+      deduplicatedFiles.sort((a: any, b: any) => {
+        const nameA = a.metadata?.filename || "";
+        const nameB = b.metadata?.filename || "";
+        return nameA.localeCompare(nameB, undefined, {
+          numeric: true,
+          sensitivity: "base",
+        });
+      });
+    }
+
+    deduplicatedFiles.forEach((af: any, idx: number) => af.index = idx + 1);
 
     const { error: bookError } = await db.from("library_items").update({
       audio_files: deduplicatedFiles,
@@ -520,3 +559,58 @@ Deno.serve(async (req) => {
     });
   }
 });
+
+async function sortFilesWithZAI(
+  filenames: string[],
+  zaiApiKey: string,
+): Promise<string[]> {
+  if (filenames.length <= 1 || !zaiApiKey) return filenames;
+  try {
+    const aiRes = await fetch(
+      "https://open.bigmodel.cn/api/paas/v4/chat/completions",
+      {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${zaiApiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: "glm-4-flash",
+          messages: [{
+            role: "user",
+            content:
+              `Sort these audiobook chapter/track filenames in exact narrative chronological order (considering disc numbers, track numbers, prologues, chapters, and parts): ${
+                JSON.stringify(filenames)
+              }. Return ONLY a JSON array of strings: ["file1.mp3", "file2.mp3", ...]`,
+          }],
+          temperature: 0.0,
+        }),
+      },
+    );
+    if (aiRes.ok) {
+      const aiData = await aiRes.json();
+      const content = aiData.choices?.[0]?.message?.content || "";
+      const match = content.match(/\[[\s\S]*\]/);
+      if (match) {
+        const sortedList: string[] = JSON.parse(match[0]);
+        if (
+          Array.isArray(sortedList) && sortedList.length === filenames.length
+        ) {
+          console.log(
+            "[upload-finalize] Z.AI successfully optimized chapter sequence sorting.",
+          );
+          return sortedList;
+        }
+      }
+    }
+  } catch (e: unknown) {
+    const err = e as Error;
+    console.warn(
+      "[upload-finalize] Z.AI file sorting fallback to natural sort:",
+      err.message,
+    );
+  }
+  return filenames.sort((a, b) =>
+    a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" })
+  );
+}
