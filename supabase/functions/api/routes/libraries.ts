@@ -155,8 +155,8 @@ librariesRouter.get("/:id/items", async (c) => {
 
   const queryParams = new URL(c.req.raw.url).searchParams;
   const rawLimit = queryParams.get("limit");
-  const parsedLimit = rawLimit !== null ? parseInt(rawLimit, 10) : 50;
-  const limit = parsedLimit === 0 ? 0 : Math.min(Math.max(parsedLimit, 1), 500);
+  const parsedLimit = rawLimit !== null ? parseInt(rawLimit, 10) : 0;
+  const limit = parsedLimit <= 0 ? 0 : parsedLimit;
   const page = parseInt(queryParams.get("page") || "0", 10);
   const sortParam = (queryParams.get("sort") || "addedAt").toLowerCase();
   const isDesc = queryParams.get("desc") === "1" ||
@@ -187,41 +187,93 @@ librariesRouter.get("/:id/items", async (c) => {
   const seriesId = queryParams.get("seriesId");
 
   try {
-    let query = supabase
-      .from("library_items")
-      .select("*, book_authors(authors(*)), book_series(series(*))", {
-        count: "exact",
-      })
-      .eq("library_id", libraryId);
+    let items: any[] = [];
+    let count: number | null = 0;
 
-    if (search) {
-      query = query.or(
-        `title.ilike.%${search}%,author_names_first_last.ilike.%${search}%`,
-      );
-    }
+    if (isFetchAll) {
+      const CHUNK_SIZE = 500;
+      let currentOffset = 0;
+      while (true) {
+        let batchQuery = supabase
+          .from("library_items")
+          .select("*, book_authors(authors(*)), book_series(series(*))", {
+            count: "exact",
+          })
+          .eq("library_id", libraryId);
 
-    if (authorId) {
-      query = query.eq("book_authors.author_id", authorId);
-    }
+        if (search) {
+          batchQuery = batchQuery.or(
+            `title.ilike.%${search}%,author_names_first_last.ilike.%${search}%`,
+          );
+        }
+        if (authorId) {
+          batchQuery = batchQuery.eq("book_authors.author_id", authorId);
+        }
+        if (seriesId) {
+          batchQuery = batchQuery.eq("book_series.series_id", seriesId);
+        }
 
-    if (seriesId) {
-      query = query.eq("book_series.series_id", seriesId);
-    }
+        batchQuery = batchQuery
+          .order(dbSortField, { ascending: !isDesc })
+          .range(currentOffset, currentOffset + CHUNK_SIZE - 1);
 
-    query = query.order(dbSortField, { ascending: !isDesc });
+        const { data, error, count: totalCount } = await batchQuery;
 
-    if (!isFetchAll) {
-      query = query.range(offset, offset + limit - 1);
-    }
+        if (error) {
+          return c.json({
+            error: error.message || error,
+            details: error.details,
+            hint: error.hint,
+          }, 500);
+        }
 
-    const { data: items, error, count } = await query;
+        count = totalCount;
+        if (!data || data.length === 0) break;
 
-    if (error) {
-      return c.json({
-        error: error.message || error,
-        details: error.details,
-        hint: error.hint,
-      }, 500);
+        items.push(...data);
+        if (
+          data.length < CHUNK_SIZE || (count !== null && items.length >= count)
+        ) {
+          break;
+        }
+        currentOffset += CHUNK_SIZE;
+      }
+    } else {
+      let query = supabase
+        .from("library_items")
+        .select("*, book_authors(authors(*)), book_series(series(*))", {
+          count: "exact",
+        })
+        .eq("library_id", libraryId);
+
+      if (search) {
+        query = query.or(
+          `title.ilike.%${search}%,author_names_first_last.ilike.%${search}%`,
+        );
+      }
+      if (authorId) {
+        query = query.eq("book_authors.author_id", authorId);
+      }
+      if (seriesId) {
+        query = query.eq("book_series.series_id", seriesId);
+      }
+
+      query = query
+        .order(dbSortField, { ascending: !isDesc })
+        .range(offset, offset + limit - 1);
+
+      const { data, error, count: totalCount } = await query;
+
+      if (error) {
+        return c.json({
+          error: error.message || error,
+          details: error.details,
+          hint: error.hint,
+        }, 500);
+      }
+
+      items = data || [];
+      count = totalCount;
     }
 
     // Natural in-memory sort refinement for title & author
