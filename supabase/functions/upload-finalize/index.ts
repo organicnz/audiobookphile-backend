@@ -1,3 +1,4 @@
+import { createClient } from "npm:@supabase/supabase-js@2.44.0";
 import { corsHeaders } from "../_shared/cors.ts";
 import { StorageRouter } from "../_shared/storage-router.ts";
 
