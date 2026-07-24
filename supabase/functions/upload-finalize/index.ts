@@ -43,7 +43,7 @@ Deno.serve(async (req) => {
     }
 
     const body = await req.json();
-    const {
+    let {
       bookId,
       title: rawTitle,
       author: rawAuthor = "",
@@ -134,21 +134,76 @@ Deno.serve(async (req) => {
 
     const totalSize = files.reduce((sum: number, f: any) => sum + f.size, 0);
 
-    // Fetch existing book to merge files if it already exists
-    const { data: existingBook } = await db.from("library_items").select(
-      "audio_files, duration",
-    ).eq("id", bookId).maybeSingle();
+    // --- SMART REBINDING & DUPLICATE PREVENTION ---
+    // Search for existing book in library matching bookId, media_id, OR title/author
+    let existingItem: any = null;
+
+    // 1. Try matching directly by bookId or media_id
+    const { data: itemById } = await db.from("library_items")
+      .select(
+        "id, media_id, size, library_files, audio_files, duration, author_names_first_last, title",
+      )
+      .or(`id.eq.${bookId},media_id.eq.${bookId}`)
+      .eq("library_id", libraryId)
+      .maybeSingle();
+
+    if (itemById) {
+      existingItem = itemById;
+    } else if (title) {
+      // 2. Try exact title match in same library
+      const { data: itemByTitle } = await db.from("library_items")
+        .select(
+          "id, media_id, size, library_files, audio_files, duration, author_names_first_last, title",
+        )
+        .eq("library_id", libraryId)
+        .ilike("title", title.trim())
+        .maybeSingle();
+
+      if (itemByTitle) {
+        existingItem = itemByTitle;
+      } else {
+        // 3. Try normalized fuzzy match against all books in library
+        const { data: allLibItems } = await db.from("library_items")
+          .select(
+            "id, media_id, size, library_files, audio_files, duration, author_names_first_last, title",
+          )
+          .eq("library_id", libraryId);
+
+        if (allLibItems?.length) {
+          const normalize = (s: string) =>
+            s.toLowerCase().replace(/[^a-z0-9]/g, "");
+          const normTitle = normalize(title);
+
+          for (const item of allLibItems) {
+            const normItemTitle = normalize(item.title || "");
+            if (normItemTitle && normItemTitle === normTitle) {
+              existingItem = item;
+              break;
+            }
+          }
+        }
+      }
+    }
+
+    let libraryItemId = crypto.randomUUID();
+    if (existingItem) {
+      libraryItemId = existingItem.id;
+      bookId = existingItem.media_id || existingItem.id;
+      console.log(
+        `[upload-finalize] Rebinding upload to existing book record: ${libraryItemId} ("${existingItem.title}")`,
+      );
+    }
 
     let baseIndex = 0;
     let finalAudioFiles: any[] = [];
     let currentDuration = 0;
-    if (existingBook) {
-      finalAudioFiles = existingBook.audio_files || [];
+    if (existingItem) {
+      finalAudioFiles = existingItem.audio_files || [];
       baseIndex = finalAudioFiles.reduce(
         (max: number, af: any) => Math.max(max, af.index || 0),
         0,
       );
-      currentDuration = existingBook.duration || 0;
+      currentDuration = existingItem.duration || 0;
     }
 
     const audioFilesJson = files.map((file: any, i: number) => ({
@@ -173,40 +228,39 @@ Deno.serve(async (req) => {
 
     finalAudioFiles = [...finalAudioFiles, ...audioFilesJson];
 
-    let bookError = null;
-    if (existingBook) {
-      // Deduplicate files by filename so re-uploading doesn't create duplicate chapters
-      const uniqueFilesMap = new Map<string, any>();
-      for (const af of finalAudioFiles) {
-        if (af.metadata?.filename) {
-          uniqueFilesMap.set(af.metadata.filename, af);
-        }
+    // Deduplicate files by filename so re-uploading doesn't create duplicate chapters
+    const uniqueFilesMap = new Map<string, any>();
+    for (const af of finalAudioFiles) {
+      if (af.metadata?.filename) {
+        uniqueFilesMap.set(af.metadata.filename, af);
       }
-      const deduplicatedFiles = Array.from(uniqueFilesMap.values());
-      // Re-index the files nicely
-      deduplicatedFiles.forEach((af, idx) => af.index = idx + 1);
+    }
+    const deduplicatedFiles = Array.from(uniqueFilesMap.values());
+    deduplicatedFiles.forEach((af, idx) => af.index = idx + 1);
 
-      const res = await db.from("library_items").update({
+    const { error: bookError } = await db.from("library_items").update({
+      audio_files: deduplicatedFiles,
+      duration: currentDuration,
+      title: title || existingItem?.title,
+    }).eq("id", libraryItemId);
+
+    if (bookError && !existingItem) {
+      const res = await db.from("library_items").insert({
+        id: libraryItemId,
+        library_id: libraryId,
+        media_type: mediaType,
+        media_id: bookId,
+        path: `${libraryId}/${title}`,
+        rel_path: title,
+        title,
         audio_files: deduplicatedFiles,
         duration: currentDuration,
-      }).eq("id", bookId);
-      bookError = res.error;
-    } else {
-      const res = await db.from("library_items").insert({
-        id: bookId,
-        title,
-        audio_files: finalAudioFiles,
-        duration: currentDuration,
+        size: totalSize,
+        is_missing: false,
+        last_storage_check: new Date().toISOString(),
       });
-      bookError = res.error;
+      if (res.error) throw res.error;
     }
-    if (bookError) throw bookError;
-
-    const { data: existingItem } = await db.from("library_items").select(
-      "id, size, library_files",
-    ).eq("media_id", bookId).maybeSingle();
-
-    let libraryItemId = crypto.randomUUID();
 
     const newLibraryFiles = audioFilesJson.map((af: any) => ({
       ino: af.ino,
@@ -218,7 +272,6 @@ Deno.serve(async (req) => {
 
     let finalLibraryFiles = newLibraryFiles;
     if (existingItem) {
-      libraryItemId = existingItem.id;
       const allLibFiles = [
         ...(existingItem.library_files || []),
         ...newLibraryFiles,
@@ -233,33 +286,14 @@ Deno.serve(async (req) => {
     }
     const finalSize = (existingItem?.size || 0) + totalSize;
 
-    if (existingItem) {
-      const { error: itemError } = await db.from("library_items").update({
-        size: finalSize,
-        library_files: finalLibraryFiles,
-        last_storage_check: new Date().toISOString(),
-      }).eq("id", libraryItemId);
-      if (itemError) throw itemError;
-    } else {
-      const { error: itemError } = await db.from("library_items").insert({
-        id: libraryItemId,
-        library_id: libraryId,
-        media_type: mediaType,
-        media_id: bookId,
-        path: `${libraryId}/${title}`,
-        rel_path: title,
-        title,
-        size: totalSize,
-        is_missing: false,
-        last_storage_check: new Date().toISOString(),
-        library_files: newLibraryFiles,
-      });
-      if (itemError) {
-        if (!existingBook) {
-          await db.from("library_items").delete().eq("id", bookId);
-        }
-        throw itemError;
-      }
+    const { error: itemError } = await db.from("library_items").update({
+      size: finalSize,
+      library_files: finalLibraryFiles,
+      last_storage_check: new Date().toISOString(),
+    }).eq("id", libraryItemId);
+
+    if (itemError && !existingItem) {
+      throw itemError;
     }
 
     // --- BACKGROUND TASK: Extract Audio Duration ---
