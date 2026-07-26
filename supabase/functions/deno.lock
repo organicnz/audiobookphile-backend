@@ -3,7 +3,9 @@
   "specifiers": {
     "jsr:@supabase/functions-js@2": "2.110.2",
     "npm:@aws-sdk/client-s3@3.1085.0": "3.1085.0",
+    "npm:@aws-sdk/client-s3@^3.693.0": "3.1085.0",
     "npm:@aws-sdk/s3-request-presigner@3.1085.0": "3.1085.0",
+    "npm:@aws-sdk/s3-request-presigner@^3.693.0": "3.1085.0",
     "npm:@sentry/deno@8.32.0": "8.32.0",
     "npm:@supabase/supabase-js@2.44.0": "2.44.0",
     "npm:hono@4.4.0": "4.4.0",

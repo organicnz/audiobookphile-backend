@@ -32,13 +32,35 @@ export const AudioFileSchema = z.object({
   index: z.number(),
   ino: z.string(),
   metadata: AudioMetadataSchema,
-  duration: z.number(),
+  duration: z.number().nullish(),
   bitRate: z.number().nullish(),
   language: z.string().nullish(),
   codec: z.string().nullish(),
   mimeType: z.string(),
   addedAt: z.number().nullish(),
   updatedAt: z.number().nullish(),
+  timeBase: z.string().nullish(),
+  channels: z.number().nullish(),
+  channelLayout: z.string().nullish(),
+});
+
+export const AudioTrackSchema = z.object({
+  index: z.number(),
+  title: z.string(),
+  contentUrl: z.string(),
+  startOffset: z.number(),
+  ino: z.string(),
+  metadata: AudioMetadataSchema,
+  duration: z.number().nullish(),
+  bitRate: z.number().nullish(),
+  language: z.string().nullish(),
+  codec: z.string().nullish(),
+  mimeType: z.string(),
+  addedAt: z.number().nullish(),
+  updatedAt: z.number().nullish(),
+  timeBase: z.string().nullish(),
+  channels: z.number().nullish(),
+  channelLayout: z.string().nullish(),
 });
 
 export const ChapterSchema = z.object({
@@ -60,19 +82,20 @@ export const FileMetadataSchema = z.object({
 });
 
 export const LibraryFileSchema = z.object({
-  id: z.string(),
   ino: z.string(),
   metadata: FileMetadataSchema.nullish(),
   isSupplementary: z.boolean().nullish(),
   fileType: z.string().nullish(),
-  addedAt: z.number().nullish(),
-  updatedAt: z.number().nullish(),
+  addedAt: z.number(),
+  updatedAt: z.number(),
 });
 
 export const EbookFileSchema = z.object({
   ino: z.string(),
   metadata: FileMetadataSchema,
   ebookFormat: z.string(),
+  addedAt: z.number(),
+  updatedAt: z.number(),
 });
 
 /**
@@ -114,9 +137,10 @@ export const BookMediaSchema = z.object({
   coverPath: z.string().nullish(),
   tags: z.array(z.string()).nullish(),
   audioFiles: z.array(AudioFileSchema).nullish(),
-  tracks: z.array(AudioFileSchema).nullish(),
+  tracks: z.array(AudioTrackSchema).nullish(),
   numTracks: z.number().optional(),
   ebookFile: EbookFileSchema.nullish(),
+  ebookFormat: z.string().nullish(),
 });
 
 export const MediaProgressSchema = z.object({
@@ -197,7 +221,30 @@ export type EbookFileModel = z.infer<typeof EbookFileSchema>;
  * that drift between the schema and the interface is caught at compile time.
  * When making structural changes here, verify the web copy still compiles.
  */
-export type BookMetadataModel = z.infer<typeof BookMetadataSchema>;
+/**
+ * BookMetadataModel is pinned to BookMetadataFlat.
+ * This ensures the schema stays in sync with the web interface.
+ */
+export type BookMetadataFlat = {
+  title: string;
+  subtitle?: string | null;
+  authorName?: string | null;
+  authorNameLF?: string | null;
+  narratorName?: string | null;
+  seriesName?: string | null;
+  genres: string[];
+  publishedYear?: string | null;
+  publishedDate?: string | null;
+  publisher?: string | null;
+  description?: string | null;
+  isbn?: string | null;
+  asin?: string | null;
+  language?: string | null;
+  explicit: boolean;
+  abridged?: boolean | null;
+};
+
+export type BookMetadataModel = BookMetadataFlat;
 export type BookMediaModel = z.infer<typeof BookMediaSchema>;
 export type MediaProgressModel = z.infer<typeof MediaProgressSchema>;
 export type MobileBookModel = z.infer<typeof MobileBookSchema>;
