@@ -236,8 +236,8 @@ itemsRouter.get('/:id/cover', async (c) => {
 })
 
 itemsRouter.delete('/:id/cover', async (c) => {
-  const user = c.get('user')!
-  const requiresServiceRole = true
+  const _user = c.get('user')!
+  const _requiresServiceRole = true
 
   const itemId = c.req.param('id')
 
@@ -251,12 +251,12 @@ itemsRouter.delete('/:id/cover', async (c) => {
 })
 
 const handleCoverUpload = async (c: Context) => {
-  const user = c.get('user')!
+  const _user = c.get('user')!
   const supabase = c.get('supabase')
 
-  const requiresServiceRole = true
+  const _requiresServiceRole = true
 
-  const { data: profile } = await supabase.from('profiles').select('user_type').eq('id', user.id).single()
+  const { data: _profile } = await supabase.from('profiles').select('user_type').eq('id', _user.id).single()
 
   const supabaseUrl = c.get('supabaseUrl')
   const serviceRoleKey = c.get('serviceRoleKey')

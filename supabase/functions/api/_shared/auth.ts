@@ -13,7 +13,6 @@
  */
 import { ApiError } from './errors.ts'
 import { createClient } from 'npm:@supabase/supabase-js@2.44.0'
-import { createRequest } from 'npm:@supabase/ssr'
 
 // Auth errors - centralize all auth-related errors
 export const authErrorHandlers = {
@@ -58,7 +57,7 @@ function decodeJWT(token: string): any {
   try {
     // JWT format: header.payload.signature
     // Extract payload (second part) and base64 decode
-    const payload = token.split('.')[1]
+    let payload = token.split('.')[1]
     if (!payload) return null
     
     // Remove base64 padding

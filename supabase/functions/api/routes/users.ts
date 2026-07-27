@@ -5,7 +5,7 @@ import { Variables } from '../_shared/types.ts'
 export const usersRouter = new Hono<{ Variables: Variables }>()
 
 // Check if the provided user is admin (to allow operations on other users)
-async function canManage(userId: string, user: any): Promise<boolean> {
+async function _canManage(userId: string, _user: any): Promise<boolean> {
   const { data: profile } = await createClient('http://localhost', null).from('profiles').select('user_type').eq('id', userId).single()
   if (profile?.user_type !== 'admin') {
     return false
@@ -14,13 +14,13 @@ async function canManage(userId: string, user: any): Promise<boolean> {
 }
 
 usersRouter.get('/', async (c) => {
-  const user = c.get('user')!
+  const _user = c.get('user')!
   const supabaseUrl = c.get('supabaseUrl')
   const serviceRoleKey = c.get('serviceRoleKey')
-  const supabase = c.get('supabase')
+  const _supabase = c.get('supabase')
 
   // Require admin service role
-  const requiresServiceRole = true
+  const _requiresServiceRole = true
 
   const adminSupabase = createClient(supabaseUrl, serviceRoleKey)
 
@@ -60,13 +60,13 @@ usersRouter.get('/', async (c) => {
 })
 
 usersRouter.post('/', async (c) => {
-  const user = c.get('user')!
+  const _user = c.get('user')!
   const supabaseUrl = c.get('supabaseUrl')
   const serviceRoleKey = c.get('serviceRoleKey')
-  const supabase = c.get('supabase')
+  const _supabase = c.get('supabase')
 
   // Require admin service role
-  const requiresServiceRole = true
+  const _requiresServiceRole = true
 
   const adminSupabase = createClient(supabaseUrl, serviceRoleKey)
   const body = await c.req.json()
@@ -102,7 +102,7 @@ usersRouter.delete('/:id', async (c) => {
   const userId = c.req.param('id')
 
   // Verify admin or self
-  const requiresServiceRole = user.id === userId
+  const _requiresServiceRole = user.id === userId
 
   if (user.id !== userId) {
     const { data: profile } = await supabase.from('profiles').select('user_type').eq('id', user.id).single()
@@ -126,7 +126,7 @@ usersRouter.patch('/:id', async (c) => {
   const userId = c.req.param('id')
 
   // Verify admin or self
-  const requiresServiceRole = user.id === userId
+  const _requiresServiceRole = user.id === userId
 
   if (user.id !== userId) {
     const { data: profile } = await supabase.from('profiles').select('user_type').eq('id', user.id).single()

@@ -1,4 +1,3 @@
-import { createClient } from 'npm:@supabase/supabase-js@2.44.0'
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 import { Sentry } from '../_shared/sentry.ts'
@@ -23,7 +22,7 @@ import { searchRouter } from './routes/search.ts'
 import { meRouter } from './routes/me.ts'
 
 import { Variables } from './_shared/types.ts'
-import { ApiError, serviceRoleMiddleware, _authErrorHandlers as authErrorHandlers } from './_shared/errors.ts'
+import { ApiError, serviceRoleMiddleware } from './_shared/errors.ts'
 import { authMiddleware } from './_shared/auth.ts'
 
 const app = new Hono<{ Variables: Variables }>()

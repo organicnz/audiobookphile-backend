@@ -36,10 +36,10 @@ authorsRouter.delete('/:id', async (c) => {
 })
 
 authorsRouter.post('/:id/match', async (c) => {
-  const user = c.get('user')!
+  const _user = c.get('user')!
   const supabase = c.get('supabase')
 
-  const requiresServiceRole = true
+  const _requiresServiceRole = true
 
   const supabaseUrl = c.get('supabaseUrl')
   const serviceRoleKey = c.get('serviceRoleKey')

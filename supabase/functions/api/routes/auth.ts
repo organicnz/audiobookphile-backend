@@ -598,13 +598,12 @@ function decodeJWT(token: string): any {
   try {
     // JWT format: header.payload.signature
     // Extract payload (second part) and base64 decode
-    const payload = token.split('.')[1]
+    let payload = token.split('.')[1]
     if (!payload) return null
     
     // Remove base64 padding
     const padding = (4 - (payload.length % 4)) % 4
-    let tempPayload = '='.repeat(padding)
-    payload += tempPayload
+    payload += '='.repeat(padding)
     
     // Decode
     const decoded = Buffer.from(payload, 'base64').toString()
