@@ -1,6 +1,6 @@
+import { createClient } from 'npm:@supabase/supabase-js@2.44.0'
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
-import { createClient } from 'npm:@supabase/supabase-js@2.44.0'
 import { Sentry } from '../_shared/sentry.ts'
 
 // Native Hono Routers
@@ -23,13 +23,37 @@ import { searchRouter } from './routes/search.ts'
 import { meRouter } from './routes/me.ts'
 
 import { Variables } from './_shared/types.ts'
-import { ApiError, serviceRoleMiddleware } from './_shared/errors.ts'
-import { authMiddleware, authErrorHandlers } from './_shared/auth.ts'
+import { ApiError, serviceRoleMiddleware, _authErrorHandlers as authErrorHandlers } from './_shared/errors.ts'
+import { authMiddleware } from './_shared/auth.ts'
+
+const app = new Hono<{ Variables: Variables }>()
 
 // === MIDDLEWARE CHAIN ===
-// Order matters: logging → error handling → auth → route handlers
+// Order matters: CORS → health → logging → error handling → auth → service role → routes
 
-// 1. Structured Logging Middleware
+// 1. CORS (must run first so preflight OPTIONS requests get proper headers)
+app.use('*', cors({
+  origin: '*',
+  // x-refresh-token is required for the /authorize silent-refresh path used
+  // by the iOS Audiobookshelf client to avoid daily re-authentication prompts.
+  allowHeaders: ['authorization', 'x-client-info', 'apikey', 'content-type', 'x-refresh-token']
+}))
+
+// 2. Health check (before auth so it's always accessible)
+app.get('/api/health', (c) => {
+  const zaiConfigured = Boolean(Deno.env.get('ZAI_API_KEY') || Deno.env.get('ZHIPU_API_KEY'))
+  return c.json({
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+    version: '2026.07.24',
+    services: {
+      database: 'connected',
+      zai: zaiConfigured ? 'configured' : 'unconfigured'
+    }
+  })
+})
+
+// 3. Structured Logging Middleware
 app.use(async (c, next) => {
   const start = Date.now()
   await next()
@@ -37,7 +61,7 @@ app.use(async (c, next) => {
   const requestId = crypto.randomUUID()
   c.res.headers.set('X-Request-ID', requestId)
   c.set('requestId', requestId)
-  
+
   // Only log in production
   if (Deno.env.get('NODE_ENV') === 'production') {
     const log = {
@@ -51,16 +75,13 @@ app.use(async (c, next) => {
       statusCode: c.res.status,
       durationMs: duration,
       user: c.get('user')?.email,
-      ip: c.req.env.req.connection.remoteAddress || 'unknown'
+      ip: c.req.header('x-forwarded-for') || c.req.header('x-real-ip') || 'unknown'
     }
-    Deno.console.log(JSON.stringify(log))
+    console.log(JSON.stringify(log))
   }
 })
 
-// 2. Auth Middleware (centralized authentication, skips auth routes)
-app.use('*', authMiddleware)
-
-// 3. Error Handling Middleware
+// 4. Error Handling Middleware
 app.use(async (c, next) => {
   try {
     await next()
@@ -88,8 +109,8 @@ app.use(async (c, next) => {
     } else {
       // Generic error - log and return 500
       const errorId = crypto.randomUUID()
-      Deno.console.log(
-        `[API Index] Unhandled error - Request: ${c.req.method} ${c.req.path} - Error: ${err.message} (${err.constructor.name})`
+      console.error(
+        `[API Index] Unhandled error [${errorId}] - Request: ${c.req.method} ${c.req.path} - Error: ${(err as Error).message} (${(err as Error).constructor.name})`
       )
       // Optionally report to Sentry in production
       if (Deno.env.get('NODE_ENV') === 'production') {
@@ -100,34 +121,11 @@ app.use(async (c, next) => {
   }
 })
 
-// 4. Additional auth middleware (for protected routes within routers)
-// This is for routes that need to call downstream services requiring auth
-// Individual route handlers can use the auth middleware as needed
+// 5. Auth Middleware (centralized authentication, skips auth routes)
+app.use('*', authMiddleware)
 
-// 5. Service Role Middleware
+// 6. Service Role Middleware
 app.use(serviceRoleMiddleware)
-
-const app = new Hono<{ Variables: Variables }>()
-
-app.get('/api/health', (c) => {
-  const zaiConfigured = Boolean(Deno.env.get('ZAI_API_KEY') || Deno.env.get('ZHIPU_API_KEY'))
-  return c.json({
-    status: 'ok',
-    timestamp: new Date().toISOString(),
-    version: '2026.07.24',
-    services: {
-      database: 'connected',
-      zai: zaiConfigured ? 'configured' : 'unconfigured'
-    }
-  })
-})
-
-app.use('*', cors({
-  origin: '*',
-  // x-refresh-token is required for the /authorize silent-refresh path used
-  // by the iOS Audiobookshelf client to avoid daily re-authentication prompts.
-  allowHeaders: ['authorization', 'x-client-info', 'apikey', 'content-type', 'x-refresh-token']
-}))
 
 // === NATIVE HONO ROUTERS ===
 // Routes are mounted here, middleware chain applies to all

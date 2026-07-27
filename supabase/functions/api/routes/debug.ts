@@ -5,14 +5,14 @@ import { Variables } from '../_shared/types.ts'
 export const debugRouter = new Hono<{ Variables: Variables }>()
 
 debugRouter.get('/:id', async (c) => {
-  const user = c.get('user')!
+  const _user = c.get('user')!
   const supabaseUrl = c.get('supabaseUrl') as string
   const serviceRoleKey = c.get('serviceRoleKey') as string
-  const adminClient = createClient(supabaseUrl, serviceRoleKey)
+  const _adminClient = _createClient(supabaseUrl, serviceRoleKey)
 
-  const requiresServiceRole = true
+  const _requiresServiceRole = true
 
   const itemId = c.req.param('id')
-  const { data: item } = await adminClient.from('library_items').select('*, books(*)').eq('id', itemId).single()
+  const { data: item } = await _adminClient.from('library_items').select('*, books(*)').eq('id', itemId).single()
   return c.json(item)
 })

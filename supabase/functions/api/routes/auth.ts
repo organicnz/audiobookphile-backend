@@ -11,7 +11,7 @@ import { Hono } from 'hono'
 import { createClient } from 'npm:@supabase/supabase-js@2.44.0'
 import { Variables } from '../_shared/types.ts'
 import { getProxyOrigin } from '../../api/_shared/proxy.ts'
-import { ApiError, authErrorHandlers } from '../_shared/errors.ts'
+import { authErrorHandlers } from '../_shared/errors.ts'
 import { z } from 'zod'
 
 export const authRouter = new Hono<{ Variables: Variables }>()
@@ -603,7 +603,8 @@ function decodeJWT(token: string): any {
     
     // Remove base64 padding
     const padding = (4 - (payload.length % 4)) % 4
-    payload += '='.repeat(padding)
+    let tempPayload = '='.repeat(padding)
+    payload += tempPayload
     
     // Decode
     const decoded = Buffer.from(payload, 'base64').toString()
