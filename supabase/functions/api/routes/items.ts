@@ -279,6 +279,8 @@ itemsRouter.delete("/:id/cover", async (c) => {
   const _user = c.get("user")!;
   const _requiresServiceRole = true;
 
+  const supabaseUrl = c.get("supabaseUrl");
+  const serviceRoleKey = c.get("serviceRoleKey");
   const itemId = c.req.param("id");
 
   const adminClient = createClient(supabaseUrl, serviceRoleKey);

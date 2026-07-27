@@ -11,7 +11,7 @@ import { Hono } from "hono";
 import { createClient } from "npm:@supabase/supabase-js@2.44.0";
 import { Variables } from "../_shared/types.ts";
 import { getProxyOrigin } from "../../api/_shared/proxy.ts";
-import { authErrorHandlers } from "../_shared/errors.ts";
+import { authErrorHandlers } from "../_shared/auth.ts";
 import { z } from "zod";
 
 export const authRouter = new Hono<{ Variables: Variables }>();
@@ -422,7 +422,7 @@ authRouter.post("/refresh", async (c) => {
     const adminSupabase = createClient(supabaseUrl, serviceRoleKey);
     const { data: profile, error: profileError } = await adminSupabase.from(
       "profiles",
-    ).select("*").eq("id", sessionData.user.id).maybeSingle();
+    ).select("*").eq("id", sessionData.user!.id).maybeSingle();
 
     if (profileError) {
       return authErrorHandlers.USER_NOT_FOUND();
@@ -430,10 +430,10 @@ authRouter.post("/refresh", async (c) => {
 
     const userPayload = {
       user: {
-        id: sessionData.user.id,
-        username: profile?.username || sessionData.user.email?.split("@")[0] ||
+        id: sessionData.user!.id,
+        username: profile?.username || sessionData.user!.email?.split("@")[0] ||
           "User",
-        email: sessionData.user.email,
+        email: sessionData.user!.email,
         type: profile?.user_type || "user",
         token: sessionData.session.access_token,
         refreshToken: sessionData.session.refresh_token || token,
@@ -443,7 +443,7 @@ authRouter.post("/refresh", async (c) => {
         isActive: true,
         isLocked: false,
         lastSeen: Date.now(),
-        createdAt: new Date(profile?.created_at || sessionData.user.created_at)
+        createdAt: new Date(profile?.created_at || sessionData.user!.created_at)
           .getTime(),
         permissions: {
           download: true,
@@ -497,10 +497,9 @@ authRouter.post("/authorize", async (c) => {
     let user = null;
     let activeToken = jwt;
     let newRefreshToken: string | null = null;
+    const adminSupabase = createClient(supabaseUrl, serviceRoleKey);
 
     if (jwt) {
-      const adminSupabase = createClient(supabaseUrl, serviceRoleKey);
-
       // Extract payload from JWT
       const payload = decodeJWT(jwt);
 
@@ -539,8 +538,8 @@ authRouter.post("/authorize", async (c) => {
 
       user = {
         id: userId,
-        email: payload.email || profile.email || authIdentity?.email || null,
-        username: payload.username || profile.username,
+        email: payload.email || profile?.email || null,
+        username: payload.username || profile?.username,
         created_at: new Date(profile?.created_at || Date.now()).toISOString(),
       };
 
@@ -553,7 +552,6 @@ authRouter.post("/authorize", async (c) => {
         .refreshSession({ refresh_token: providedRefreshToken });
 
       if (!refreshError && refreshData.session && refreshData.user) {
-        const adminSupabase = createClient(supabaseUrl, serviceRoleKey);
         const { data: profile } = await adminSupabase.from("profiles").select(
           "*",
         ).eq("id", refreshData.user.id).maybeSingle();
@@ -658,9 +656,3 @@ function decodeJWT(token: string): any {
     return null;
   }
 }
-
-// =========================
-// Module Export
-// =========================
-
-export { authErrorHandlers, authRouter };

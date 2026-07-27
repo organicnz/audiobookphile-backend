@@ -7,4 +7,5 @@ export type Variables = {
   supabase: SupabaseClient<Database>;
   user: User | null;
   requireUser: () => Promise<User>;
+  requestId: string;
 };

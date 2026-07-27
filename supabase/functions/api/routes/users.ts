@@ -6,7 +6,7 @@ export const usersRouter = new Hono<{ Variables: Variables }>();
 
 // Check if the provided user is admin (to allow operations on other users)
 async function _canManage(userId: string, _user: any): Promise<boolean> {
-  const { data: profile } = await createClient("http://localhost", null).from(
+  const { data: profile } = await createClient("http://localhost", "").from(
     "profiles",
   ).select("user_type").eq("id", userId).single();
   if (profile?.user_type !== "admin") {
