@@ -1,190 +1,249 @@
-import { createClient } from 'npm:@supabase/supabase-js@2.44.0'
-import { corsHeaders } from '../_shared/cors.ts'
-import { StorageRouter } from '../_shared/storage-router.ts'
-import { parseTitleAndAuthor } from '../_shared/titleAuthorParser.ts'
-import { matchExistingBookWithZAI, sortFilesWithZAI } from '../_shared/zai.ts'
+import { createClient } from "npm:@supabase/supabase-js@2.44.0";
+import { corsHeaders } from "../_shared/cors.ts";
+import { StorageRouter } from "../_shared/storage-router.ts";
+import { parseTitleAndAuthor } from "../_shared/titleAuthorParser.ts";
+import { matchExistingBookWithZAI, sortFilesWithZAI } from "../_shared/zai.ts";
 
 Deno.serve(async (req) => {
-  if (req.method === 'OPTIONS') {
-    return new Response('ok', { headers: corsHeaders })
+  if (req.method === "OPTIONS") {
+    return new Response("ok", { headers: corsHeaders });
   }
 
   try {
-    const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? ''
-    const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY') ?? ''
-    const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+    const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
+    const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
+    const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
 
-    const authHeader = req.headers.get('Authorization')
+    const authHeader = req.headers.get("Authorization");
     const supabase = createClient(supabaseUrl, supabaseAnonKey, {
-      global: { headers: authHeader ? { Authorization: authHeader } : {} }
-    })
-    const db = createClient(supabaseUrl, serviceRoleKey)
+      global: { headers: authHeader ? { Authorization: authHeader } : {} },
+    });
+    const db = createClient(supabaseUrl, serviceRoleKey);
 
     const {
-      data: { user }
-    } = authHeader ? await supabase.auth.getUser() : { data: { user: null } }
+      data: { user },
+    } = authHeader ? await supabase.auth.getUser() : { data: { user: null } };
     if (!user) {
-      return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+      return new Response(JSON.stringify({ error: "Unauthorized" }), {
         status: 401,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-      })
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
 
-    const { data: profile } = await db.from('profiles').select('user_type').eq('id', user.id).single()
-    if (!profile || !['admin', 'root', 'user'].includes(profile.user_type ?? '')) {
-      return new Response(JSON.stringify({ error: 'Forbidden' }), {
+    const { data: profile } = await db.from("profiles").select("user_type").eq(
+      "id",
+      user.id,
+    ).single();
+    if (
+      !profile || !["admin", "root", "user"].includes(profile.user_type ?? "")
+    ) {
+      return new Response(JSON.stringify({ error: "Forbidden" }), {
         status: 403,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-      })
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
 
-    const body = await req.json()
-    let { bookId, title: rawTitle, author: rawAuthor = '', series = '', library: libraryId, mediaType = 'book', files } = body
+    const body = await req.json();
+    let {
+      bookId,
+      title: rawTitle,
+      author: rawAuthor = "",
+      series = "",
+      library: libraryId,
+      mediaType = "book",
+      files,
+    } = body;
 
-    let { cleanTitle: title, cleanAuthor: author } = parseTitleAndAuthor(rawTitle, rawAuthor)
+    let { cleanTitle: title, cleanAuthor: author } = parseTitleAndAuthor(
+      rawTitle,
+      rawAuthor,
+    );
 
-    const zaiApiKey = Deno.env.get('ZAI_API_KEY') ?? Deno.env.get('ZHIPU_API_KEY') ?? ''
+    const zaiApiKey = Deno.env.get("ZAI_API_KEY") ??
+      Deno.env.get("ZHIPU_API_KEY") ?? "";
 
     // AI title/author extraction fallback via Z.ai GLM-4 if author is unknown or title is ambiguous
-    if ((!author || author === 'Unknown Author' || !title) && rawTitle && zaiApiKey) {
+    if (
+      (!author || author === "Unknown Author" || !title) && rawTitle &&
+      zaiApiKey
+    ) {
       try {
-        const aiRes = await fetch('https://open.bigmodel.cn/api/paas/v4/chat/completions', {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${zaiApiKey}`,
-            'Content-Type': 'application/json'
+        const aiRes = await fetch(
+          "https://open.bigmodel.cn/api/paas/v4/chat/completions",
+          {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${zaiApiKey}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              model: "glm-4-flash",
+              messages: [
+                {
+                  role: "user",
+                  content:
+                    `Extract the exact book title and author name from this filename/text: "${rawTitle}". Return ONLY a JSON object: {"title": "...", "author": "..."}`,
+                },
+              ],
+              temperature: 0.1,
+            }),
           },
-          body: JSON.stringify({
-            model: 'glm-4-flash',
-            messages: [
-              {
-                role: 'user',
-                content: `Extract the exact book title and author name from this filename/text: "${rawTitle}". Return ONLY a JSON object: {"title": "...", "author": "..."}`
-              }
-            ],
-            temperature: 0.1
-          })
-        })
+        );
         if (aiRes.ok) {
-          const aiData = await aiRes.json()
-          const content = aiData.choices?.[0]?.message?.content || ''
-          const match = content.match(/\{[\s\S]*\}/)
+          const aiData = await aiRes.json();
+          const content = aiData.choices?.[0]?.message?.content || "";
+          const match = content.match(/\{[\s\S]*\}/);
           if (match) {
-            const parsed = JSON.parse(match[0])
-            if (parsed.title) title = parsed.title
-            if (parsed.author) author = parsed.author
+            const parsed = JSON.parse(match[0]);
+            if (parsed.title) title = parsed.title;
+            if (parsed.author) author = parsed.author;
           }
         }
       } catch (e: unknown) {
-        const err = e as Error
-        console.error('[upload-finalize] Z.ai GLM-4 fallback error:', err.message)
+        const err = e as Error;
+        console.error(
+          "[upload-finalize] Z.ai GLM-4 fallback error:",
+          err.message,
+        );
       }
     }
 
     if (!bookId || !title || !libraryId || !files?.length) {
-      return new Response(JSON.stringify({ error: 'Missing fields' }), {
+      return new Response(JSON.stringify({ error: "Missing fields" }), {
         status: 400,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-      })
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
 
-    const missingFiles: string[] = []
-    const storageRouter = new StorageRouter(db)
+    const missingFiles: string[] = [];
+    const storageRouter = new StorageRouter(db);
 
     const fileCheckPromises = files.map(async (file: any) => {
-      const exists = await storageRouter.fileExists(file.storagePath)
-      return exists ? null : file.storagePath
-    })
+      const exists = await storageRouter.fileExists(file.storagePath);
+      return exists ? null : file.storagePath;
+    });
 
-    const checkResults = await Promise.all(fileCheckPromises)
-    missingFiles.push(...checkResults.filter((r): r is string => r !== null))
+    const checkResults = await Promise.all(fileCheckPromises);
+    missingFiles.push(...checkResults.filter((r): r is string => r !== null));
 
     if (missingFiles.length > 0) {
-      return new Response(JSON.stringify({ error: 'Files missing in storage', missingFiles }), {
-        status: 400,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-      })
+      return new Response(
+        JSON.stringify({ error: "Files missing in storage", missingFiles }),
+        {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        },
+      );
     }
 
-    const totalSize = files.reduce((sum: number, f: any) => sum + f.size, 0)
+    const totalSize = files.reduce((sum: number, f: any) => sum + f.size, 0);
 
     // --- SMART REBINDING & DUPLICATE PREVENTION ---
-    let existingItem: any = null
+    let existingItem: any = null;
 
     const normalizeTitle = (s: string) => {
-      if (!s) return ''
-      let v = s.toLowerCase().trim()
-      v = v.replace(/\[(audiobook|unabridged|abridged|mp3)\]|\((audiobook|unabridged|abridged|mp3)\)/gi, '')
-      v = v.replace(/\b(cd|disc|part|vol|volume)\s*\d+\b/gi, '')
-      return v.replace(/[^\p{L}\p{N}]/gu, '')
-    }
+      if (!s) return "";
+      let v = s.toLowerCase().trim();
+      v = v.replace(
+        /\[(audiobook|unabridged|abridged|mp3)\]|\((audiobook|unabridged|abridged|mp3)\)/gi,
+        "",
+      );
+      v = v.replace(/\b(cd|disc|part|vol|volume)\s*\d+\b/gi, "");
+      return v.replace(/[^\p{L}\p{N}]/gu, "");
+    };
 
     // 1. Try matching directly by bookId or media_id
     const { data: itemsById } = await db
-      .from('library_items')
-      .select('id, media_id, size, library_files, audio_files, duration, author_names_first_last, title')
+      .from("library_items")
+      .select(
+        "id, media_id, size, library_files, audio_files, duration, author_names_first_last, title",
+      )
       .or(`id.eq.${bookId},media_id.eq.${bookId}`)
-      .eq('library_id', libraryId)
-      .limit(1)
+      .eq("library_id", libraryId)
+      .limit(1);
 
     if (itemsById && itemsById.length > 0) {
-      existingItem = itemsById[0]
+      existingItem = itemsById[0];
     } else if (title) {
       // Fetch all items in library for exact, normalized, and Z.AI matching
       const { data: allLibItems } = await db
-        .from('library_items')
-        .select('id, media_id, size, library_files, audio_files, duration, author_names_first_last, title')
-        .eq('library_id', libraryId)
+        .from("library_items")
+        .select(
+          "id, media_id, size, library_files, audio_files, duration, author_names_first_last, title",
+        )
+        .eq("library_id", libraryId);
 
       if (allLibItems?.length) {
-        const normTitle = normalizeTitle(title)
+        const normTitle = normalizeTitle(title);
 
         // 2. Try exact title, normalized fuzzy title match, or prefix title + matching author
         for (const item of allLibItems) {
-          const itemTitle = (item.title || '').trim()
+          const itemTitle = (item.title || "").trim();
           if (itemTitle.toLowerCase() === title.trim().toLowerCase()) {
-            existingItem = item
-            break
+            existingItem = item;
+            break;
           }
-          const normItemTitle = normalizeTitle(itemTitle)
+          const normItemTitle = normalizeTitle(itemTitle);
           if (normItemTitle && normItemTitle === normTitle) {
-            existingItem = item
-            break
+            existingItem = item;
+            break;
           }
-          if (normItemTitle && normTitle && (normItemTitle.startsWith(normTitle) || normTitle.startsWith(normItemTitle))) {
-            const itemAuthor = (item.author_names_first_last || '').toLowerCase().replace(/[^\p{L}\p{N}]/gu, '')
-            const uploadAuthor = (author || '').toLowerCase().replace(/[^\p{L}\p{N}]/gu, '')
-            if (!itemAuthor || !uploadAuthor || itemAuthor.includes(uploadAuthor) || uploadAuthor.includes(itemAuthor)) {
-              existingItem = item
-              break
+          if (
+            normItemTitle && normTitle &&
+            (normItemTitle.startsWith(normTitle) ||
+              normTitle.startsWith(normItemTitle))
+          ) {
+            const itemAuthor = (item.author_names_first_last || "")
+              .toLowerCase().replace(/[^\p{L}\p{N}]/gu, "");
+            const uploadAuthor = (author || "").toLowerCase().replace(
+              /[^\p{L}\p{N}]/gu,
+              "",
+            );
+            if (
+              !itemAuthor || !uploadAuthor ||
+              itemAuthor.includes(uploadAuthor) ||
+              uploadAuthor.includes(itemAuthor)
+            ) {
+              existingItem = item;
+              break;
             }
           }
         }
 
         // 3. Try Z.AI AI Semantic/Fuzzy Match if normalized match didn't find item
         if (!existingItem && zaiApiKey) {
-          const matchedId = await matchExistingBookWithZAI(title, author, allLibItems, zaiApiKey)
+          const matchedId = await matchExistingBookWithZAI(
+            title,
+            author,
+            allLibItems,
+            zaiApiKey,
+          );
           if (matchedId) {
-            existingItem = allLibItems.find((i) => i.id === matchedId) || null
+            existingItem = allLibItems.find((i) => i.id === matchedId) || null;
           }
         }
       }
     }
 
-    let libraryItemId = crypto.randomUUID()
+    let libraryItemId = crypto.randomUUID();
     if (existingItem) {
-      libraryItemId = existingItem.id
-      bookId = existingItem.media_id || existingItem.id
-      console.log(`[upload-finalize] Rebinding upload to existing book record: ${libraryItemId} ("${existingItem.title}")`)
+      libraryItemId = existingItem.id;
+      bookId = existingItem.media_id || existingItem.id;
+      console.log(
+        `[upload-finalize] Rebinding upload to existing book record: ${libraryItemId} ("${existingItem.title}")`,
+      );
     }
 
-    let baseIndex = 0
-    let finalAudioFiles: any[] = []
-    let currentDuration = 0
+    let baseIndex = 0;
+    let finalAudioFiles: any[] = [];
+    let currentDuration = 0;
     if (existingItem) {
-      finalAudioFiles = existingItem.audio_files || []
-      baseIndex = finalAudioFiles.reduce((max: number, af: any) => Math.max(max, af.index || 0), 0)
-      currentDuration = existingItem.duration || 0
+      finalAudioFiles = existingItem.audio_files || [];
+      baseIndex = finalAudioFiles.reduce(
+        (max: number, af: any) => Math.max(max, af.index || 0),
+        0,
+      );
+      currentDuration = existingItem.duration || 0;
     }
 
     const audioFilesJson = files.map((file: any, i: number) => ({
@@ -193,61 +252,65 @@ Deno.serve(async (req) => {
       duration: 0,
       metadata: {
         filename: file.name,
-        ext: '.' + (file.name.split('.').pop()?.toLowerCase() ?? ''),
+        ext: "." + (file.name.split(".").pop()?.toLowerCase() ?? ""),
         path: file.storagePath,
         relPath: file.name,
         size: file.size,
         duration: 0,
         mtimeMs: Date.now(),
         ctimeMs: Date.now(),
-        birthtimeMs: Date.now()
+        birthtimeMs: Date.now(),
       },
       addedAt: Date.now(),
       updatedAt: Date.now(),
-      mimeType: file.type || 'audio/mpeg'
-    }))
+      mimeType: file.type || "audio/mpeg",
+    }));
 
-    finalAudioFiles = [...finalAudioFiles, ...audioFilesJson]
+    finalAudioFiles = [...finalAudioFiles, ...audioFilesJson];
 
     // Deduplicate files by filename so re-uploading doesn't create duplicate chapters
-    const uniqueFilesMap = new Map<string, any>()
+    const uniqueFilesMap = new Map<string, any>();
     for (const af of finalAudioFiles) {
       if (af.metadata?.filename) {
-        uniqueFilesMap.set(af.metadata.filename, af)
+        uniqueFilesMap.set(af.metadata.filename, af);
       }
     }
-    let deduplicatedFiles = Array.from(uniqueFilesMap.values())
+    let deduplicatedFiles = Array.from(uniqueFilesMap.values());
 
     // --- Z.AI AI-OPTIMIZED SEQUENCE SORTING ---
-    const filenames = deduplicatedFiles.map((af: any) => af.metadata?.filename || af.metadata?.relPath || '').filter(Boolean)
+    const filenames = deduplicatedFiles.map((af: any) =>
+      af.metadata?.filename || af.metadata?.relPath || ""
+    ).filter(Boolean);
 
     if (filenames.length > 1) {
-      const sortedFilenames = await sortFilesWithZAI(filenames, zaiApiKey)
-      const filenameOrderMap = new Map<string, number>()
-      sortedFilenames.forEach((name: string, index: number) => filenameOrderMap.set(name, index))
+      const sortedFilenames = await sortFilesWithZAI(filenames, zaiApiKey);
+      const filenameOrderMap = new Map<string, number>();
+      sortedFilenames.forEach((name: string, index: number) =>
+        filenameOrderMap.set(name, index)
+      );
 
       deduplicatedFiles.sort((a: any, b: any) => {
-        const nameA = a.metadata?.filename || a.metadata?.relPath || ''
-        const nameB = b.metadata?.filename || b.metadata?.relPath || ''
-        const orderA = filenameOrderMap.get(nameA) ?? 999
-        const orderB = filenameOrderMap.get(nameB) ?? 999
-        return orderA - orderB
-      })
+        const nameA = a.metadata?.filename || a.metadata?.relPath || "";
+        const nameB = b.metadata?.filename || b.metadata?.relPath || "";
+        const orderA = filenameOrderMap.get(nameA) ?? 999;
+        const orderB = filenameOrderMap.get(nameB) ?? 999;
+        return orderA - orderB;
+      });
     }
 
-    deduplicatedFiles.forEach((af: any, idx: number) => (af.index = idx + 1))
+    deduplicatedFiles.forEach((af: any, idx: number) => (af.index = idx + 1));
 
     const { error: bookError } = await db
-      .from('library_items')
+      .from("library_items")
       .update({
         audio_files: deduplicatedFiles,
         duration: currentDuration,
-        title: title || existingItem?.title
+        title: title || existingItem?.title,
       })
-      .eq('id', libraryItemId)
+      .eq("id", libraryItemId);
 
     if (bookError && !existingItem) {
-      const res = await db.from('library_items').insert({
+      const res = await db.from("library_items").insert({
         id: libraryItemId,
         library_id: libraryId,
         media_type: mediaType,
@@ -259,9 +322,9 @@ Deno.serve(async (req) => {
         duration: currentDuration,
         size: totalSize,
         is_missing: false,
-        last_storage_check: new Date().toISOString()
-      })
-      if (res.error) throw res.error
+        last_storage_check: new Date().toISOString(),
+      });
+      if (res.error) throw res.error;
     }
 
     const newLibraryFiles = audioFilesJson.map((af: any) => ({
@@ -269,70 +332,79 @@ Deno.serve(async (req) => {
       metadata: af.metadata,
       addedAt: af.addedAt,
       updatedAt: af.updatedAt,
-      isSupplementary: false
-    }))
+      isSupplementary: false,
+    }));
 
-    let finalLibraryFiles = newLibraryFiles
+    let finalLibraryFiles = newLibraryFiles;
     if (existingItem) {
-      const allLibFiles = [...(existingItem.library_files || []), ...newLibraryFiles]
-      const uniqueLibMap = new Map<string, any>()
+      const allLibFiles = [
+        ...(existingItem.library_files || []),
+        ...newLibraryFiles,
+      ];
+      const uniqueLibMap = new Map<string, any>();
       for (const lf of allLibFiles) {
         if (lf.metadata?.filename) {
-          uniqueLibMap.set(lf.metadata.filename, lf)
+          uniqueLibMap.set(lf.metadata.filename, lf);
         }
       }
-      finalLibraryFiles = Array.from(uniqueLibMap.values())
+      finalLibraryFiles = Array.from(uniqueLibMap.values());
     }
-    const finalSize = (existingItem?.size || 0) + totalSize
+    const finalSize = (existingItem?.size || 0) + totalSize;
 
     const { error: itemError } = await db
-      .from('library_items')
+      .from("library_items")
       .update({
         size: finalSize,
         library_files: finalLibraryFiles,
-        last_storage_check: new Date().toISOString()
+        last_storage_check: new Date().toISOString(),
       })
-      .eq('id', libraryItemId)
+      .eq("id", libraryItemId);
 
     if (itemError && !existingItem) {
-      throw itemError
+      throw itemError;
     }
 
     // --- BACKGROUND TASK: Extract Audio Duration ---
     const processDurationsAsync = async () => {
       try {
-        const storageRouter = new StorageRouter(db)
-        let mm: any = null
+        const storageRouter = new StorageRouter(db);
+        let mm: any = null;
         try {
-          mm = await import('npm:music-metadata@10.8.0')
+          mm = await import("npm:music-metadata@10.8.0");
         } catch (_err) {
-          console.warn('[upload-finalize] Could not load music-metadata')
+          console.warn("[upload-finalize] Could not load music-metadata");
         }
 
         const metadataPromises = files.map(async (file: any, i: number) => {
-          const existingAf = audioFilesJson[i]
-          let duration = 0
+          const existingAf = audioFilesJson[i];
+          let duration = 0;
           try {
-            const signedUrl = await storageRouter.getSignedUrl(file.storagePath, 60)
+            const signedUrl = await storageRouter.getSignedUrl(
+              file.storagePath,
+              60,
+            );
             if (signedUrl && mm) {
-              const res = await fetch(signedUrl)
+              const res = await fetch(signedUrl);
               if (res.body) {
                 const metadata = await mm.parseWebStream(
                   res.body,
                   { mimeType: file.type, size: file.size },
-                  { duration: true, skipCovers: true, skipPostHeaders: true }
-                )
-                duration = metadata.format?.duration || 0
+                  { duration: true, skipCovers: true, skipPostHeaders: true },
+                );
+                duration = metadata.format?.duration || 0;
 
                 try {
-                  res.body.cancel()
+                  res.body.cancel();
                 } catch (_e) {
                   // Ignore
                 }
               }
             }
           } catch (err) {
-            console.warn(`[upload-finalize] Background duration parse failed for ${file.name}:`, err)
+            console.warn(
+              `[upload-finalize] Background duration parse failed for ${file.name}:`,
+              err,
+            );
           }
 
           return {
@@ -340,147 +412,168 @@ Deno.serve(async (req) => {
             duration,
             metadata: {
               ...existingAf.metadata,
-              duration
-            }
-          }
-        })
+              duration,
+            },
+          };
+        });
 
-        const updatedAudioFilesJson = await Promise.all(metadataPromises)
+        const updatedAudioFilesJson = await Promise.all(metadataPromises);
 
         // Fetch latest state of book to merge updated durations
-        const { data: latestBook } = await db.from('library_items').select('audio_files').eq('id', libraryItemId).single()
-        const existingAudioFiles = latestBook?.audio_files || deduplicatedFiles
+        const { data: latestBook } = await db.from("library_items").select(
+          "audio_files",
+        ).eq("id", libraryItemId).single();
+        const existingAudioFiles = latestBook?.audio_files || deduplicatedFiles;
 
-        const updatedMap = new Map<string, any>()
+        const updatedMap = new Map<string, any>();
         for (const af of existingAudioFiles) {
-          if (af.metadata?.filename) updatedMap.set(af.metadata.filename, af)
+          if (af.metadata?.filename) updatedMap.set(af.metadata.filename, af);
         }
         for (const updatedAf of updatedAudioFilesJson) {
           if (updatedAf.metadata?.filename) {
-            updatedMap.set(updatedAf.metadata.filename, updatedAf)
+            updatedMap.set(updatedAf.metadata.filename, updatedAf);
           }
         }
 
-        const finalMergedAudioFiles = Array.from(updatedMap.values())
-        finalMergedAudioFiles.forEach((af, idx) => (af.index = idx + 1))
+        const finalMergedAudioFiles = Array.from(updatedMap.values());
+        finalMergedAudioFiles.forEach((af, idx) => (af.index = idx + 1));
 
-        const totalDuration = finalMergedAudioFiles.reduce((sum: number, af: any) => sum + (af.duration || 0), 0)
+        const totalDuration = finalMergedAudioFiles.reduce(
+          (sum: number, af: any) => sum + (af.duration || 0),
+          0,
+        );
 
         await db
-          .from('library_items')
+          .from("library_items")
           .update({
             audio_files: finalMergedAudioFiles,
-            duration: totalDuration
+            duration: totalDuration,
           })
-          .eq('id', libraryItemId)
+          .eq("id", libraryItemId);
 
-        console.log(`[upload-finalize] Successfully updated duration for book ${libraryItemId} to ${totalDuration}s`)
+        console.log(
+          `[upload-finalize] Successfully updated duration for book ${libraryItemId} to ${totalDuration}s`,
+        );
       } catch (err) {
-        console.error(`[upload-finalize] Background duration extraction failed for book ${libraryItemId}:`, err)
+        console.error(
+          `[upload-finalize] Background duration extraction failed for book ${libraryItemId}:`,
+          err,
+        );
       }
-    }
+    };
 
     // Spawn detached task depending on environment
     // @ts-ignore
-    if (typeof (globalThis as any).EdgeRuntime !== 'undefined' && typeof (globalThis as any).EdgeRuntime.waitUntil === 'function') {
+    if (
+      typeof (globalThis as any).EdgeRuntime !== "undefined" &&
+      typeof (globalThis as any).EdgeRuntime.waitUntil === "function"
+    ) {
       // @ts-ignore
-      ;(globalThis as any).EdgeRuntime.waitUntil(processDurationsAsync())
+      (globalThis as any).EdgeRuntime.waitUntil(processDurationsAsync());
     } else {
-      processDurationsAsync().catch(() => {})
+      processDurationsAsync().catch(() => {});
     }
     // ------------------------------------------------
 
     if (author) {
-      await db.from('book_authors').delete().eq('library_item_id', libraryItemId)
+      await db.from("book_authors").delete().eq(
+        "library_item_id",
+        libraryItemId,
+      );
 
       const rawAuthors = author
         .split(/\s*(?:\/|,|&|\band\b)\s*/i)
         .map((a: string) => a.trim())
-        .filter(Boolean)
+        .filter(Boolean);
 
       const cleanAuthors = rawAuthors
         .map((a: string) => {
-          let name = a
-          const dashSplit = name.split(' - ')
+          let name = a;
+          const dashSplit = name.split(" - ");
           if (dashSplit.length > 1) {
-            name = dashSplit[0]
+            name = dashSplit[0];
           }
-          name = name.replace(/\b(Ph\.?D\.?|M\.?D\.?)\b/gi, '')
-          name = name.replace(/([A-Za-z])\./g, '$1')
-          return name.replace(/\s+/g, ' ').trim()
+          name = name.replace(/\b(Ph\.?D\.?|M\.?D\.?)\b/gi, "");
+          name = name.replace(/([A-Za-z])\./g, "$1");
+          return name.replace(/\s+/g, " ").trim();
         })
-        .filter(Boolean)
+        .filter(Boolean);
 
-      const uniqueAuthors = Array.from(new Set(cleanAuthors))
+      const uniqueAuthors = Array.from(new Set(cleanAuthors));
 
       for (const singleAuthor of uniqueAuthors) {
-        await db.from('authors').upsert(
+        await db.from("authors").upsert(
           {
             id: crypto.randomUUID(),
             name: singleAuthor,
-            library_id: libraryId
+            library_id: libraryId,
           },
-          { onConflict: 'library_id, name', ignoreDuplicates: true }
-        )
+          { onConflict: "library_id, name", ignoreDuplicates: true },
+        );
 
-        const { data: existingAuthor } = await db.from('authors').select('id').eq('name', singleAuthor).eq('library_id', libraryId).single()
+        const { data: existingAuthor } = await db.from("authors").select("id")
+          .eq("name", singleAuthor).eq("library_id", libraryId).single();
 
-        const authorId = existingAuthor?.id
+        const authorId = existingAuthor?.id;
         if (authorId) {
-          await db.from('book_authors').upsert(
+          await db.from("book_authors").upsert(
             {
               library_item_id: libraryItemId,
-              author_id: authorId
+              author_id: authorId,
             },
             {
-              onConflict: 'library_item_id, author_id',
-              ignoreDuplicates: true
-            }
-          )
+              onConflict: "library_item_id, author_id",
+              ignoreDuplicates: true,
+            },
+          );
         }
       }
 
       await db
-        .from('library_items')
+        .from("library_items")
         .update({
-          author_names_first_last: author
+          author_names_first_last: author,
         })
-        .eq('id', libraryItemId)
+        .eq("id", libraryItemId);
     }
 
     if (series) {
-      await db.from('book_series').delete().eq('library_item_id', libraryItemId)
+      await db.from("book_series").delete().eq(
+        "library_item_id",
+        libraryItemId,
+      );
 
       const rawSeries = series
         .split(/\s*(?:\/|,|&|\band\b)\s*/i)
         .map((s: string) => s.trim())
-        .filter(Boolean)
-      const uniqueSeries = Array.from(new Set(rawSeries))
+        .filter(Boolean);
+      const uniqueSeries = Array.from(new Set(rawSeries));
 
       for (const singleSeries of uniqueSeries) {
-        await db.from('series').upsert(
+        await db.from("series").upsert(
           {
             id: crypto.randomUUID(),
             name: singleSeries,
-            library_id: libraryId
+            library_id: libraryId,
           },
-          { onConflict: 'library_id, name', ignoreDuplicates: true }
-        )
+          { onConflict: "library_id, name", ignoreDuplicates: true },
+        );
 
-        const { data: existingSeries } = await db.from('series').select('id').eq('name', singleSeries).eq('library_id', libraryId).single()
+        const { data: existingSeries } = await db.from("series").select("id")
+          .eq("name", singleSeries).eq("library_id", libraryId).single();
 
-        const seriesId = existingSeries?.id
+        const seriesId = existingSeries?.id;
         if (seriesId) {
-          await db.from('book_series').upsert(
+          await db.from("book_series").upsert(
             {
               library_item_id: libraryItemId,
-              series_id: seriesId
+              series_id: seriesId,
             },
             {
-              onConflict: 'library_item_id, series_id',
-              ignoreDuplicates: true
-            }
-          )
+              onConflict: "library_item_id, series_id",
+              ignoreDuplicates: true,
+            },
+          );
         }
       }
     }
@@ -489,65 +582,77 @@ Deno.serve(async (req) => {
     if (title && zaiApiKey) {
       const enrichAsync = async () => {
         try {
-          const aiRes = await fetch('https://open.bigmodel.cn/api/paas/v4/chat/completions', {
-            method: 'POST',
-            headers: {
-              Authorization: `Bearer ${zaiApiKey}`,
-              'Content-Type': 'application/json'
+          const aiRes = await fetch(
+            "https://open.bigmodel.cn/api/paas/v4/chat/completions",
+            {
+              method: "POST",
+              headers: {
+                Authorization: `Bearer ${zaiApiKey}`,
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({
+                model: "glm-4-flash",
+                messages: [
+                  {
+                    role: "user",
+                    content:
+                      `Generate a concise executive summary (description), top 3 genres/tags, and published year for the audiobook "${title}" by ${
+                        author || "Unknown Author"
+                      }. Return ONLY a JSON object: {"description": "...", "genres": ["..."], "publishedYear": "YYYY"}`,
+                  },
+                ],
+                temperature: 0.2,
+              }),
             },
-            body: JSON.stringify({
-              model: 'glm-4-flash',
-              messages: [
-                {
-                  role: 'user',
-                  content: `Generate a concise executive summary (description), top 3 genres/tags, and published year for the audiobook "${title}" by ${
-                    author || 'Unknown Author'
-                  }. Return ONLY a JSON object: {"description": "...", "genres": ["..."], "publishedYear": "YYYY"}`
-                }
-              ],
-              temperature: 0.2
-            })
-          })
+          );
           if (aiRes.ok) {
-            const aiData = await aiRes.json()
-            const text = aiData.choices?.[0]?.message?.content || ''
-            const match = text.match(/\{[\s\S]*\}/)
+            const aiData = await aiRes.json();
+            const text = aiData.choices?.[0]?.message?.content || "";
+            const match = text.match(/\{[\s\S]*\}/);
             if (match) {
-              const enriched = JSON.parse(match[0])
+              const enriched = JSON.parse(match[0]);
               await db
-                .from('library_items')
+                .from("library_items")
                 .update({
                   description: enriched.description || undefined,
                   genres: enriched.genres || undefined,
-                  published_year: enriched.publishedYear || undefined
+                  published_year: enriched.publishedYear || undefined,
                 })
-                .eq('id', libraryItemId)
-              console.log(`[upload-finalize] Z.AI successfully enriched metadata for "${title}"`)
+                .eq("id", libraryItemId);
+              console.log(
+                `[upload-finalize] Z.AI successfully enriched metadata for "${title}"`,
+              );
             }
           }
         } catch (_err) {
           // Silent enrichment fallback
         }
-      }
+      };
 
       // @ts-ignore
-      if (typeof (globalThis as any).EdgeRuntime !== 'undefined' && typeof (globalThis as any).EdgeRuntime.waitUntil === 'function') {
+      if (
+        typeof (globalThis as any).EdgeRuntime !== "undefined" &&
+        typeof (globalThis as any).EdgeRuntime.waitUntil === "function"
+      ) {
         // @ts-ignore
-        ;(globalThis as any).EdgeRuntime.waitUntil(enrichAsync())
+        (globalThis as any).EdgeRuntime.waitUntil(enrichAsync());
       } else {
-        enrichAsync().catch(() => {})
+        enrichAsync().catch(() => {});
       }
     }
 
-    return new Response(JSON.stringify({ success: true, libraryItemId, bookId }), {
-      status: 200,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-    })
+    return new Response(
+      JSON.stringify({ success: true, libraryItemId, bookId }),
+      {
+        status: 200,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      },
+    );
   } catch (e: unknown) {
-    const err = e as Error
+    const err = e as Error;
     return new Response(JSON.stringify({ error: err.message }), {
       status: 500,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-    })
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
   }
-})
+});

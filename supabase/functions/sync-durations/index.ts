@@ -1,94 +1,98 @@
-import { createClient } from 'npm:@supabase/supabase-js@2.44.0'
-import { corsHeaders } from '../_shared/cors.ts'
-import { StorageRouter } from '../_shared/storage-router.ts'
+import { createClient } from "npm:@supabase/supabase-js@2.44.0";
+import { corsHeaders } from "../_shared/cors.ts";
+import { StorageRouter } from "../_shared/storage-router.ts";
 
 Deno.serve(async (req) => {
-  if (req.method === 'OPTIONS') {
-    return new Response('ok', { headers: corsHeaders })
+  if (req.method === "OPTIONS") {
+    return new Response("ok", { headers: corsHeaders });
   }
 
   try {
-    const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? ''
-    const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
-    const db = createClient(supabaseUrl, serviceRoleKey)
-    const storageRouter = new StorageRouter(db)
+    const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
+    const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+    const db = createClient(supabaseUrl, serviceRoleKey);
+    const storageRouter = new StorageRouter(db);
 
-    let mm: any = null
+    let mm: any = null;
     try {
-      mm = await import('npm:music-metadata@10.8.0')
+      mm = await import("npm:music-metadata@10.8.0");
     } catch (_err) {
-      console.warn('[sync-durations] Could not load music-metadata')
+      console.warn("[sync-durations] Could not load music-metadata");
     }
 
     // Auth check
-    const authHeader = req.headers.get('Authorization')
+    const authHeader = req.headers.get("Authorization");
     if (!authHeader) {
-      return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+      return new Response(JSON.stringify({ error: "Unauthorized" }), {
         status: 401,
-        headers: corsHeaders
-      })
+        headers: corsHeaders,
+      });
     }
     const {
       data: { user },
-      error: userError
-    } = await createClient(supabaseUrl, Deno.env.get('SUPABASE_ANON_KEY') ?? '').auth.getUser(authHeader.replace('Bearer ', ''))
+      error: userError,
+    } = await createClient(supabaseUrl, Deno.env.get("SUPABASE_ANON_KEY") ?? "")
+      .auth.getUser(authHeader.replace("Bearer ", ""));
     if (userError || !user) {
-      return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+      return new Response(JSON.stringify({ error: "Unauthorized" }), {
         status: 401,
-        headers: corsHeaders
-      })
+        headers: corsHeaders,
+      });
     }
-    const { data: profile } = await db.from('profiles').select('user_type').eq('id', user.id).single()
-    if (!profile || !['admin', 'root'].includes(profile.user_type ?? '')) {
-      return new Response(JSON.stringify({ error: 'Forbidden' }), {
+    const { data: profile } = await db.from("profiles").select("user_type").eq(
+      "id",
+      user.id,
+    ).single();
+    if (!profile || !["admin", "root"].includes(profile.user_type ?? "")) {
+      return new Response(JSON.stringify({ error: "Forbidden" }), {
         status: 403,
-        headers: corsHeaders
-      })
+        headers: corsHeaders,
+      });
     }
 
-    const url = new URL(req.url)
-    const bookId = url.searchParams.get('bookId')
+    const url = new URL(req.url);
+    const bookId = url.searchParams.get("bookId");
 
-    let query = db.from('library_items').select('*')
-    if (bookId) query = query.eq('id', bookId)
+    let query = db.from("library_items").select("*");
+    if (bookId) query = query.eq("id", bookId);
 
-    const { data: books, error } = await query
-    if (error) throw error
+    const { data: books, error } = await query;
+    if (error) throw error;
 
-    const results = []
+    const results = [];
 
     for (const book of books || []) {
-      if (!book.audio_files) continue
+      if (!book.audio_files) continue;
 
-      const files = book.audio_files
+      const files = book.audio_files;
       const metadataPromises = files.map(async (file: any, _i: number) => {
-        let duration = file.duration || file.metadata?.duration || 0
+        let duration = file.duration || file.metadata?.duration || 0;
         // ALWAYS re-sync if 0
         if (duration > 0) {
-          return file
+          return file;
         }
 
         try {
-          const path = file.metadata?.path || file.path || file.storagePath
+          const path = file.metadata?.path || file.path || file.storagePath;
           if (path) {
-            console.log(`Fetching signed URL for ${path}`)
-            const signedUrl = await storageRouter.getSignedUrl(path, 60)
+            console.log(`Fetching signed URL for ${path}`);
+            const signedUrl = await storageRouter.getSignedUrl(path, 60);
             if (signedUrl) {
-              const res = await fetch(signedUrl)
+              const res = await fetch(signedUrl);
               if (res.body) {
                 const metadata = await mm.parseWebStream(
                   res.body,
                   {
                     mimeType: file.mimeType,
-                    size: file.size || file.metadata?.size
+                    size: file.size || file.metadata?.size,
                   },
-                  { duration: true, skipCovers: true, skipPostHeaders: true }
-                )
-                duration = metadata.format.duration || 0
-                console.log(`Parsed duration for ${path}: ${duration}`)
+                  { duration: true, skipCovers: true, skipPostHeaders: true },
+                );
+                duration = metadata.format.duration || 0;
+                console.log(`Parsed duration for ${path}: ${duration}`);
 
                 try {
-                  res.body.cancel()
+                  res.body.cancel();
                 } catch (_e) {
                   /* ignore */
                 }
@@ -96,7 +100,10 @@ Deno.serve(async (req) => {
             }
           }
         } catch (err: any) {
-          console.warn(`[sync-durations] Failed for ${file.metadata?.filename}:`, err.message)
+          console.warn(
+            `[sync-durations] Failed for ${file.metadata?.filename}:`,
+            err.message,
+          );
         }
 
         return {
@@ -104,37 +111,40 @@ Deno.serve(async (req) => {
           duration,
           metadata: {
             ...(file.metadata || {}),
-            duration
-          }
-        }
-      })
+            duration,
+          },
+        };
+      });
 
-      const updatedAudioFilesJson = await Promise.all(metadataPromises)
-      const totalDuration = updatedAudioFilesJson.reduce((sum: number, af: any) => sum + (af.duration || 0), 0)
+      const updatedAudioFilesJson = await Promise.all(metadataPromises);
+      const totalDuration = updatedAudioFilesJson.reduce(
+        (sum: number, af: any) => sum + (af.duration || 0),
+        0,
+      );
 
       await db
-        .from('library_items')
+        .from("library_items")
         .update({
           audio_files: updatedAudioFilesJson,
-          duration: totalDuration
+          duration: totalDuration,
         })
-        .eq('id', book.id)
+        .eq("id", book.id);
 
       results.push({
         bookTitle: book.title,
         totalDuration,
-        tracks: updatedAudioFilesJson.length
-      })
+        tracks: updatedAudioFilesJson.length,
+      });
     }
 
     return new Response(JSON.stringify({ success: true, updated: results }), {
       status: 200,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-    })
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
   } catch (err: any) {
     return new Response(JSON.stringify({ error: err.message }), {
       status: 500,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-    })
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
   }
-})
+});

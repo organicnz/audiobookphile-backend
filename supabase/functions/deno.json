@@ -12,7 +12,13 @@
   },
   "lint": {
     "rules": {
-      "exclude": ["no-explicit-any", "ban-ts-comment", "prefer-const", "no-import-prefix", "require-await"]
+      "exclude": [
+        "no-explicit-any",
+        "ban-ts-comment",
+        "prefer-const",
+        "no-import-prefix",
+        "require-await"
+      ]
     }
   }
 }

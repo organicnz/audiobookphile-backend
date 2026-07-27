@@ -1,208 +1,218 @@
-import { createClient } from 'npm:@supabase/supabase-js@2.44.0'
-import { corsHeaders } from '../_shared/cors.ts'
-import { z } from 'npm:zod@3.23.8'
+import { createClient } from "npm:@supabase/supabase-js@2.44.0";
+import { corsHeaders } from "../_shared/cors.ts";
+import { z } from "npm:zod@3.23.8";
 
 // Note: Ensure `EdgeRuntime` is configured in the environment to allow async operations after response
-declare const EdgeRuntime: any
+declare const EdgeRuntime: any;
 
 Deno.serve(async (req) => {
-  if (req.method === 'OPTIONS') {
-    return new Response('ok', { headers: corsHeaders })
+  if (req.method === "OPTIONS") {
+    return new Response("ok", { headers: corsHeaders });
   }
 
   try {
-    const authHeader = req.headers.get('Authorization')
+    const authHeader = req.headers.get("Authorization");
     if (!authHeader) {
-      return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+      return new Response(JSON.stringify({ error: "Unauthorized" }), {
         status: 401,
-        headers: corsHeaders
-      })
+        headers: corsHeaders,
+      });
     }
 
-    const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? ''
-    const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
-    const openAiApiKey = Deno.env.get('OPENAI_API_KEY') ?? ''
-    const zaiApiKey = Deno.env.get('ZAI_API_KEY') ?? Deno.env.get('ZHIPU_API_KEY') ?? ''
+    const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
+    const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+    const openAiApiKey = Deno.env.get("OPENAI_API_KEY") ?? "";
+    const zaiApiKey = Deno.env.get("ZAI_API_KEY") ??
+      Deno.env.get("ZHIPU_API_KEY") ?? "";
 
     if (!zaiApiKey && !openAiApiKey) {
       return new Response(
         JSON.stringify({
-          error: 'Neither ZAI_API_KEY nor OPENAI_API_KEY is configured on the server'
+          error:
+            "Neither ZAI_API_KEY nor OPENAI_API_KEY is configured on the server",
         }),
-        { status: 500, headers: corsHeaders }
-      )
+        { status: 500, headers: corsHeaders },
+      );
     }
 
     // Auth client with service role key to bypass RLS
     const supabase = createClient(supabaseUrl, supabaseServiceKey, {
       auth: {
         autoRefreshToken: false,
-        persistSession: false
-      }
-    })
+        persistSession: false,
+      },
+    });
 
     const {
       data: { user },
-      error: userError
-    } = await supabase.auth.getUser(authHeader.replace('Bearer ', ''))
+      error: userError,
+    } = await supabase.auth.getUser(authHeader.replace("Bearer ", ""));
     if (userError || !user) {
-      return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+      return new Response(JSON.stringify({ error: "Unauthorized" }), {
         status: 401,
-        headers: corsHeaders
-      })
+        headers: corsHeaders,
+      });
     }
 
-    const { data: profile } = await supabase.from('profiles').select('user_type').eq('id', user.id).single()
-    if (!profile || !['admin', 'root'].includes(profile.user_type ?? '')) {
-      return new Response(JSON.stringify({ error: 'Forbidden' }), {
+    const { data: profile } = await supabase.from("profiles").select(
+      "user_type",
+    ).eq("id", user.id).single();
+    if (!profile || !["admin", "root"].includes(profile.user_type ?? "")) {
+      return new Response(JSON.stringify({ error: "Forbidden" }), {
         status: 403,
-        headers: corsHeaders
-      })
+        headers: corsHeaders,
+      });
     }
 
-    const body = await req.json().catch(() => ({}))
+    const body = await req.json().catch(() => ({}));
 
     const PayloadSchema = z.object({
-      libraryItemId: z.string().min(1)
-    })
+      libraryItemId: z.string().min(1),
+    });
 
-    const parsed = PayloadSchema.safeParse(body)
+    const parsed = PayloadSchema.safeParse(body);
     if (!parsed.success) {
       return new Response(
         JSON.stringify({
-          error: 'Invalid payload',
-          details: parsed.error.issues
+          error: "Invalid payload",
+          details: parsed.error.issues,
         }),
-        { status: 400, headers: corsHeaders }
-      )
+        { status: 400, headers: corsHeaders },
+      );
     }
-    const { libraryItemId } = parsed.data
+    const { libraryItemId } = parsed.data;
 
     // Process embedding asynchronously
     const generateAndSaveEmbedding = async () => {
       try {
         // Fetch the item
         const { data: item, error: fetchErr } = await supabase
-          .from('library_items')
-          .select('media_id, media_type, author_names_first_last, title')
-          .eq('id', libraryItemId)
-          .single()
+          .from("library_items")
+          .select("media_id, media_type, author_names_first_last, title")
+          .eq("id", libraryItemId)
+          .single();
 
         if (fetchErr || !item) {
-          console.error('Library item not found:', libraryItemId)
-          return
+          console.error("Library item not found:", libraryItemId);
+          return;
         }
 
-        let title = item.title || ''
-        let authorName = item.author_names_first_last || ''
-        let description = ''
-        let genresStr = ''
+        let title = item.title || "";
+        let authorName = item.author_names_first_last || "";
+        let description = "";
+        let genresStr = "";
 
-        if (item.media_type === 'book') {
-          title = item.title || title
-          description = (item as any).description || ''
+        if (item.media_type === "book") {
+          title = item.title || title;
+          description = (item as any).description || "";
           if ((item as any).genres && Array.isArray((item as any).genres)) {
-            genresStr = (item as any).genres.join(', ')
+            genresStr = (item as any).genres.join(", ");
           }
-        } else if (item.media_type === 'podcast' && item.media_id) {
-          const { data: podcast } = await supabase.from('podcasts').select('title, author, description, genres').eq('id', item.media_id).single()
+        } else if (item.media_type === "podcast" && item.media_id) {
+          const { data: podcast } = await supabase.from("podcasts").select(
+            "title, author, description, genres",
+          ).eq("id", item.media_id).single();
           if (podcast) {
-            title = podcast.title || title
-            authorName = podcast.author || authorName
-            description = podcast.description || ''
+            title = podcast.title || title;
+            authorName = podcast.author || authorName;
+            description = podcast.description || "";
             if (podcast.genres && Array.isArray(podcast.genres)) {
-              genresStr = podcast.genres.join(', ')
+              genresStr = podcast.genres.join(", ");
             }
           }
         }
 
         if (!title && !description) {
-          console.error('Item has no title or description to embed')
-          return
+          console.error("Item has no title or description to embed");
+          return;
         }
 
-        const textToEmbed = `Title: ${title}\nAuthor: ${authorName}\nGenres: ${genresStr}\nDescription: ${description}`
+        const textToEmbed =
+          `Title: ${title}\nAuthor: ${authorName}\nGenres: ${genresStr}\nDescription: ${description}`;
 
-        console.log(`Generating embedding for: ${title} by ${authorName}`)
+        console.log(`Generating embedding for: ${title} by ${authorName}`);
 
-        let res: Response
+        let res: Response;
         if (zaiApiKey) {
-          res = await fetch('https://open.bigmodel.cn/api/paas/v4/embeddings', {
-            method: 'POST',
+          res = await fetch("https://open.bigmodel.cn/api/paas/v4/embeddings", {
+            method: "POST",
             headers: {
               Authorization: `Bearer ${zaiApiKey}`,
-              'Content-Type': 'application/json'
+              "Content-Type": "application/json",
             },
             body: JSON.stringify({
               input: textToEmbed,
-              model: 'embedding-3'
-            })
-          })
+              model: "embedding-3",
+            }),
+          });
         } else {
-          res = await fetch('https://api.openai.com/v1/embeddings', {
-            method: 'POST',
+          res = await fetch("https://api.openai.com/v1/embeddings", {
+            method: "POST",
             headers: {
               Authorization: `Bearer ${openAiApiKey}`,
-              'Content-Type': 'application/json'
+              "Content-Type": "application/json",
             },
             body: JSON.stringify({
               input: textToEmbed,
-              model: 'text-embedding-3-small'
-            })
-          })
+              model: "text-embedding-3-small",
+            }),
+          });
         }
 
         if (!res.ok) {
-          const errText = await res.text()
-          throw new Error(`Failed to fetch from OpenAI API: ${errText}`)
+          const errText = await res.text();
+          throw new Error(`Failed to fetch from OpenAI API: ${errText}`);
         }
 
-        const data = await res.json()
+        const data = await res.json();
         if (data.data && data.data.length > 0 && data.data[0].embedding) {
-          const embeddingVector = data.data[0].embedding
+          const embeddingVector = data.data[0].embedding;
 
           // Save the embedding
           const { error: updateErr } = await supabase
-            .from('library_items')
+            .from("library_items")
             .update({ embedding: embeddingVector } as any)
-            .eq('id', libraryItemId)
+            .eq("id", libraryItemId);
 
           if (updateErr) {
-            console.error('Failed to update library_items with embedding:', updateErr)
+            console.error(
+              "Failed to update library_items with embedding:",
+              updateErr,
+            );
           } else {
-            console.log(`Successfully saved embedding for ${libraryItemId}`)
+            console.log(`Successfully saved embedding for ${libraryItemId}`);
           }
         } else {
-          console.error('No embedding data returned from OpenAI.')
+          console.error("No embedding data returned from OpenAI.");
         }
       } catch (e) {
-        console.error('Embedding generation error:', e)
+        console.error("Embedding generation error:", e);
       }
-    }
+    };
 
     // WaitUntil lets the execution continue after returning a response
-    if (typeof EdgeRuntime !== 'undefined' && EdgeRuntime.waitUntil) {
-      EdgeRuntime.waitUntil(generateAndSaveEmbedding())
+    if (typeof EdgeRuntime !== "undefined" && EdgeRuntime.waitUntil) {
+      EdgeRuntime.waitUntil(generateAndSaveEmbedding());
     } else {
       // Fallback for local testing if not using actual EdgeRuntime
-      generateAndSaveEmbedding()
+      generateAndSaveEmbedding();
     }
 
     return new Response(
       JSON.stringify({
         success: true,
-        message: 'Embedding generation started asynchronously'
+        message: "Embedding generation started asynchronously",
       }),
       {
         status: 202,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-      }
-    )
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      },
+    );
   } catch (e: unknown) {
-    const err = e as Error
+    const err = e as Error;
     return new Response(JSON.stringify({ error: err.message }), {
       status: 500,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-    })
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
   }
-})
+});

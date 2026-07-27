@@ -1,4 +1,4 @@
-export type { ApiError } from './errors.ts'
+export type { ApiError } from "./errors.ts";
 
 /**
  * Create a new API error.
@@ -7,9 +7,9 @@ export type { ApiError } from './errors.ts'
  * @param details - Optional additional context
  */
 export function createApiError(
-    message: string,
-    code: ApiError['code'] = 'INTERNAL_ERROR',
-    details: any = null
+  message: string,
+  code: ApiError["code"] = "INTERNAL_ERROR",
+  details: any = null,
 ): ApiError {
-    return new ApiError(message, code, details)
+  return new ApiError(message, code, details);
 }

@@ -1,5 +1,5 @@
-import { SupabaseClient } from 'npm:@supabase/supabase-js@2.44.0'
-import { Database } from '../../../src/types/supabase.ts'
+import { SupabaseClient } from "npm:@supabase/supabase-js@2.44.0";
+import { Database } from "../../../src/types/supabase.ts";
 
 export async function upsertMediaProgress(
   supabase: SupabaseClient<Database>,
@@ -7,19 +7,28 @@ export async function upsertMediaProgress(
   libraryItemId: string,
   episodeId: string | null,
   progressData: {
-    progress?: number
-    duration?: number
-    currentTime?: number
-    isFinished?: boolean
-    hideFromContinueListening?: boolean
-  }
+    progress?: number;
+    duration?: number;
+    currentTime?: number;
+    isFinished?: boolean;
+    hideFromContinueListening?: boolean;
+  },
 ) {
-  const { progress, duration, currentTime, isFinished, hideFromContinueListening } = progressData
+  const {
+    progress,
+    duration,
+    currentTime,
+    isFinished,
+    hideFromContinueListening,
+  } = progressData;
 
-  const finalDuration = duration || 0
-  const finalCurrentTime = currentTime ?? (progress && finalDuration ? progress * finalDuration : 0)
-  const finalProgress = progress ?? (finalDuration > 0 ? finalCurrentTime / finalDuration : 0)
-  const finalIsFinished = isFinished ?? (finalDuration > 0 && finalCurrentTime >= finalDuration - 5)
+  const finalDuration = duration || 0;
+  const finalCurrentTime = currentTime ??
+    (progress && finalDuration ? progress * finalDuration : 0);
+  const finalProgress = progress ??
+    (finalDuration > 0 ? finalCurrentTime / finalDuration : 0);
+  const finalIsFinished = isFinished ??
+    (finalDuration > 0 && finalCurrentTime >= finalDuration - 5);
 
   const dataToUpsert = {
     user_id: userId,
@@ -31,39 +40,42 @@ export async function upsertMediaProgress(
     is_finished: finalIsFinished,
     hide_from_continue_listening: hideFromContinueListening ?? false,
     finished_at: finalIsFinished ? new Date().toISOString() : null,
-    last_update: new Date().toISOString()
-  }
+    last_update: new Date().toISOString(),
+  };
 
   const { data, error } = await supabase
-    .from('media_progress')
+    .from("media_progress")
     .upsert(dataToUpsert, {
-      onConflict: 'user_id,library_item_id,episode_id'
+      onConflict: "user_id,library_item_id,episode_id",
     })
     .select()
-    .single()
+    .single();
 
-  if (error) throw error
-  return data
+  if (error) throw error;
+  return data;
 }
 
 export async function bulkUpsertMediaProgress(
   supabase: SupabaseClient<Database>,
   userId: string,
   progressItems: {
-    libraryItemId: string
-    episodeId: string | null
-    progress?: number
-    duration?: number
-    currentTime?: number
-    isFinished?: boolean
-    hideFromContinueListening?: boolean
-  }[]
+    libraryItemId: string;
+    episodeId: string | null;
+    progress?: number;
+    duration?: number;
+    currentTime?: number;
+    isFinished?: boolean;
+    hideFromContinueListening?: boolean;
+  }[],
 ) {
   const dataToUpsert = progressItems.map((item) => {
-    const finalDuration = item.duration || 0
-    const finalCurrentTime = item.currentTime ?? (item.progress && finalDuration ? item.progress * finalDuration : 0)
-    const finalProgress = item.progress ?? (finalDuration > 0 ? finalCurrentTime / finalDuration : 0)
-    const finalIsFinished = item.isFinished ?? (finalDuration > 0 && finalCurrentTime >= finalDuration - 5)
+    const finalDuration = item.duration || 0;
+    const finalCurrentTime = item.currentTime ??
+      (item.progress && finalDuration ? item.progress * finalDuration : 0);
+    const finalProgress = item.progress ??
+      (finalDuration > 0 ? finalCurrentTime / finalDuration : 0);
+    const finalIsFinished = item.isFinished ??
+      (finalDuration > 0 && finalCurrentTime >= finalDuration - 5);
 
     return {
       user_id: userId,
@@ -75,17 +87,17 @@ export async function bulkUpsertMediaProgress(
       is_finished: finalIsFinished,
       hide_from_continue_listening: item.hideFromContinueListening ?? false,
       finished_at: finalIsFinished ? new Date().toISOString() : null,
-      last_update: new Date().toISOString()
-    }
-  })
+      last_update: new Date().toISOString(),
+    };
+  });
 
   const { data, error } = await supabase
-    .from('media_progress')
+    .from("media_progress")
     .upsert(dataToUpsert, {
-      onConflict: 'user_id,library_item_id,episode_id'
+      onConflict: "user_id,library_item_id,episode_id",
     })
-    .select()
+    .select();
 
-  if (error) throw error
-  return data
+  if (error) throw error;
+  return data;
 }
