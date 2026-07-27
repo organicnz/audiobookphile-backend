@@ -25,6 +25,8 @@ export const authErrorHandlers = {
   USER_NOT_FOUND: () => new ApiError("User not found", "USER_NOT_FOUND", 401),
   USER_DEACTIVATED: () =>
     new ApiError("Account deactivated", "USER_DEACTIVATED", 401),
+  VALIDATION_ERROR: () =>
+    new ApiError("Validation error", "VALIDATION_ERROR", 400),
 };
 
 // Routes that don't require auth (auth routes need to create session first, plus health check)
