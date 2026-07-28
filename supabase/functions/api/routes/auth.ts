@@ -82,7 +82,7 @@ authRouter.post("/login", async (c) => {
     const { username: loginUsername, password: loginPassword } = loginData;
 
     if (!loginUsername || !loginPassword) {
-      return authErrorHandlers.UNAUTHORIZED();
+      return c.json({ error: authErrorHandlers.UNAUTHORIZED().message, code: authErrorHandlers.UNAUTHORIZED().code }, authErrorHandlers.UNAUTHORIZED().statusCode);
     }
 
     let emailToUse = loginUsername;
@@ -113,11 +113,11 @@ authRouter.post("/login", async (c) => {
 
       if (existingProfile) {
         // User exists but credentials are wrong
-        return authErrorHandlers.INVALID_TOKEN();
+        return c.json({ error: authErrorHandlers.INVALID_TOKEN().message, code: authErrorHandlers.INVALID_TOKEN().code }, authErrorHandlers.INVALID_TOKEN().statusCode);
       }
 
       // User doesn't exist
-      return authErrorHandlers.USER_NOT_FOUND();
+      return c.json({ error: authErrorHandlers.USER_NOT_FOUND().message, code: authErrorHandlers.USER_NOT_FOUND().code }, authErrorHandlers.USER_NOT_FOUND().statusCode);
     }
 
     const { data: profile } = await adminSupabase.from("profiles").select("*")
@@ -162,10 +162,10 @@ authRouter.post("/login", async (c) => {
   } catch (err) {
     if (err instanceof z.ZodError) {
       // Validation error
-      return authErrorHandlers.VALIDATION_ERROR();
+      return c.json({ error: authErrorHandlers.VALIDATION_ERROR().message, code: authErrorHandlers.VALIDATION_ERROR().code }, authErrorHandlers.VALIDATION_ERROR().statusCode);
     }
     if (err instanceof Error && err.message === "Unauthorized") {
-      return authErrorHandlers.UNAUTHORIZED();
+      return c.json({ error: authErrorHandlers.UNAUTHORIZED().message, code: authErrorHandlers.UNAUTHORIZED().code }, authErrorHandlers.UNAUTHORIZED().statusCode);
     }
     throw err;
   }
@@ -192,7 +192,7 @@ authRouter.post("/signup", async (c) => {
     const { email: signupEmail, password: signupPassword } = signupData;
 
     if (!signupEmail || !signupPassword) {
-      return authErrorHandlers.VALIDATION_ERROR();
+      return c.json({ error: authErrorHandlers.VALIDATION_ERROR().message, code: authErrorHandlers.VALIDATION_ERROR().code }, authErrorHandlers.VALIDATION_ERROR().statusCode);
     }
 
     const { data: authData, error: authError } = await supabase.auth.signUp({
@@ -201,7 +201,7 @@ authRouter.post("/signup", async (c) => {
     });
 
     if (authError) {
-      return authErrorHandlers.VALIDATION_ERROR();
+      return c.json({ error: authErrorHandlers.VALIDATION_ERROR().message, code: authErrorHandlers.VALIDATION_ERROR().code }, authErrorHandlers.VALIDATION_ERROR().statusCode);
     }
 
     if (signupData.username && authData.user) {
@@ -211,7 +211,7 @@ authRouter.post("/signup", async (c) => {
         .select("*").eq("username", signupData.username).maybeSingle();
 
       if (existingProfile) {
-        return authErrorHandlers.USER_NOT_FOUND();
+        return c.json({ error: authErrorHandlers.USER_NOT_FOUND().message, code: authErrorHandlers.USER_NOT_FOUND().code }, authErrorHandlers.USER_NOT_FOUND().statusCode);
       }
 
       await adminSupabase.from("profiles").insert({
@@ -224,10 +224,10 @@ authRouter.post("/signup", async (c) => {
     return c.json({ success: true, user: authData.user }, 200);
   } catch (err) {
     if (err instanceof z.ZodError) {
-      return authErrorHandlers.VALIDATION_ERROR();
+      return c.json({ error: authErrorHandlers.VALIDATION_ERROR().message, code: authErrorHandlers.VALIDATION_ERROR().code }, authErrorHandlers.VALIDATION_ERROR().statusCode);
     }
     if (err instanceof Error && err.message === "Validation error") {
-      return authErrorHandlers.VALIDATION_ERROR();
+      return c.json({ error: authErrorHandlers.VALIDATION_ERROR().message, code: authErrorHandlers.VALIDATION_ERROR().code }, authErrorHandlers.VALIDATION_ERROR().statusCode);
     }
     throw err;
   }
@@ -263,7 +263,7 @@ authRouter.post("/logout", async (c) => {
     return c.json({ success: true }, 200);
   } catch (err) {
     if (err instanceof Error && err.message === "Unauthorized") {
-      return authErrorHandlers.UNAUTHORIZED();
+      return c.json({ error: authErrorHandlers.UNAUTHORIZED().message, code: authErrorHandlers.UNAUTHORIZED().code }, authErrorHandlers.UNAUTHORIZED().statusCode);
     }
     throw err;
   }
@@ -290,16 +290,16 @@ authRouter.post("/forgot-password", async (c) => {
     });
 
     if (error) {
-      return authErrorHandlers.VALIDATION_ERROR();
+      return c.json({ error: authErrorHandlers.VALIDATION_ERROR().message, code: authErrorHandlers.VALIDATION_ERROR().code }, authErrorHandlers.VALIDATION_ERROR().statusCode);
     }
 
     return c.json({ success: true, message: "Reset link sent to email" }, 200);
   } catch (err) {
     if (err instanceof z.ZodError) {
-      return authErrorHandlers.VALIDATION_ERROR();
+      return c.json({ error: authErrorHandlers.VALIDATION_ERROR().message, code: authErrorHandlers.VALIDATION_ERROR().code }, authErrorHandlers.VALIDATION_ERROR().statusCode);
     }
     if (err instanceof Error && err.message === "Validation error") {
-      return authErrorHandlers.VALIDATION_ERROR();
+      return c.json({ error: authErrorHandlers.VALIDATION_ERROR().message, code: authErrorHandlers.VALIDATION_ERROR().code }, authErrorHandlers.VALIDATION_ERROR().statusCode);
     }
     throw err;
   }
@@ -321,22 +321,22 @@ authRouter.post("/reset-password", async (c) => {
     const { password } = resetData;
 
     if (!password) {
-      return authErrorHandlers.VALIDATION_ERROR();
+      return c.json({ error: authErrorHandlers.VALIDATION_ERROR().message, code: authErrorHandlers.VALIDATION_ERROR().code }, authErrorHandlers.VALIDATION_ERROR().statusCode);
     }
 
     const { error } = await supabase.auth.updateUser({ password });
 
     if (error) {
-      return authErrorHandlers.VALIDATION_ERROR();
+      return c.json({ error: authErrorHandlers.VALIDATION_ERROR().message, code: authErrorHandlers.VALIDATION_ERROR().code }, authErrorHandlers.VALIDATION_ERROR().statusCode);
     }
 
     return c.json({ success: true }, 200);
   } catch (err) {
     if (err instanceof z.ZodError) {
-      return authErrorHandlers.VALIDATION_ERROR();
+      return c.json({ error: authErrorHandlers.VALIDATION_ERROR().message, code: authErrorHandlers.VALIDATION_ERROR().code }, authErrorHandlers.VALIDATION_ERROR().statusCode);
     }
     if (err instanceof Error && err.message === "Validation error") {
-      return authErrorHandlers.VALIDATION_ERROR();
+      return c.json({ error: authErrorHandlers.VALIDATION_ERROR().message, code: authErrorHandlers.VALIDATION_ERROR().code }, authErrorHandlers.VALIDATION_ERROR().statusCode);
     }
     throw err;
   }
@@ -361,22 +361,22 @@ authRouter.post("/change-password", async (c) => {
     const { newPassword } = formData;
 
     if (!newPassword) {
-      return authErrorHandlers.VALIDATION_ERROR();
+      return c.json({ error: authErrorHandlers.VALIDATION_ERROR().message, code: authErrorHandlers.VALIDATION_ERROR().code }, authErrorHandlers.VALIDATION_ERROR().statusCode);
     }
 
     const { error } = await supabase.auth.updateUser({ password: newPassword });
 
     if (error) {
-      return authErrorHandlers.VALIDATION_ERROR();
+      return c.json({ error: authErrorHandlers.VALIDATION_ERROR().message, code: authErrorHandlers.VALIDATION_ERROR().code }, authErrorHandlers.VALIDATION_ERROR().statusCode);
     }
 
     return c.json({ success: true }, 200);
   } catch (err) {
     if (err instanceof z.ZodError) {
-      return authErrorHandlers.VALIDATION_ERROR();
+      return c.json({ error: authErrorHandlers.VALIDATION_ERROR().message, code: authErrorHandlers.VALIDATION_ERROR().code }, authErrorHandlers.VALIDATION_ERROR().statusCode);
     }
     if (err instanceof Error && err.message === "Validation error") {
-      return authErrorHandlers.VALIDATION_ERROR();
+      return c.json({ error: authErrorHandlers.VALIDATION_ERROR().message, code: authErrorHandlers.VALIDATION_ERROR().code }, authErrorHandlers.VALIDATION_ERROR().statusCode);
     }
     throw err;
   }
@@ -401,7 +401,7 @@ authRouter.post("/refresh", async (c) => {
     const { refreshToken: token } = refreshData;
 
     if (!token) {
-      return authErrorHandlers.VALIDATION_ERROR();
+      return c.json({ error: authErrorHandlers.VALIDATION_ERROR().message, code: authErrorHandlers.VALIDATION_ERROR().code }, authErrorHandlers.VALIDATION_ERROR().statusCode);
     }
 
     const { data: sessionData, error: sessionError } = await supabase.auth
@@ -413,10 +413,10 @@ authRouter.post("/refresh", async (c) => {
       // Try to decode the token to check if it's invalid
       const payload = decodeJWT(token);
       if (!payload || !payload.id) {
-        return authErrorHandlers.INVALID_TOKEN();
+        return c.json({ error: authErrorHandlers.INVALID_TOKEN().message, code: authErrorHandlers.INVALID_TOKEN().code }, authErrorHandlers.INVALID_TOKEN().statusCode);
       }
 
-      return authErrorHandlers.TOKEN_EXPIRED();
+      return c.json({ error: authErrorHandlers.TOKEN_EXPIRED().message, code: authErrorHandlers.TOKEN_EXPIRED().code }, authErrorHandlers.TOKEN_EXPIRED().statusCode);
     }
 
     const adminSupabase = createClient(supabaseUrl, serviceRoleKey);
@@ -425,7 +425,7 @@ authRouter.post("/refresh", async (c) => {
     ).select("*").eq("id", sessionData.user!.id).maybeSingle();
 
     if (profileError) {
-      return authErrorHandlers.USER_NOT_FOUND();
+      return c.json({ error: authErrorHandlers.USER_NOT_FOUND().message, code: authErrorHandlers.USER_NOT_FOUND().code }, authErrorHandlers.USER_NOT_FOUND().statusCode);
     }
 
     const userPayload = {
@@ -465,10 +465,10 @@ authRouter.post("/refresh", async (c) => {
     return c.json(userPayload, 200);
   } catch (err) {
     if (err instanceof z.ZodError) {
-      return authErrorHandlers.VALIDATION_ERROR();
+      return c.json({ error: authErrorHandlers.VALIDATION_ERROR().message, code: authErrorHandlers.VALIDATION_ERROR().code }, authErrorHandlers.VALIDATION_ERROR().statusCode);
     }
     if (err instanceof Error && err.message === "Validation error") {
-      return authErrorHandlers.VALIDATION_ERROR();
+      return c.json({ error: authErrorHandlers.VALIDATION_ERROR().message, code: authErrorHandlers.VALIDATION_ERROR().code }, authErrorHandlers.VALIDATION_ERROR().statusCode);
     }
     throw err;
   }
@@ -504,7 +504,7 @@ authRouter.post("/authorize", async (c) => {
       const payload = decodeJWT(jwt);
 
       if (!payload) {
-        return authErrorHandlers.INVALID_TOKEN();
+        return c.json({ error: authErrorHandlers.INVALID_TOKEN().message, code: authErrorHandlers.INVALID_TOKEN().code }, authErrorHandlers.INVALID_TOKEN().statusCode);
       }
 
       const userId = payload.id;
@@ -529,10 +529,10 @@ authRouter.post("/authorize", async (c) => {
             is_locked: true,
           });
           if (updateError) {
-            return authErrorHandlers.USER_NOT_FOUND();
+            return c.json({ error: authErrorHandlers.USER_NOT_FOUND().message, code: authErrorHandlers.USER_NOT_FOUND().code }, authErrorHandlers.USER_NOT_FOUND().statusCode);
           }
         } else {
-          return authErrorHandlers.USER_NOT_FOUND();
+          return c.json({ error: authErrorHandlers.USER_NOT_FOUND().message, code: authErrorHandlers.USER_NOT_FOUND().code }, authErrorHandlers.USER_NOT_FOUND().statusCode);
         }
       }
 
@@ -578,7 +578,7 @@ authRouter.post("/authorize", async (c) => {
     }
 
     if (!user) {
-      return authErrorHandlers.UNAUTHORIZED();
+      return c.json({ error: authErrorHandlers.UNAUTHORIZED().message, code: authErrorHandlers.UNAUTHORIZED().code }, authErrorHandlers.UNAUTHORIZED().statusCode);
     }
 
     const { data: profile } = await adminSupabase.from("profiles").select("*")
@@ -619,10 +619,10 @@ authRouter.post("/authorize", async (c) => {
     return c.json(userPayload, 200);
   } catch (err) {
     if (err instanceof z.ZodError) {
-      return authErrorHandlers.VALIDATION_ERROR();
+      return c.json({ error: authErrorHandlers.VALIDATION_ERROR().message, code: authErrorHandlers.VALIDATION_ERROR().code }, authErrorHandlers.VALIDATION_ERROR().statusCode);
     }
     if (err instanceof Error && err.message === "Validation error") {
-      return authErrorHandlers.VALIDATION_ERROR();
+      return c.json({ error: authErrorHandlers.VALIDATION_ERROR().message, code: authErrorHandlers.VALIDATION_ERROR().code }, authErrorHandlers.VALIDATION_ERROR().statusCode);
     }
     throw err;
   }
