@@ -59,6 +59,17 @@ function getB2SecondaryClient(): S3Client {
   return _b2SecondaryClient;
 }
 
+/**
+ * Result of a successful path resolution for a legacy bare path.
+ * Contains the signed URL and the canonical storage path (with scheme prefix)
+ * so callers can optionally persist the resolved path back to the DB.
+ */
+export interface ResolvedStoragePath {
+  signedUrl: string;
+  /** The canonical path with scheme prefix, e.g. "b2-secondary://itemId/file.mp3" */
+  canonicalPath: string;
+}
+
 export class StorageRouter {
   constructor(private supabase: SupabaseClient<Database>) {}
 
@@ -93,6 +104,91 @@ export class StorageRouter {
     }
 
     throw new Error(`Unsupported storage provider for path: ${path}`);
+  }
+
+  /**
+   * Resolves a legacy bare filesystem path (e.g. "/audiobooks/Title/file.mp3")
+   * by probing all three storage backends under the canonical key pattern:
+   *   {itemId}/{filename}
+   *
+   * Probe order: b2-secondary → b2-primary → supabase
+   * (most new uploads go to b2-secondary, so check that first)
+   *
+   * Returns the signed URL and canonical path of whichever backend has the file,
+   * or throws if none of them do.
+   */
+  async resolveAndSign(
+    legacyPath: string,
+    itemId: string,
+    expiresIn: number,
+  ): Promise<ResolvedStoragePath> {
+    // Extract just the filename from the legacy path
+    const filename = legacyPath.split("/").pop()!;
+    const key = `${itemId}/${filename}`;
+
+    // 1. Try b2-secondary
+    try {
+      await getB2SecondaryClient().send(
+        new HeadObjectCommand({
+          Bucket: Deno.env.get("B2_SECONDARY_BUCKET_NAME")!,
+          Key: key,
+        }),
+      );
+      const command = new GetObjectCommand({
+        Bucket: Deno.env.get("B2_SECONDARY_BUCKET_NAME")!,
+        Key: key,
+      });
+      const signedUrl = await getSignedUrl(getB2SecondaryClient(), command, {
+        expiresIn,
+      });
+      return { signedUrl, canonicalPath: `b2-secondary://${key}` };
+    } catch {
+      // not in b2-secondary
+    }
+
+    // 2. Try b2-primary
+    try {
+      await getB2PrimaryClient().send(
+        new HeadObjectCommand({
+          Bucket: Deno.env.get("B2_BUCKET_NAME")!,
+          Key: key,
+        }),
+      );
+      const command = new GetObjectCommand({
+        Bucket: Deno.env.get("B2_BUCKET_NAME")!,
+        Key: key,
+      });
+      const signedUrl = await getSignedUrl(getB2PrimaryClient(), command, {
+        expiresIn,
+      });
+      return { signedUrl, canonicalPath: `b2://${key}` };
+    } catch {
+      // not in b2-primary
+    }
+
+    // 3. Try Supabase Storage
+    const folder = itemId;
+    const { data: listed } = await this.supabase.storage
+      .from("audio-files")
+      .list(folder, { search: filename });
+
+    if (listed && listed.some((f) => f.name === filename)) {
+      const supabasePath = `${folder}/${filename}`;
+      const { data, error } = await this.supabase.storage
+        .from("audio-files")
+        .createSignedUrl(supabasePath, expiresIn);
+
+      if (!error && data?.signedUrl) {
+        return {
+          signedUrl: data.signedUrl,
+          canonicalPath: `supabase://${supabasePath}`,
+        };
+      }
+    }
+
+    throw new Error(
+      `File not found in any storage backend for item "${itemId}", filename "${filename}" (legacy path: ${legacyPath})`,
+    );
   }
 
   async fileExists(path: string): Promise<boolean> {

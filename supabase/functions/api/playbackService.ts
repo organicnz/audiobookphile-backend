@@ -160,9 +160,27 @@ export class PlaybackService {
 
       let finalSignedUrl = "";
       let isMissing = false;
+      // Track the resolved canonical path so we can optionally patch the DB
+      let resolvedCanonicalPath: string | null = null;
 
       try {
-        finalSignedUrl = await storage.getSignedUrl(storagePath, 3600);
+        // Legacy bare filesystem paths (e.g. "/audiobooks/Title/file.mp3") have
+        // no storage scheme prefix. Route them through resolveAndSign which probes
+        // b2-secondary → b2-primary → supabase under {itemId}/{filename}.
+        const isLegacyPath = storagePath.startsWith("/") ||
+          (!storagePath.includes("://") && storagePath.length > 0);
+
+        if (isLegacyPath) {
+          const resolved = await storage.resolveAndSign(
+            storagePath,
+            libraryItemId,
+            3600,
+          );
+          finalSignedUrl = resolved.signedUrl;
+          resolvedCanonicalPath = resolved.canonicalPath;
+        } else {
+          finalSignedUrl = await storage.getSignedUrl(storagePath, 3600);
+        }
       } catch (e: unknown) {
         const signErr = e as Error;
         console.warn(
@@ -170,6 +188,51 @@ export class PlaybackService {
         );
         missingTracks.push(storagePath);
         isMissing = true;
+      }
+
+      // If we resolved a legacy path to a canonical one, patch the DB entry
+      // in the background so subsequent plays skip the probe overhead.
+      if (!isMissing && resolvedCanonicalPath) {
+        (async () => {
+          try {
+            const { data: currentItem } = await supabase
+              .from("library_items")
+              .select("audio_files")
+              .eq("id", libraryItemId)
+              .single();
+
+            if (currentItem?.audio_files) {
+              const updatedFiles = (
+                currentItem.audio_files as Record<string, unknown>[]
+              ).map((af: Record<string, unknown>) => {
+                const afMeta = (af.metadata as Record<string, unknown>) || {};
+                if (
+                  String(afMeta.path ?? "") === storagePath
+                ) {
+                  return {
+                    ...af,
+                    metadata: {
+                      ...afMeta,
+                      path: resolvedCanonicalPath,
+                    },
+                  };
+                }
+                return af;
+              });
+
+              await supabase
+                .from("library_items")
+                .update({ audio_files: updatedFiles })
+                .eq("id", libraryItemId);
+            }
+          } catch (patchErr) {
+            // Non-fatal — the signed URL still works for this session
+            console.warn(
+              `[PlaybackService] Failed to patch legacy path "${storagePath}" → "${resolvedCanonicalPath}":`,
+              patchErr,
+            );
+          }
+        })();
       }
 
       if (!isMissing && finalSignedUrl) {
