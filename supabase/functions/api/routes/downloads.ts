@@ -122,7 +122,16 @@ downloadsRouter.get("/:id/download", async (c) => {
     const af = sortedAudioFiles[i];
     const metadata = ((af as any).metadata as Record<string, unknown>) || {};
     const storagePath = String(
-      metadata.path ?? (af as any).storage_path ?? (af as any).path ?? "",
+      metadata.path ||
+        (af as any).storage_path ||
+        (af as any).path ||
+        (af as any).relPath ||
+        (af as any).rel_path ||
+        metadata.relPath ||
+        metadata.rel_path ||
+        metadata.filename ||
+        (af as any).filename ||
+        "",
     );
 
     let duration = af.duration;

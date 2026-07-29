@@ -23,6 +23,19 @@ export class PlaybackService {
       .select(
         `
         *,
+        books (
+          *,
+          book_authors (
+            authors (
+              *
+            )
+          ),
+          book_series (
+            series (
+              *
+            )
+          )
+        ),
         book_authors (
           authors (
             *
@@ -46,19 +59,43 @@ export class PlaybackService {
       );
     }
 
-    let audioFilesList =
-      ((item as Record<string, unknown>)?.audio_files || []) as Record<
-        string,
-        unknown
-      >[];
+    const bookObj = Array.isArray((item as Record<string, unknown>)?.books)
+      ? ((item as Record<string, unknown>)?.books as unknown[])[0]
+      : (item as Record<string, unknown>)?.books;
+
+    let rawAudioFiles =
+      (item as Record<string, unknown>)?.audio_files ||
+      (bookObj as Record<string, unknown>)?.audio_files ||
+      [];
+    if (typeof rawAudioFiles === "string") {
+      try {
+        rawAudioFiles = JSON.parse(rawAudioFiles);
+      } catch {
+        rawAudioFiles = [];
+      }
+    }
+    let audioFilesList = (Array.isArray(rawAudioFiles) ? rawAudioFiles : []) as Record<
+      string,
+      unknown
+    >[];
 
     // Fallback: If audio_files is empty, extract audio files from library_files
     if (!audioFilesList.length) {
-      const libraryFiles =
-        ((item as Record<string, unknown>)?.library_files || []) as Record<
-          string,
-          unknown
-        >[];
+      let rawLibraryFiles =
+        (item as Record<string, unknown>)?.library_files ||
+        (bookObj as Record<string, unknown>)?.library_files ||
+        [];
+      if (typeof rawLibraryFiles === "string") {
+        try {
+          rawLibraryFiles = JSON.parse(rawLibraryFiles);
+        } catch {
+          rawLibraryFiles = [];
+        }
+      }
+      const libraryFiles = (Array.isArray(rawLibraryFiles) ? rawLibraryFiles : []) as Record<
+        string,
+        unknown
+      >[];
       const audioExts = [
         ".mp3",
         ".m4b",
@@ -91,6 +128,12 @@ export class PlaybackService {
             filename: String(
               metadata.filename || metadata.relPath || `Track ${idx + 1}`,
             ),
+            path: String(
+              lf.path || metadata.path || metadata.relPath || metadata.filename || "",
+            ),
+            storage_path: String(
+              lf.storage_path || lf.path || metadata.path || metadata.relPath || metadata.filename || "",
+            ),
           };
         });
 
@@ -107,7 +150,7 @@ export class PlaybackService {
 
     let totalFilesSize = 0;
     const sortedAudioFiles = [...audioFilesList]
-      .map((af) => {
+      .map((af, idx) => {
         const metadata = ((af as any).metadata as Record<string, unknown>) ||
           {};
         const size = Number(af.size) || Number(metadata.size) || 0;
@@ -118,7 +161,7 @@ export class PlaybackService {
             ? Number(af.track_index)
             : af.index !== undefined
             ? Number(af.index)
-            : 0,
+            : idx,
           duration: Number(af.duration) || Number(metadata.duration) || 0,
           size: size,
           mime_type: String(af.mime_type || af.mimeType || "audio/mpeg"),
@@ -143,7 +186,16 @@ export class PlaybackService {
       const af = sortedAudioFiles[i];
       const metadata = ((af as any).metadata as Record<string, unknown>) || {};
       const storagePath = String(
-        metadata.path ?? (af as any).storage_path ?? (af as any).path ?? "",
+        metadata.path ||
+          (af as any).storage_path ||
+          (af as any).path ||
+          (af as any).relPath ||
+          (af as any).rel_path ||
+          metadata.relPath ||
+          metadata.rel_path ||
+          metadata.filename ||
+          (af as any).filename ||
+          "",
       );
 
       let duration = af.duration;

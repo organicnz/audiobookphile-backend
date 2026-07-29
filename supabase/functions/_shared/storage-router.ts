@@ -4,9 +4,6 @@ import {
   S3Client,
 } from "npm:@aws-sdk/client-s3@^3.693.0";
 import { getSignedUrl } from "npm:@aws-sdk/s3-request-presigner@^3.693.0";
-import { SupabaseClient } from "npm:@supabase/supabase-js@2.44.0";
-
-import { Database } from "../../../src/types/supabase.ts";
 
 // S3Client instances are cached per-process to avoid re-initialising on every
 // request. Each edge function invocation is a new process, but within a single
@@ -71,7 +68,7 @@ export interface ResolvedStoragePath {
 }
 
 export class StorageRouter {
-  constructor(private supabase: SupabaseClient<Database>) {}
+  constructor(private supabase: any) {}
 
   async getSignedUrl(path: string, expiresIn: number): Promise<string> {
     if (path.startsWith("supabase://")) {
@@ -94,8 +91,8 @@ export class StorageRouter {
       return await getSignedUrl(getB2SecondaryClient(), command, { expiresIn });
     }
 
-    if (path.startsWith("b2://") || !path.includes("://")) {
-      const actualPath = path.replace("b2://", "");
+    if (path.startsWith("b2://") || path.startsWith("b2-primary://") || path.startsWith("s3://") || !path.includes("://")) {
+      const actualPath = path.replace("b2://", "").replace("b2-primary://", "").replace("s3://", "");
       const command = new GetObjectCommand({
         Bucket: Deno.env.get("B2_BUCKET_NAME")!,
         Key: actualPath,
@@ -172,7 +169,7 @@ export class StorageRouter {
       .from("audio-files")
       .list(folder, { search: filename });
 
-    if (listed && listed.some((f) => f.name === filename)) {
+    if (listed && listed.some((f: any) => f.name === filename)) {
       const supabasePath = `${folder}/${filename}`;
       const { data, error } = await this.supabase.storage
         .from("audio-files")
@@ -218,8 +215,8 @@ export class StorageRouter {
       }
     }
 
-    if (path.startsWith("b2://") || !path.includes("://")) {
-      const actualPath = path.replace("b2://", "");
+    if (path.startsWith("b2://") || path.startsWith("b2-primary://") || path.startsWith("s3://") || !path.includes("://")) {
+      const actualPath = path.replace("b2://", "").replace("b2-primary://", "").replace("s3://", "");
       try {
         await getB2PrimaryClient().send(
           new HeadObjectCommand({

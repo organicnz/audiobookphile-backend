@@ -64,8 +64,12 @@ playbackRouter.post("/items/:id/play", async (c) => {
     return c.json(session);
   } catch (err: unknown) {
     const e = err as Error;
-    const isNotFound = e.message.includes("not found") ||
-      e.message.includes("does not exist");
+    const msg = (e.message || "").toLowerCase();
+    const isNotFound = msg.includes("not found") ||
+      msg.includes("does not exist") ||
+      msg.includes("no audio files") ||
+      msg.includes("missing from storage") ||
+      msg.includes("missing");
     const status = isNotFound ? 404 : 400;
     return c.json({ success: false, error: { message: e.message } }, status);
   }
@@ -108,8 +112,12 @@ playbackRouter.post("/items/:id/play/:episodeId", async (c) => {
     return c.json(session);
   } catch (err: unknown) {
     const e = err as Error;
-    const isNotFound = e.message.includes("not found") ||
-      e.message.includes("does not exist");
+    const msg = (e.message || "").toLowerCase();
+    const isNotFound = msg.includes("not found") ||
+      msg.includes("does not exist") ||
+      msg.includes("no audio files") ||
+      msg.includes("missing from storage") ||
+      msg.includes("missing");
     const status = isNotFound ? 404 : 400;
     return c.json({ success: false, error: { message: e.message } }, status);
   }

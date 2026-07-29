@@ -58,8 +58,18 @@ Deno.serve(async (req) => {
     const tracksWithUrls = (
       await Promise.all(
         audioFiles.map(async (audioFile, idx) => {
-          const storagePath = audioFile.metadata?.path ??
-            audioFile.storage_path ?? "";
+          const storagePath = String(
+            audioFile.metadata?.path ||
+              audioFile.storage_path ||
+              audioFile.path ||
+              audioFile.relPath ||
+              audioFile.rel_path ||
+              audioFile.metadata?.relPath ||
+              audioFile.metadata?.rel_path ||
+              audioFile.metadata?.filename ||
+              audioFile.filename ||
+              "",
+          );
           try {
             const finalSignedUrl = await storageRouter.getSignedUrl(
               storagePath,

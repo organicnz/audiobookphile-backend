@@ -110,7 +110,18 @@ Deno.serve(async (req) => {
 
     // Sign audio files in parallel to prevent N+1 timeout
     const signPromises = sortedAudioFiles.map(async (af: any, i: number) => {
-      const storagePath = af.metadata?.path ?? af.storage_path ?? af.path ?? "";
+      const storagePath = String(
+        af.metadata?.path ||
+          af.storage_path ||
+          af.path ||
+          af.relPath ||
+          af.rel_path ||
+          af.metadata?.relPath ||
+          af.metadata?.rel_path ||
+          af.metadata?.filename ||
+          af.filename ||
+          "",
+      );
       try {
         const finalSignedUrl = await storageRouter.getSignedUrl(
           storagePath,
