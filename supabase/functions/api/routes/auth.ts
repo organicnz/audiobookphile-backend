@@ -11,7 +11,7 @@ import { Hono } from "hono";
 import { createClient } from "npm:@supabase/supabase-js@2.44.0";
 import { Variables } from "../_shared/types.ts";
 import { getProxyOrigin } from "../../api/_shared/proxy.ts";
-import { authErrorHandlers } from "../_shared/auth.ts";
+import { authErrorHandlers, decodeJWT } from "../_shared/auth.ts";
 import { z } from "zod";
 
 export const authRouter = new Hono<{ Variables: Variables }>();
@@ -46,6 +46,8 @@ export const ForgotPasswordBodySchema = z.object({
 /** Reset password body schema */
 export const ResetPasswordBodySchema = z.object({
   password: z.string().min(6, "Password must be at least 6 characters"),
+  token: z.string().optional(),
+  accessToken: z.string().optional(),
 });
 
 /** Change password body schema */
@@ -56,6 +58,26 @@ export const ChangePasswordBodySchema = z.object({
 /** Authorize body schema (optional) */
 export const AuthorizeBodySchema = z.object({
   refreshToken: z.string().optional(),
+});
+
+/** Magic link body schema */
+export const MagicLinkBodySchema = z.object({
+  email: z.string().email("Invalid email address"),
+  redirectTo: z.string().optional(),
+});
+
+/** Verify OTP body schema */
+export const VerifyOtpBodySchema = z.object({
+  email: z.string().email("Invalid email address"),
+  token: z.string().min(1, "OTP token is required"),
+  type: z.string().optional(),
+});
+
+/** Invite user body schema */
+export const InviteUserBodySchema = z.object({
+  email: z.string().email("Invalid email address"),
+  username: z.string().optional(),
+  userType: z.string().optional(),
 });
 
 // =========================
@@ -72,18 +94,8 @@ authRouter.post("/login", async (c) => {
     const serviceRoleKey = c.get("serviceRoleKey");
     const body = await c.req.json();
 
-    // Zod validation for login body
-    const LoginBodySchema = z.object({
-      username: z.string().min(1, "Username is required"),
-      password: z.string().min(6, "Password must be at least 6 characters"),
-    });
-
     const loginData = LoginBodySchema.parse(body);
     const { username: loginUsername, password: loginPassword } = loginData;
-
-    if (!loginUsername || !loginPassword) {
-      return c.json({ error: authErrorHandlers.UNAUTHORIZED().message, code: authErrorHandlers.UNAUTHORIZED().code }, authErrorHandlers.UNAUTHORIZED().statusCode);
-    }
 
     let emailToUse = loginUsername;
     const adminSupabase = createClient(supabaseUrl, serviceRoleKey);
@@ -181,19 +193,8 @@ authRouter.post("/signup", async (c) => {
     const serviceRoleKey = c.get("serviceRoleKey");
     const body = await c.req.json();
 
-    // Zod validation for signup body
-    const SignupBodySchema = z.object({
-      email: z.string().email("Invalid email address"),
-      password: z.string().min(6, "Password must be at least 6 characters"),
-      username: z.string().optional().optional(),
-    });
-
     const signupData = SignupBodySchema.parse(body);
     const { email: signupEmail, password: signupPassword } = signupData;
-
-    if (!signupEmail || !signupPassword) {
-      return c.json({ error: authErrorHandlers.VALIDATION_ERROR().message, code: authErrorHandlers.VALIDATION_ERROR().code }, authErrorHandlers.VALIDATION_ERROR().statusCode);
-    }
 
     const { data: authData, error: authError } = await supabase.auth.signUp({
       email: signupEmail,
@@ -208,10 +209,10 @@ authRouter.post("/signup", async (c) => {
       const adminSupabase = createClient(supabaseUrl, serviceRoleKey);
       // Check if profile already exists
       const { data: existingProfile } = await adminSupabase.from("profiles")
-        .select("*").eq("username", signupData.username).maybeSingle();
+        .select("id").eq("username", signupData.username).maybeSingle();
 
       if (existingProfile) {
-        return c.json({ error: authErrorHandlers.USER_NOT_FOUND().message, code: authErrorHandlers.USER_NOT_FOUND().code }, authErrorHandlers.USER_NOT_FOUND().statusCode);
+        return c.json({ error: "Username already taken", code: "USERNAME_TAKEN" }, 409);
       }
 
       await adminSupabase.from("profiles").insert({
@@ -242,20 +243,16 @@ authRouter.post("/logout", async (c) => {
     const jwt = c.req.header("Authorization")?.replace("Bearer ", "").trim() ||
       "";
 
-    const supabaseUrl = c.get("supabaseUrl");
-    const serviceRoleKey = c.get("serviceRoleKey");
-
     if (jwt) {
-      const adminSupabase = createClient(supabaseUrl, serviceRoleKey);
-      const { data: profile } = await adminSupabase.from("profiles").select(
-        "id",
-      ).eq("username", jwt.split(".").pop() || "").maybeSingle();
+      // Decode the JWT to extract the user ID (sub claim)
+      const payload = decodeJWT(jwt);
+      if (payload?.sub) {
+        const supabaseUrl = c.get("supabaseUrl");
+        const serviceRoleKey = c.get("serviceRoleKey");
+        const adminSupabase = createClient(supabaseUrl, serviceRoleKey);
 
-      if (profile) {
-        await adminSupabase.from("profiles").update({ is_locked: true }).eq(
-          "id",
-          profile.id,
-        );
+        // Sign out the user via admin API to invalidate the session
+        await adminSupabase.auth.admin.signOut(payload.sub);
       }
     }
 
@@ -276,10 +273,6 @@ authRouter.post("/forgot-password", async (c) => {
   try {
     const supabase = c.get("supabase");
     const body = await c.req.json();
-
-    const ForgotPasswordBodySchema = z.object({
-      email: z.string().email("Invalid email address"),
-    });
 
     const formData = ForgotPasswordBodySchema.parse(body);
     const { email } = formData;
@@ -313,21 +306,33 @@ authRouter.post("/reset-password", async (c) => {
     const supabase = c.get("supabase");
     const body = await c.req.json();
 
-    const ResetPasswordBodySchema = z.object({
-      password: z.string().min(6, "Password must be at least 6 characters"),
-    });
-
     const resetData = ResetPasswordBodySchema.parse(body);
-    const { password } = resetData;
+    const { password, token, accessToken } = resetData;
 
     if (!password) {
       return c.json({ error: authErrorHandlers.VALIDATION_ERROR().message, code: authErrorHandlers.VALIDATION_ERROR().code }, authErrorHandlers.VALIDATION_ERROR().statusCode);
     }
 
+    const authHeaderToken = c.req.header("Authorization")?.replace("Bearer ", "").trim();
+    const targetToken = authHeaderToken || accessToken || token;
+
+    if (targetToken) {
+      const payload = decodeJWT(targetToken);
+      if (!payload || !payload.sub) {
+        return c.json({ error: authErrorHandlers.INVALID_TOKEN().message, code: authErrorHandlers.INVALID_TOKEN().code }, authErrorHandlers.INVALID_TOKEN().statusCode);
+      }
+      const adminSupabase = createClient(c.get("supabaseUrl"), c.get("serviceRoleKey"));
+      const { error } = await adminSupabase.auth.admin.updateUserById(payload.sub, { password });
+      if (error) {
+        return c.json({ error: authErrorHandlers.VALIDATION_ERROR().message, code: authErrorHandlers.VALIDATION_ERROR().code }, authErrorHandlers.VALIDATION_ERROR().statusCode);
+      }
+      return c.json({ success: true }, 200);
+    }
+
     const { error } = await supabase.auth.updateUser({ password });
 
     if (error) {
-      return c.json({ error: authErrorHandlers.VALIDATION_ERROR().message, code: authErrorHandlers.VALIDATION_ERROR().code }, authErrorHandlers.VALIDATION_ERROR().statusCode);
+      return c.json({ error: authErrorHandlers.UNAUTHORIZED().message, code: authErrorHandlers.UNAUTHORIZED().code }, authErrorHandlers.UNAUTHORIZED().statusCode);
     }
 
     return c.json({ success: true }, 200);
@@ -347,15 +352,7 @@ authRouter.post("/reset-password", async (c) => {
  */
 authRouter.post("/change-password", async (c) => {
   try {
-    const supabase = c.get("supabase");
     const body = await c.req.json();
-
-    const ChangePasswordBodySchema = z.object({
-      newPassword: z.string().min(
-        6,
-        "New password must be at least 6 characters",
-      ),
-    });
 
     const formData = ChangePasswordBodySchema.parse(body);
     const { newPassword } = formData;
@@ -364,6 +361,17 @@ authRouter.post("/change-password", async (c) => {
       return c.json({ error: authErrorHandlers.VALIDATION_ERROR().message, code: authErrorHandlers.VALIDATION_ERROR().code }, authErrorHandlers.VALIDATION_ERROR().statusCode);
     }
 
+    const userId = c.get("userId");
+    if (userId) {
+      const adminSupabase = createClient(c.get("supabaseUrl"), c.get("serviceRoleKey"));
+      const { error } = await adminSupabase.auth.admin.updateUserById(userId, { password: newPassword });
+      if (error) {
+        return c.json({ error: authErrorHandlers.VALIDATION_ERROR().message, code: authErrorHandlers.VALIDATION_ERROR().code }, authErrorHandlers.VALIDATION_ERROR().statusCode);
+      }
+      return c.json({ success: true }, 200);
+    }
+
+    const supabase = c.get("supabase");
     const { error } = await supabase.auth.updateUser({ password: newPassword });
 
     if (error) {
@@ -371,6 +379,147 @@ authRouter.post("/change-password", async (c) => {
     }
 
     return c.json({ success: true }, 200);
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      return c.json({ error: authErrorHandlers.VALIDATION_ERROR().message, code: authErrorHandlers.VALIDATION_ERROR().code }, authErrorHandlers.VALIDATION_ERROR().statusCode);
+    }
+    if (err instanceof Error && err.message === "Validation error") {
+      return c.json({ error: authErrorHandlers.VALIDATION_ERROR().message, code: authErrorHandlers.VALIDATION_ERROR().code }, authErrorHandlers.VALIDATION_ERROR().statusCode);
+    }
+    throw err;
+  }
+});
+
+/**
+ * Magic Link - Send OTP login email
+ */
+authRouter.post("/magic-link", async (c) => {
+  try {
+    const supabase = c.get("supabase");
+    const body = await c.req.json();
+    const { email, redirectTo } = MagicLinkBodySchema.parse(body);
+
+    const siteUrl = getProxyOrigin(c);
+    const { error } = await supabase.auth.signInWithOtp({
+      email,
+      options: {
+        emailRedirectTo: redirectTo || `${siteUrl}/auth/callback?next=/library`,
+      },
+    });
+
+    if (error) {
+      return c.json({ error: authErrorHandlers.VALIDATION_ERROR().message, code: authErrorHandlers.VALIDATION_ERROR().code }, authErrorHandlers.VALIDATION_ERROR().statusCode);
+    }
+
+    return c.json({ success: true, message: "Magic link sent to email" }, 200);
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      return c.json({ error: authErrorHandlers.VALIDATION_ERROR().message, code: authErrorHandlers.VALIDATION_ERROR().code }, authErrorHandlers.VALIDATION_ERROR().statusCode);
+    }
+    if (err instanceof Error && err.message === "Validation error") {
+      return c.json({ error: authErrorHandlers.VALIDATION_ERROR().message, code: authErrorHandlers.VALIDATION_ERROR().code }, authErrorHandlers.VALIDATION_ERROR().statusCode);
+    }
+    throw err;
+  }
+});
+
+/**
+ * Verify OTP - Verify OTP token for Magic Link / Recovery
+ */
+authRouter.post("/verify", async (c) => {
+  try {
+    const supabase = c.get("supabase");
+    const body = await c.req.json();
+    const { email, token, type } = VerifyOtpBodySchema.parse(body);
+
+    const { data: verifyData, error: verifyError } = await supabase.auth.verifyOtp({
+      email,
+      token,
+      type: (type || "magiclink") as "magiclink" | "recovery" | "signup" | "invite",
+    });
+
+    if (verifyError || !verifyData.session || !verifyData.user) {
+      return c.json({ error: authErrorHandlers.INVALID_TOKEN().message, code: authErrorHandlers.INVALID_TOKEN().code }, authErrorHandlers.INVALID_TOKEN().statusCode);
+    }
+
+    const adminSupabase = createClient(c.get("supabaseUrl"), c.get("serviceRoleKey"));
+    const { data: profile } = await adminSupabase.from("profiles")
+      .select("*").eq("id", verifyData.user.id).maybeSingle();
+
+    const userPayload = {
+      user: {
+        id: verifyData.user.id,
+        username: profile?.username || verifyData.user.email?.split("@")[0] || "User",
+        email: verifyData.user.email,
+        type: profile?.user_type || "user",
+        token: verifyData.session.access_token,
+        refreshToken: verifyData.session.refresh_token,
+        mediaProgress: [],
+        seriesHideFromContinueListening: [],
+        bookmarks: [],
+        isActive: true,
+        isLocked: false,
+        lastSeen: Date.now(),
+        createdAt: new Date(profile?.created_at || verifyData.user.created_at).getTime(),
+        permissions: {
+          download: true,
+          update: profile?.user_type === "admin",
+          delete: profile?.user_type === "admin",
+          upload: profile?.user_type === "admin",
+          accessAllLibraries: true,
+          accessAllTags: true,
+          accessExplicitContent: true,
+        },
+        librariesAccessible: [],
+        itemTagsAccessible: [],
+      },
+      userDefaultLibraryId: profile?.default_library_id || null,
+      serverSettings: {},
+      source: "local",
+    };
+
+    return c.json(userPayload, 200);
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      return c.json({ error: authErrorHandlers.VALIDATION_ERROR().message, code: authErrorHandlers.VALIDATION_ERROR().code }, authErrorHandlers.VALIDATION_ERROR().statusCode);
+    }
+    if (err instanceof Error && err.message === "Validation error") {
+      return c.json({ error: authErrorHandlers.VALIDATION_ERROR().message, code: authErrorHandlers.VALIDATION_ERROR().code }, authErrorHandlers.VALIDATION_ERROR().statusCode);
+    }
+    throw err;
+  }
+});
+
+/**
+ * Invite User - Invite new user by email (Admin only)
+ */
+authRouter.post("/invite", async (c) => {
+  try {
+    const user = c.get("user");
+    if (!user || (user.type !== "admin" && !user.permissions.update)) {
+      return c.json({ error: authErrorHandlers.UNAUTHORIZED().message, code: authErrorHandlers.UNAUTHORIZED().code }, 403);
+    }
+
+    const body = await c.req.json();
+    const { email, username, userType } = InviteUserBodySchema.parse(body);
+
+    const adminSupabase = createClient(c.get("supabaseUrl"), c.get("serviceRoleKey"));
+    const siteUrl = getProxyOrigin(c);
+    const { data: inviteData, error: inviteError } = await adminSupabase.auth.admin.inviteUserByEmail(email, {
+      redirectTo: `${siteUrl}/auth/callback?next=/reset-password`,
+    });
+
+    if (inviteError || !inviteData.user) {
+      return c.json({ error: inviteError?.message || "Failed to send invite", code: "INVITE_ERROR" }, 400);
+    }
+
+    await adminSupabase.from("profiles").upsert({
+      id: inviteData.user.id,
+      username: username || email.split("@")[0],
+      user_type: userType || "user",
+    });
+
+    return c.json({ success: true, user: inviteData.user }, 200);
   } catch (err) {
     if (err instanceof z.ZodError) {
       return c.json({ error: authErrorHandlers.VALIDATION_ERROR().message, code: authErrorHandlers.VALIDATION_ERROR().code }, authErrorHandlers.VALIDATION_ERROR().statusCode);
@@ -392,10 +541,6 @@ authRouter.post("/refresh", async (c) => {
     const serviceRoleKey = c.get("serviceRoleKey");
     const refreshToken = c.req.header("x-refresh-token") ||
       (await c.req.json()).refreshToken;
-
-    const RefreshBodySchema = z.object({
-      refreshToken: z.string().min(1, "Refresh token is required"),
-    });
 
     const refreshData = RefreshBodySchema.parse({ refreshToken });
     const { refreshToken: token } = refreshData;
@@ -487,10 +632,6 @@ authRouter.post("/authorize", async (c) => {
       "";
 
     const body = await c.req.json();
-    const AuthorizeBodySchema = z.object({
-      refreshToken: z.string().optional(),
-    });
-
     const authorizeData = AuthorizeBodySchema.parse(body);
     const providedRefreshToken = authorizeData.refreshToken || "";
 
@@ -500,14 +641,14 @@ authRouter.post("/authorize", async (c) => {
     const adminSupabase = createClient(supabaseUrl, serviceRoleKey);
 
     if (jwt) {
-      // Extract payload from JWT
+      // Extract payload from JWT — Supabase uses 'sub' for user ID
       const payload = decodeJWT(jwt);
 
       if (!payload) {
         return c.json({ error: authErrorHandlers.INVALID_TOKEN().message, code: authErrorHandlers.INVALID_TOKEN().code }, authErrorHandlers.INVALID_TOKEN().statusCode);
       }
 
-      const userId = payload.id;
+      const userId = payload.sub;
 
       // Validate user exists and is not banned/locked
       const { data: profile, error: fetchError } = await adminSupabase.from(
@@ -515,22 +656,18 @@ authRouter.post("/authorize", async (c) => {
       ).select("*").eq("id", userId).maybeSingle();
 
       if (fetchError || !profile) {
-        // Check if user exists but no profile
-        const { data: authIdentity } = await adminSupabase.from(
-          "auth_identities",
-        ).select("id").eq("user_id", userId).maybeSingle();
+        // Check if auth user exists via admin API (auth schema tables are inaccessible)
+        const { data: userData } = await adminSupabase.auth.admin.getUserById(
+          userId,
+        );
 
-        if (authIdentity) {
-          // User exists but profile is missing or locked
-          const updateError = await adminSupabase.from("profiles").upsert({
+        if (userData?.user) {
+          // User exists in auth but profile is missing — create one
+          await adminSupabase.from("profiles").upsert({
             id: userId,
-            username: payload.username,
+            username: payload.email?.split("@")[0] || "user",
             user_type: "user",
-            is_locked: true,
           });
-          if (updateError) {
-            return c.json({ error: authErrorHandlers.USER_NOT_FOUND().message, code: authErrorHandlers.USER_NOT_FOUND().code }, authErrorHandlers.USER_NOT_FOUND().statusCode);
-          }
         } else {
           return c.json({ error: authErrorHandlers.USER_NOT_FOUND().message, code: authErrorHandlers.USER_NOT_FOUND().code }, authErrorHandlers.USER_NOT_FOUND().statusCode);
         }
@@ -539,11 +676,11 @@ authRouter.post("/authorize", async (c) => {
       user = {
         id: userId,
         email: payload.email || profile?.email || null,
-        username: payload.username || profile?.username,
+        username: profile?.username || payload.email?.split("@")[0] || "User",
         created_at: new Date(profile?.created_at || Date.now()).toISOString(),
       };
 
-      activeToken = payload.access_token || activeToken;
+      activeToken = jwt;
     }
 
     // If JWT is invalid, try refresh token
@@ -581,15 +718,16 @@ authRouter.post("/authorize", async (c) => {
       return c.json({ error: authErrorHandlers.UNAUTHORIZED().message, code: authErrorHandlers.UNAUTHORIZED().code }, authErrorHandlers.UNAUTHORIZED().statusCode);
     }
 
-    const { data: profile } = await adminSupabase.from("profiles").select("*")
+    // Fetch final profile for payload (single fetch instead of redundant re-fetches)
+    const { data: finalProfile } = await adminSupabase.from("profiles").select("*")
       .eq("id", user.id).maybeSingle();
 
     const userPayload = {
       user: {
         id: user.id,
-        username: profile?.username || user.email?.split("@")[0] || "User",
+        username: finalProfile?.username || user.email?.split("@")[0] || "User",
         email: user.email,
-        type: profile?.user_type || "user",
+        type: finalProfile?.user_type || "user",
         token: activeToken,
         refreshToken: newRefreshToken || null,
         mediaProgress: [],
@@ -598,12 +736,12 @@ authRouter.post("/authorize", async (c) => {
         isActive: true,
         isLocked: false,
         lastSeen: Date.now(),
-        createdAt: new Date(profile?.created_at || user.created_at).getTime(),
+        createdAt: new Date(finalProfile?.created_at || user.created_at).getTime(),
         permissions: {
           download: true,
-          update: profile?.user_type === "admin",
-          delete: profile?.user_type === "admin",
-          upload: profile?.user_type === "admin",
+          update: finalProfile?.user_type === "admin",
+          delete: finalProfile?.user_type === "admin",
+          upload: finalProfile?.user_type === "admin",
           accessAllLibraries: true,
           accessAllTags: true,
           accessExplicitContent: true,
@@ -611,7 +749,7 @@ authRouter.post("/authorize", async (c) => {
         librariesAccessible: [],
         itemTagsAccessible: [],
       },
-      userDefaultLibraryId: profile?.default_library_id || null,
+      userDefaultLibraryId: finalProfile?.default_library_id || null,
       serverSettings: {},
       source: "local",
     };
@@ -628,31 +766,4 @@ authRouter.post("/authorize", async (c) => {
   }
 });
 
-// =========================
-// Utility Functions
-// =========================
-
-/**
- * Decode JWT token to extract payload (base64 decode, skip signature verification)
- * @param token - JWT token string (Bearer token or full JWT)
- * @returns Decoded JWT payload or null
- */
-function decodeJWT(token: string): any {
-  try {
-    // JWT format: header.payload.signature
-    // Extract payload (second part) and base64 decode
-    let payload = token.split(".")[1];
-    if (!payload) return null;
-
-    // Remove base64 padding
-    const padding = (4 - (payload.length % 4)) % 4;
-    payload += "=".repeat(padding);
-
-    // Decode
-    const decoded = Buffer.from(payload, "base64").toString();
-    return JSON.parse(decoded);
-  } catch (e) {
-    console.error("[authRouter] JWT decode error:", e);
-    return null;
-  }
-}
+// decodeJWT is imported from _shared/auth.ts — single source of truth

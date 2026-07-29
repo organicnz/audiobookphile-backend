@@ -136,11 +136,11 @@ app.use(async (c, next) => {
   }
 });
 
-// 5. Auth Middleware (centralized authentication, skips auth routes)
-app.use("*", authMiddleware);
-
-// 6. Service Role Middleware
+// 5. Service Role Middleware (injects supabaseUrl + serviceRoleKey into context — must run before auth)
 app.use(serviceRoleMiddleware);
+
+// 6. Auth Middleware (centralized authentication, skips public auth routes)
+app.use("*", authMiddleware);
 
 // === NATIVE HONO ROUTERS ===
 // Routes are mounted here, middleware chain applies to all
@@ -156,6 +156,7 @@ app.route("/api", progressRouter);
 app.route("/api/playlists", playlistsRouter);
 app.route("/api/collections", collectionsRouter);
 app.route("/api/auth", authRouter);
+app.route("/api", authRouter);
 app.route("/api/migrate-batch", migrateBatchRouter);
 app.route("/api/items", downloadsRouter);
 app.route("/api/me/bookmarks", bookmarksRouter);

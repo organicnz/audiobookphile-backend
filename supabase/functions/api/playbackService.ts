@@ -222,7 +222,7 @@ export class PlaybackService {
 
               await supabase
                 .from("library_items")
-                .update({ audio_files: updatedFiles })
+                .update({ audio_files: updatedFiles as any })
                 .eq("id", libraryItemId);
             }
           } catch (patchErr) {

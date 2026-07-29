@@ -1,5 +1,6 @@
 import { Database } from "../../../src/types/supabase.ts";
 import {
+  EbookFileModel,
   MobileBookModel as MobileBook,
   MobileLibraryModel as MobileLibrary,
 } from "../../../src/types/schemas.ts";
@@ -389,11 +390,7 @@ export function mapBookForMobile(
       tracks: audioFiles,
       numTracks: audioFiles.length,
       ebookFile: bookRecord.ebook_file
-        ? (bookRecord.ebook_file as unknown as {
-          ino: string;
-          metadata: Record<string, unknown>;
-          ebookFormat: string;
-        })
+        ? (bookRecord.ebook_file as EbookFileModel)
         : null,
       metadata: {
         title: finalTitle,

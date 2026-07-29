@@ -46,9 +46,9 @@ export const AudioFileSchema = z.object({
 
 export const AudioTrackSchema = z.object({
   index: z.number(),
-  title: z.string(),
-  contentUrl: z.string(),
-  startOffset: z.number(),
+  title: z.string().nullish(),
+  contentUrl: z.string().nullish(),
+  startOffset: z.number().nullish(),
   ino: z.string(),
   metadata: AudioMetadataSchema,
   duration: z.number().nullish(),
@@ -82,20 +82,21 @@ export const FileMetadataSchema = z.object({
 });
 
 export const LibraryFileSchema = z.object({
+  id: z.string().nullish(),
   ino: z.string(),
   metadata: FileMetadataSchema.nullish(),
   isSupplementary: z.boolean().nullish(),
   fileType: z.string().nullish(),
-  addedAt: z.number(),
-  updatedAt: z.number(),
+  addedAt: z.number().nullish(),
+  updatedAt: z.number().nullish(),
 });
 
 export const EbookFileSchema = z.object({
   ino: z.string(),
   metadata: FileMetadataSchema,
   ebookFormat: z.string(),
-  addedAt: z.number(),
-  updatedAt: z.number(),
+  addedAt: z.number().nullish(),
+  updatedAt: z.number().nullish(),
 });
 
 /**

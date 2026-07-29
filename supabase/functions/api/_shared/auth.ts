@@ -13,6 +13,8 @@
  */
 import { ApiError } from "./errors.ts";
 import { createClient } from "npm:@supabase/supabase-js@2.44.0";
+import { Context, Next } from "hono";
+import { Variables } from "./types.ts";
 
 // Auth errors - centralize all auth-related errors
 export const authErrorHandlers = {
@@ -32,23 +34,36 @@ export const authErrorHandlers = {
 // Routes that don't require auth (auth routes need to create session first, plus health check)
 const publicAuthRoutes = new Set([
   "/api/auth/login",
+  "/api/login",
   "/api/auth/signup",
+  "/api/signup",
   "/api/auth/refresh",
+  "/api/refresh",
   "/api/auth/callback",
+  "/api/callback",
   "/api/auth/verify",
+  "/api/verify",
   "/api/auth/logout",
+  "/api/logout",
   "/api/auth/forgot-password",
+  "/api/forgot-password",
   "/api/auth/reset-password",
+  "/api/reset-password",
   "/api/auth/change-password",
+  "/api/change-password",
   "/api/auth/authorize",
+  "/api/authorize",
   "/api/auth/verify-token",
+  "/api/verify-token",
+  "/api/auth/magic-link",
+  "/api/magic-link",
   "/api/health", // Health check should be public
 ]);
 
 /**
  * Check if route should skip auth middleware
  */
-export function shouldSkipAuth(c: any): boolean {
+export function shouldSkipAuth(c: Context<{ Variables: Variables }>): boolean {
   return publicAuthRoutes.has(c.req.path);
 }
 
@@ -57,19 +72,16 @@ export function shouldSkipAuth(c: any): boolean {
  * @param token - JWT token string
  * @returns Decoded JWT payload or null
  */
-function decodeJWT(token: string): any {
+export function decodeJWT(token: string): any {
   try {
     // JWT format: header.payload.signature
-    // Extract payload (second part) and base64 decode
-    let payload = token.split(".")[1];
-    if (!payload) return null;
+    // Extract payload (second part) and base64url decode
+    const parts = token.split(".");
+    if (parts.length < 2 || !parts[1]) return null;
 
-    // Remove base64 padding
-    const padding = (4 - (payload.length % 4)) % 4;
-    payload += "=".repeat(padding);
-
-    // Decode
-    const decoded = Buffer.from(payload, "base64").toString();
+    // Convert base64url → standard base64, then decode with Deno-native atob()
+    const base64 = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+    const decoded = atob(base64);
     return JSON.parse(decoded);
   } catch (e) {
     console.error("[authMiddleware] JWT decode error:", e);
@@ -92,15 +104,12 @@ async function validateUser(supabase: any, userId: string): Promise<boolean> {
     .single();
 
   if (fetchError) {
-    // Check if user exists at all
-    const { data: userCheck } = await supabase
-      .from("auth_identities")
-      .select("id")
-      .eq("user_id", userId)
-      .maybeSingle();
+    // Profile not found — check if the auth user exists via admin API
+    // (auth schema tables like auth.identities are not accessible from public schema)
+    const { data: userData } = await supabase.auth.admin.getUserById(userId);
 
-    if (userCheck) {
-      // User exists but no profile - create one or return user
+    if (userData?.user) {
+      // User exists in auth but no profile yet — allow through
       return true;
     }
 
@@ -123,18 +132,26 @@ async function validateUser(supabase: any, userId: string): Promise<boolean> {
 /**
  * Auth Middleware
  */
-export async function authMiddleware(c: any, next: any) {
+export async function authMiddleware(
+  c: Context<{ Variables: Variables }>,
+  next: Next,
+) {
+  // Skip auth for public routes (login, signup, refresh, etc.)
+  if (shouldSkipAuth(c)) {
+    return next();
+  }
+
   const authorizationHeader = c.req.header("Authorization");
 
   if (!authorizationHeader) {
-    return authErrorHandlers.UNAUTHORIZED();
+    throw authErrorHandlers.UNAUTHORIZED();
   }
 
   // Parse Bearer token
   const token = authorizationHeader.replace(/^Bearer\s*/i, "").trim();
 
   if (!token) {
-    return authErrorHandlers.UNAUTHORIZED();
+    throw authErrorHandlers.UNAUTHORIZED();
   }
 
   // Get Supabase config from context
@@ -142,24 +159,31 @@ export async function authMiddleware(c: any, next: any) {
   const serviceRoleKey = c.get("serviceRoleKey");
 
   if (!supabaseUrl) {
-    return authErrorHandlers.NO_SESSION();
+    throw authErrorHandlers.NO_SESSION();
   }
 
   // Create temporary Supabase client for token validation
-  const adminSupabase = serviceRoleKey
-    ? createClient(supabaseUrl, serviceRoleKey)
-    : createClient(supabaseUrl, "anon");
+  const adminSupabase = createClient(
+    supabaseUrl,
+    serviceRoleKey || "anon",
+    {
+      auth: {
+        persistSession: false,
+        autoRefreshToken: false,
+      },
+    },
+  );
 
   try {
     // Step 1: Decode JWT token
     const payload = decodeJWT(token);
 
     if (!payload) {
-      return authErrorHandlers.INVALID_TOKEN();
+      throw authErrorHandlers.INVALID_TOKEN();
     }
 
-    // Step 2: Validate token was signed by Supabase (by checking user ID exists)
-    const userId = payload.id;
+    // Step 2: Extract user ID from Supabase JWT (uses 'sub' claim per OIDC spec)
+    const userId = payload.sub;
 
     // Step 3: Verify user exists in profiles table
     const isValid = await validateUser(adminSupabase, userId);
@@ -167,20 +191,20 @@ export async function authMiddleware(c: any, next: any) {
     if (!isValid) {
       // Check for specific reasons
       if (userId === null || userId === undefined) {
-        return authErrorHandlers.INVALID_TOKEN();
+        throw authErrorHandlers.INVALID_TOKEN();
       }
 
-      const { data: userCheck } = await adminSupabase
-        .from("auth_identities")
-        .select("id")
-        .eq("user_id", userId)
-        .maybeSingle();
+      // Check if user exists via admin API (auth schema tables are not
+      // accessible from the public schema)
+      const { data: userData } = await adminSupabase.auth.admin.getUserById(
+        userId,
+      );
 
-      if (!userCheck) {
-        return authErrorHandlers.USER_NOT_FOUND();
+      if (!userData?.user) {
+        throw authErrorHandlers.USER_NOT_FOUND();
       }
 
-      return authErrorHandlers.USER_DEACTIVATED();
+      throw authErrorHandlers.USER_DEACTIVATED();
     }
 
     // Step 4: Fetch user profile with details
@@ -192,7 +216,7 @@ export async function authMiddleware(c: any, next: any) {
       .maybeSingle();
 
     if (profileError || !profile) {
-      return authErrorHandlers.USER_NOT_FOUND();
+      throw authErrorHandlers.USER_NOT_FOUND();
     }
 
     // Step 5: Set user in context
@@ -212,6 +236,8 @@ export async function authMiddleware(c: any, next: any) {
       },
       librariesAccessible: [],
       itemTagsAccessible: [],
+      created_at: profile.created_at,
+      last_sign_in_at: profile.updated_at || profile.created_at,
     });
 
     c.set("userId", userId);
@@ -232,8 +258,10 @@ export async function authMiddleware(c: any, next: any) {
 
     c.set("userDefaultLibraryId", defaultLibrary?.default_library_id || null);
   } catch (err) {
+    // Re-throw ApiErrors so the error-handling middleware serialises them
+    if (err instanceof ApiError) throw err;
     console.error("[authMiddleware] Auth error:", err);
-    return authErrorHandlers.UNAUTHORIZED();
+    throw authErrorHandlers.UNAUTHORIZED();
   }
 
   await next();
