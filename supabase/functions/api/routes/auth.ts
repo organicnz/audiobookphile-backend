@@ -149,6 +149,11 @@ authRouter.post("/login", async (c) => {
         userId: authData.user.id,
         email: authData.user.email,
         tempToken,
+        methods: {
+          totp: Boolean(profile?.totp_secret),
+          pin: Boolean(profile?.pin_code_hash),
+          biometric: profile?.biometric_enrolled === true,
+        },
       }, 200);
     }
 

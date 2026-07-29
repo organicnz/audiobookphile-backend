@@ -226,3 +226,22 @@ export async function verify2FAChallengeToken(
   return providedHex === expectedHex;
 }
 
+/**
+ * Hashes a PIN code using Web Crypto SHA-256 for secure backend database storage.
+ */
+export async function hashPinCode(pin: string): Promise<string> {
+  const encoder = new TextEncoder();
+  const data = encoder.encode(`abp_pin_salt_${pin}`);
+  const hashBuffer = await crypto.subtle.digest("SHA-256", data);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/**
+ * Verifies a PIN code against its stored SHA-256 hash.
+ */
+export async function verifyPinCode(pin: string, hash: string): Promise<boolean> {
+  const computedHash = await hashPinCode(pin);
+  return computedHash === hash;
+}
+

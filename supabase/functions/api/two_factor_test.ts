@@ -6,6 +6,8 @@ import {
   verifyTotpCode,
   generate2FAChallengeToken,
   verify2FAChallengeToken,
+  hashPinCode,
+  verifyPinCode,
 } from "./_shared/totp.ts";
 
 Deno.test("TOTP - generateTotpSecret produces base32 valid string", () => {
@@ -61,5 +63,17 @@ Deno.test("TOTP - generate2FAChallengeToken and verify2FAChallengeToken validate
 
   const wrongSecret = await verify2FAChallengeToken(token, userId, "wrong-secret");
   assertEquals(wrongSecret, false, "Should reject challenge token signed with different secret");
+});
+
+Deno.test("PIN Code - hashPinCode and verifyPinCode securely hash and verify PINs", async () => {
+  const pin = "123456";
+  const hash = await hashPinCode(pin);
+  assertEquals(hash.length, 64, "SHA-256 hash should be 64 hex characters");
+
+  const valid = await verifyPinCode(pin, hash);
+  assertEquals(valid, true, "Should verify correct PIN against its hash");
+
+  const invalid = await verifyPinCode("654321", hash);
+  assertEquals(invalid, false, "Should reject incorrect PIN against stored hash");
 });
 

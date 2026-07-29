@@ -7,6 +7,8 @@ import {
   generateTotpUri,
   verifyTotpCode,
   verify2FAChallengeToken,
+  hashPinCode,
+  verifyPinCode,
 } from "../_shared/totp.ts";
 
 export const twoFactorRouter = new Hono<{ Variables: Variables }>();
@@ -15,15 +17,25 @@ const VerifyCodeSchema = z.object({
   code: z.string().min(6, "6-digit code is required"),
 });
 
+const EnrollPinSchema = z.object({
+  pinCode: z.string().min(4, "PIN must be at least 4 digits").max(8, "PIN must be at most 8 digits"),
+});
+
+const EnrollBiometricSchema = z.object({
+  deviceId: z.string().optional(),
+});
+
 const DisableSchema = z.object({
   code: z.string().optional(),
   password: z.string().optional(),
+  method: z.enum(["totp", "pin", "biometric", "all"]).optional(),
 });
 
 const VerifyLoginSchema = z.object({
   userId: z.string().uuid("Invalid userId"),
-  code: z.string().min(6, "6-digit code is required"),
+  code: z.string().optional(),
   tempToken: z.string().min(1, "tempToken is required"),
+  method: z.enum(["totp", "pin", "biometric"]).optional(),
 });
 
 /**
@@ -42,7 +54,7 @@ twoFactorRouter.get("/status", async (c) => {
   try {
     const { data: profile, error } = await adminSupabase
       .from("profiles")
-      .select("is_2fa_enabled")
+      .select("is_2fa_enabled, totp_secret, pin_code_hash, biometric_enrolled, two_factor_methods")
       .eq("id", user.id)
       .maybeSingle();
 
@@ -50,7 +62,13 @@ twoFactorRouter.get("/status", async (c) => {
       throw error;
     }
 
-    return c.json({ enabled: profile?.is_2fa_enabled === true }, 200);
+    return c.json({
+      enabled: profile?.is_2fa_enabled === true,
+      totpEnrolled: Boolean(profile?.totp_secret),
+      pinEnrolled: Boolean(profile?.pin_code_hash),
+      biometricEnrolled: profile?.biometric_enrolled === true,
+      methods: profile?.two_factor_methods || (profile?.totp_secret ? ["totp"] : []),
+    }, 200);
   } catch (err: any) {
     console.error("[2fa] Failed to get status:", err);
     return c.json({ error: "Failed to get two-factor authentication status" }, 500);
@@ -95,6 +113,115 @@ twoFactorRouter.post("/enroll", async (c) => {
 });
 
 /**
+ * POST /enroll-pin - Enroll in PIN Code 2FA
+ */
+twoFactorRouter.post("/enroll-pin", async (c) => {
+  const user = c.get("user");
+  if (!user) {
+    return c.json({ error: "Unauthorized" }, 401);
+  }
+
+  const supabaseUrl = c.get("supabaseUrl");
+  const serviceRoleKey = c.get("serviceRoleKey");
+  const adminSupabase = createClient(supabaseUrl, serviceRoleKey);
+
+  try {
+    const body = await c.req.json();
+    const { pinCode } = EnrollPinSchema.parse(body);
+
+    const hash = await hashPinCode(pinCode);
+
+    const { data: profile, error: fetchError } = await adminSupabase
+      .from("profiles")
+      .select("two_factor_methods")
+      .eq("id", user.id)
+      .maybeSingle();
+
+    if (fetchError || !profile) {
+      return c.json({ error: "Profile not found" }, 404);
+    }
+
+    const currentMethods = Array.isArray(profile.two_factor_methods) ? profile.two_factor_methods : [];
+    const updatedMethods = Array.from(new Set([...currentMethods, "pin"]));
+
+    const { error } = await adminSupabase
+      .from("profiles")
+      .update({
+        pin_code_hash: hash,
+        is_2fa_enabled: true,
+        two_factor_methods: updatedMethods,
+      })
+      .eq("id", user.id);
+
+    if (error) {
+      throw error;
+    }
+
+    return c.json({ success: true, enrolled: "pin" }, 200);
+  } catch (err: any) {
+    if (err instanceof z.ZodError) {
+      return c.json({ error: err.errors[0]?.message || "Validation error" }, 400);
+    }
+    console.error("[2fa] Failed to enroll in PIN 2FA:", err);
+    return c.json({ error: "Failed to enroll in PIN code two-factor authentication" }, 500);
+  }
+});
+
+/**
+ * POST /enroll-biometric - Enroll in Facial 2FA / Biometric Sign-In
+ */
+twoFactorRouter.post("/enroll-biometric", async (c) => {
+  const user = c.get("user");
+  if (!user) {
+    return c.json({ error: "Unauthorized" }, 401);
+  }
+
+  const supabaseUrl = c.get("supabaseUrl");
+  const serviceRoleKey = c.get("serviceRoleKey");
+  const adminSupabase = createClient(supabaseUrl, serviceRoleKey);
+
+  try {
+    const body = await c.req.json().catch(() => ({}));
+    const { deviceId } = EnrollBiometricSchema.parse(body);
+
+    const { data: profile, error: fetchError } = await adminSupabase
+      .from("profiles")
+      .select("two_factor_methods")
+      .eq("id", user.id)
+      .maybeSingle();
+
+    if (fetchError || !profile) {
+      return c.json({ error: "Profile not found" }, 404);
+    }
+
+    const currentMethods = Array.isArray(profile.two_factor_methods) ? profile.two_factor_methods : [];
+    const updatedMethods = Array.from(new Set([...currentMethods, "biometric"]));
+
+    const { error } = await adminSupabase
+      .from("profiles")
+      .update({
+        biometric_enrolled: true,
+        biometric_device_id: deviceId || "default",
+        is_2fa_enabled: true,
+        two_factor_methods: updatedMethods,
+      })
+      .eq("id", user.id);
+
+    if (error) {
+      throw error;
+    }
+
+    return c.json({ success: true, enrolled: "biometric" }, 200);
+  } catch (err: any) {
+    if (err instanceof z.ZodError) {
+      return c.json({ error: err.errors[0]?.message || "Validation error" }, 400);
+    }
+    console.error("[2fa] Failed to enroll in Biometric 2FA:", err);
+    return c.json({ error: "Failed to enroll in Facial 2FA / Biometric authentication" }, 500);
+  }
+});
+
+/**
  * POST /verify - Confirm and activate 2FA enrollment with 6-digit code
  */
 twoFactorRouter.post("/verify", async (c) => {
@@ -113,7 +240,7 @@ twoFactorRouter.post("/verify", async (c) => {
 
     const { data: profile, error: fetchError } = await adminSupabase
       .from("profiles")
-      .select("totp_secret, is_2fa_enabled")
+      .select("totp_secret, is_2fa_enabled, two_factor_methods")
       .eq("id", user.id)
       .maybeSingle();
 
@@ -126,9 +253,15 @@ twoFactorRouter.post("/verify", async (c) => {
       return c.json({ error: "Invalid verification code. Please check your authenticator app." }, 400);
     }
 
+    const currentMethods = Array.isArray(profile.two_factor_methods) ? profile.two_factor_methods : [];
+    const updatedMethods = Array.from(new Set([...currentMethods, "totp"]));
+
     const { error: updateError } = await adminSupabase
       .from("profiles")
-      .update({ is_2fa_enabled: true })
+      .update({
+        is_2fa_enabled: true,
+        two_factor_methods: updatedMethods,
+      })
       .eq("id", user.id);
 
     if (updateError) {
@@ -205,6 +338,9 @@ twoFactorRouter.post("/disable", async (c) => {
       .update({
         is_2fa_enabled: false,
         totp_secret: null,
+        pin_code_hash: null,
+        biometric_enrolled: false,
+        two_factor_methods: [],
       })
       .eq("id", user.id);
 
@@ -233,7 +369,7 @@ twoFactorRouter.post("/verify-login", async (c) => {
 
   try {
     const body = await c.req.json();
-    const { userId, code, tempToken } = VerifyLoginSchema.parse(body);
+    const { userId, code, tempToken, method } = VerifyLoginSchema.parse(body);
 
     const isTokenValid = await verify2FAChallengeToken(tempToken, userId);
     if (!isTokenValid) {
@@ -250,13 +386,32 @@ twoFactorRouter.post("/verify-login", async (c) => {
       return c.json({ error: "User profile not found" }, 404);
     }
 
-    if (!profile.is_2fa_enabled || !profile.totp_secret) {
+    if (!profile.is_2fa_enabled) {
       return c.json({ error: "Two-factor authentication is not enabled for this account" }, 400);
     }
 
-    const isCodeValid = await verifyTotpCode(profile.totp_secret, code);
-    if (!isCodeValid) {
-      return c.json({ error: "Invalid authentication code. Please check your authenticator app." }, 401);
+    const effectiveMethod = method || (code === "biometric" ? "biometric" : (code && code.length !== 6 ? "pin" : "totp"));
+
+    if (effectiveMethod === "biometric") {
+      if (profile.biometric_enrolled !== true) {
+        return c.json({ error: "Facial 2FA is not enrolled for this account" }, 400);
+      }
+    } else if (effectiveMethod === "pin") {
+      if (!profile.pin_code_hash || !code) {
+        return c.json({ error: "PIN code 2FA is not enrolled or PIN code is missing" }, 400);
+      }
+      const isValid = await verifyPinCode(code, profile.pin_code_hash);
+      if (!isValid) {
+        return c.json({ error: "Invalid PIN code. Please try again." }, 401);
+      }
+    } else {
+      if (!profile.totp_secret || !code) {
+        return c.json({ error: "Authenticator app 2FA is not enrolled or code is missing" }, 400);
+      }
+      const isCodeValid = await verifyTotpCode(profile.totp_secret, code);
+      if (!isCodeValid) {
+        return c.json({ error: "Invalid authentication code. Please check your authenticator app." }, 401);
+      }
     }
 
     const { data: userData } = await adminSupabase.auth.admin.getUserById(userId);
