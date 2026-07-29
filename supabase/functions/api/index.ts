@@ -21,6 +21,7 @@ import { bookmarksRouter } from "./routes/bookmarks.ts";
 import { searchRouter } from "./routes/search.ts";
 import { meRouter } from "./routes/me.ts";
 import { adminRouter } from "./routes/admin.ts";
+import { twoFactorRouter } from "./routes/twoFactor.ts";
 
 import { Variables } from "./_shared/types.ts";
 import { ApiError, serviceRoleMiddleware } from "./_shared/errors.ts";
@@ -161,6 +162,8 @@ app.route("/api/playlists", playlistsRouter);
 app.route("/api/collections", collectionsRouter);
 app.route("/api/auth", authRouter);
 app.route("/api", authRouter);
+app.route("/api/auth/2fa", twoFactorRouter);
+app.route("/api/2fa", twoFactorRouter);
 app.route("/api/migrate-batch", migrateBatchRouter);
 app.route("/api/items", downloadsRouter);
 app.route("/api/me/bookmarks", bookmarksRouter);

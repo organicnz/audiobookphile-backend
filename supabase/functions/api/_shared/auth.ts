@@ -57,6 +57,8 @@ const publicAuthRoutes = new Set([
   "/api/magic-link",
   "/api/auth/signup",
   "/api/signup",
+  "/api/auth/2fa/verify-login",
+  "/api/2fa/verify-login",
   "/api/health", // Health check should be public
 ]);
 

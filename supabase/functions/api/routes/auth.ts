@@ -12,6 +12,7 @@ import { createClient } from "npm:@supabase/supabase-js@2.44.0";
 import { Variables } from "../_shared/types.ts";
 import { getProxyOrigin } from "../../api/_shared/proxy.ts";
 import { authErrorHandlers, decodeJWT } from "../_shared/auth.ts";
+import { generate2FAChallengeToken } from "../_shared/totp.ts";
 import { z } from "zod";
 
 export const authRouter = new Hono<{ Variables: Variables }>();
@@ -140,6 +141,16 @@ authRouter.post("/login", async (c) => {
 
     const { data: profile } = await adminSupabase.from("profiles").select("*")
       .eq("id", authData.user.id).maybeSingle();
+
+    if (profile?.is_2fa_enabled === true) {
+      const tempToken = await generate2FAChallengeToken(authData.user.id);
+      return c.json({
+        requires2FA: true,
+        userId: authData.user.id,
+        email: authData.user.email,
+        tempToken,
+      }, 200);
+    }
 
     // Build user payload for client
     const userPayload = {
