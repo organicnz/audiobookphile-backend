@@ -196,66 +196,17 @@ authRouter.post("/login", async (c) => {
 });
 
 /**
- * Signup - Register new user
+ * Signup - DISABLED (invitation-only)
+ *
+ * Public self-registration is disabled. New users can only be created
+ * by admins via POST /api/auth/invite.
  */
 authRouter.post("/signup", async (c) => {
-  try {
-    const supabase = c.get("supabase");
-    const supabaseUrl = c.get("supabaseUrl");
-    const serviceRoleKey = c.get("serviceRoleKey");
-    const body = await c.req.json();
-
-    const signupData = SignupBodySchema.parse(body);
-    const { email: signupEmail, password: signupPassword } = signupData;
-
-    const { data: authData, error: authError } = await supabase.auth.signUp({
-      email: signupEmail,
-      password: signupPassword,
-    });
-
-    if (authError) {
-      return c.json({
-        error: authErrorHandlers.VALIDATION_ERROR().message,
-        code: authErrorHandlers.VALIDATION_ERROR().code,
-      }, authErrorHandlers.VALIDATION_ERROR().statusCode);
-    }
-
-    if (signupData.username && authData.user) {
-      const adminSupabase = createClient(supabaseUrl, serviceRoleKey);
-      // Check if profile already exists
-      const { data: existingProfile } = await adminSupabase.from("profiles")
-        .select("id").eq("username", signupData.username).maybeSingle();
-
-      if (existingProfile) {
-        return c.json({
-          error: "Username already taken",
-          code: "USERNAME_TAKEN",
-        }, 409);
-      }
-
-      await adminSupabase.from("profiles").insert({
-        id: authData.user.id,
-        username: signupData.username,
-        user_type: "user",
-      });
-    }
-
-    return c.json({ success: true, user: authData.user }, 200);
-  } catch (err) {
-    if (err instanceof z.ZodError) {
-      return c.json({
-        error: authErrorHandlers.VALIDATION_ERROR().message,
-        code: authErrorHandlers.VALIDATION_ERROR().code,
-      }, authErrorHandlers.VALIDATION_ERROR().statusCode);
-    }
-    if (err instanceof Error && err.message === "Validation error") {
-      return c.json({
-        error: authErrorHandlers.VALIDATION_ERROR().message,
-        code: authErrorHandlers.VALIDATION_ERROR().code,
-      }, authErrorHandlers.VALIDATION_ERROR().statusCode);
-    }
-    throw err;
-  }
+  return c.json({
+    error:
+      "Public registration is disabled. Please contact an administrator for an invitation.",
+    code: "SIGNUP_DISABLED",
+  }, 403);
 });
 
 /**
@@ -486,6 +437,7 @@ authRouter.post("/magic-link", async (c) => {
     const { error } = await supabase.auth.signInWithOtp({
       email,
       options: {
+        shouldCreateUser: false,
         emailRedirectTo: redirectTo || `${siteUrl}/auth/callback?next=/library`,
       },
     });

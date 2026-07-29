@@ -92,48 +92,51 @@ app.use(async (c, next) => {
   }
 });
 
-// 4. Error Handling Middleware
+// 4. Error Handling (Middleware & onError)
+const handleApiError = (err: unknown, c: any) => {
+  const apiErr = err as ApiError;
+  if (apiErr?.statusCode) {
+    return c.json(
+      {
+        error: {
+          code: apiErr.code,
+          message: apiErr.message,
+          ...(apiErr.field ? { field: apiErr.field } : {}),
+          ...(apiErr.validationErrors
+            ? { validationErrors: apiErr.validationErrors }
+            : {}),
+        },
+        requestId: c.get("requestId"),
+        timestamp: new Date().toISOString(),
+      },
+      apiErr.statusCode,
+    );
+  } else if (err instanceof Response && err.status >= 500) {
+    return err;
+  } else {
+    const errorId = crypto.randomUUID();
+    console.error(
+      `[API Index] Unhandled error [${errorId}] - Request: ${c.req.method} ${c.req.path} - Error: ${
+        (err as Error).message
+      } (${(err as Error).constructor.name})`,
+    );
+    if (Deno.env.get("NODE_ENV") === "production") {
+      Sentry.captureException(err);
+    }
+    return c.json({ error: "Internal Server Error" }, 500);
+  }
+};
+
 app.use(async (c, next) => {
   try {
     await next();
   } catch (err) {
-    // Distinguish between ApiError (API errors) and generic errors (server errors)
-    const apiErr = err as ApiError;
-    if (apiErr?.statusCode) {
-      // API error - return proper JSON response
-      c.res = c.json(
-        {
-          error: {
-            code: apiErr.code,
-            message: apiErr.message,
-            ...(apiErr.field ? { field: apiErr.field } : {}),
-            ...(apiErr.validationErrors
-              ? { validationErrors: apiErr.validationErrors }
-              : {}),
-          },
-          requestId: c.get("requestId"),
-          timestamp: new Date().toISOString(),
-        },
-        apiErr.statusCode,
-      );
-    } else if (err instanceof Response && err.status >= 500) {
-      // Already a Response (from error handler)
-      return err;
-    } else {
-      // Generic error - log and return 500
-      const errorId = crypto.randomUUID();
-      console.error(
-        `[API Index] Unhandled error [${errorId}] - Request: ${c.req.method} ${c.req.path} - Error: ${
-          (err as Error).message
-        } (${(err as Error).constructor.name})`,
-      );
-      // Optionally report to Sentry in production
-      if (Deno.env.get("NODE_ENV") === "production") {
-        Sentry.captureException(err);
-      }
-      return c.json({ error: "Internal Server Error" }, 500);
-    }
+    return handleApiError(err, c);
   }
+});
+
+app.onError((err, c) => {
+  return handleApiError(err, c);
 });
 
 // 5. Service Role Middleware (injects supabaseUrl + serviceRoleKey into context — must run before auth)
@@ -167,5 +170,8 @@ app.route("/api/me", meRouter);
 app.all("*", (c) => {
   return c.json({ error: "Endpoint not found or method not supported" }, 404);
 });
+
+export { app };
+export default app;
 
 Deno.serve(app.fetch);

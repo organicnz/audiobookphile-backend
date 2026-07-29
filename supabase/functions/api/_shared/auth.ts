@@ -35,8 +35,6 @@ export const authErrorHandlers = {
 const publicAuthRoutes = new Set([
   "/api/auth/login",
   "/api/login",
-  "/api/auth/signup",
-  "/api/signup",
   "/api/auth/refresh",
   "/api/refresh",
   "/api/auth/callback",
@@ -57,6 +55,8 @@ const publicAuthRoutes = new Set([
   "/api/verify-token",
   "/api/auth/magic-link",
   "/api/magic-link",
+  "/api/auth/signup",
+  "/api/signup",
   "/api/health", // Health check should be public
 ]);
 
