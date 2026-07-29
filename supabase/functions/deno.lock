@@ -7,9 +7,11 @@
     "npm:@aws-sdk/s3-request-presigner@3.1085.0": "3.1085.0",
     "npm:@aws-sdk/s3-request-presigner@^3.693.0": "3.1085.0",
     "npm:@sentry/deno@8.32.0": "8.32.0",
+    "npm:@supabase/supabase-js@2": "2.44.0",
     "npm:@supabase/supabase-js@2.44.0": "2.44.0",
     "npm:hono@4.4.0": "4.4.0",
     "npm:music-metadata@10.2.0": "10.2.0",
+    "npm:music-metadata@10.8.0": "10.8.0",
     "npm:openai@^4.52.5": "4.104.0_zod@3.23.8",
     "npm:zod@3.23.8": "3.23.8"
   },
@@ -552,6 +554,10 @@
     "is-stream@4.0.1": {
       "integrity": "sha512-Dnz92NInDqYckGEUJv689RbRiTSEHCQ7wOVeALbkOz999YpqT46yMRIGtSNl2iCL1waAZSx40+h59NV/EwzV/A=="
     },
+    "link@2.1.2": {
+      "integrity": "sha512-n+OitQgtITNBGiWmEMgMiXo/fkf3yeyLm2nXm87vO4DDpaYrx57AZs/PMDk25qJIv+l586V226B2mA1H/n9zvg==",
+      "bin": true
+    },
     "math-intrinsics@1.1.0": {
       "integrity": "sha512-/IXtbwEk5HTPyEwyKX6hGkYXxM9nbj64B+ilVJnC/R6B0pH5G4V3b0pVbL7DBj4tkhBAppbQUlf6F6Xl9LHu1g=="
     },
@@ -579,6 +585,20 @@
         "file-type",
         "media-typer",
         "strtok3@8.1.0",
+        "token-types",
+        "uint8array-extras"
+      ]
+    },
+    "music-metadata@10.8.0": {
+      "integrity": "sha512-4vPQ7gBX1ZEQItTqZjXUNWap0lsoyJ1gsUS13bmCRQ0/dwOaSJqDtW6jFWf9bwbEYoGdsc1Q9R+xw4jEfVMkiw==",
+      "dependencies": [
+        "@tokenizer/token",
+        "content-type",
+        "debug",
+        "file-type",
+        "link",
+        "media-typer",
+        "strtok3@10.1.1",
         "token-types",
         "uint8array-extras"
       ]
@@ -613,18 +633,28 @@
     "peek-readable@5.4.2": {
       "integrity": "sha512-peBp3qZyuS6cNIJ2akRNG1uo1WJ1d0wTxg/fxMdZ0BqCVhx242bSFHM9eNqflfJVS9SsgkzgT/1UgnsurBOTMg=="
     },
+    "peek-readable@6.1.1": {
+      "integrity": "sha512-7QmvgRKhxM0E2PGV4ocfROItVode+ELI27n4q+lpufZ+tRKBu/pBP8WOmw9HXn2ui/AUizqtvaVQhcJrOkRqYg=="
+    },
+    "strtok3@10.1.1": {
+      "integrity": "sha512-1cG9J+Y6UtQi+zNkQQA+zeGm4EFgBBgEj17ztlHg7YgfxWWlCowukkvhnfEEJrfTfwVhzX/kwEo4fOL3ayxwPQ==",
+      "dependencies": [
+        "@tokenizer/token",
+        "peek-readable@6.1.1"
+      ]
+    },
     "strtok3@8.1.0": {
       "integrity": "sha512-ExzDvHYPj6F6QkSNe/JxSlBxTh3OrI6wrAIz53ulxo1c4hBJ1bT9C/JrAthEKHWG9riVH3Xzg7B03Oxty6S2Lw==",
       "dependencies": [
         "@tokenizer/token",
-        "peek-readable"
+        "peek-readable@5.4.2"
       ]
     },
     "strtok3@9.1.1": {
       "integrity": "sha512-FhwotcEqjr241ZbjFzjlIYg6c5/L/s4yBGWSMvJ9UoExiSqL+FnFA/CaeZx17WGaZMS/4SOZp8wH18jSS4R4lw==",
       "dependencies": [
         "@tokenizer/token",
-        "peek-readable"
+        "peek-readable@5.4.2"
       ]
     },
     "token-types@6.1.2": {

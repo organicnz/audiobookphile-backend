@@ -67,4 +67,3 @@ export const serviceRoleMiddleware = async (
   c.set("supabase", supabase);
   await next();
 };
-
