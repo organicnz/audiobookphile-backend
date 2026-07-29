@@ -2,7 +2,7 @@ import { SupabaseClient } from "npm:@supabase/supabase-js@2.44.0";
 import { Database } from "../../../src/types/supabase.ts";
 
 export async function upsertMediaProgress(
-  supabase: SupabaseClient<Database>,
+  supabase: any,
   userId: string,
   libraryItemId: string,
   episodeId: string | null,

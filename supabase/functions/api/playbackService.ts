@@ -63,8 +63,7 @@ export class PlaybackService {
       ? ((item as Record<string, unknown>)?.books as unknown[])[0]
       : (item as Record<string, unknown>)?.books;
 
-    let rawAudioFiles =
-      (item as Record<string, unknown>)?.audio_files ||
+    let rawAudioFiles = (item as Record<string, unknown>)?.audio_files ||
       (bookObj as Record<string, unknown>)?.audio_files ||
       [];
     if (typeof rawAudioFiles === "string") {
@@ -74,15 +73,15 @@ export class PlaybackService {
         rawAudioFiles = [];
       }
     }
-    let audioFilesList = (Array.isArray(rawAudioFiles) ? rawAudioFiles : []) as Record<
-      string,
-      unknown
-    >[];
+    let audioFilesList =
+      (Array.isArray(rawAudioFiles) ? rawAudioFiles : []) as Record<
+        string,
+        unknown
+      >[];
 
     // Fallback: If audio_files is empty, extract audio files from library_files
     if (!audioFilesList.length) {
-      let rawLibraryFiles =
-        (item as Record<string, unknown>)?.library_files ||
+      let rawLibraryFiles = (item as Record<string, unknown>)?.library_files ||
         (bookObj as Record<string, unknown>)?.library_files ||
         [];
       if (typeof rawLibraryFiles === "string") {
@@ -92,10 +91,11 @@ export class PlaybackService {
           rawLibraryFiles = [];
         }
       }
-      const libraryFiles = (Array.isArray(rawLibraryFiles) ? rawLibraryFiles : []) as Record<
-        string,
-        unknown
-      >[];
+      const libraryFiles =
+        (Array.isArray(rawLibraryFiles) ? rawLibraryFiles : []) as Record<
+          string,
+          unknown
+        >[];
       const audioExts = [
         ".mp3",
         ".m4b",
@@ -129,10 +129,12 @@ export class PlaybackService {
               metadata.filename || metadata.relPath || `Track ${idx + 1}`,
             ),
             path: String(
-              lf.path || metadata.path || metadata.relPath || metadata.filename || "",
+              lf.path || metadata.path || metadata.relPath ||
+                metadata.filename || "",
             ),
             storage_path: String(
-              lf.storage_path || lf.path || metadata.path || metadata.relPath || metadata.filename || "",
+              lf.storage_path || lf.path || metadata.path || metadata.relPath ||
+                metadata.filename || "",
             ),
           };
         });

@@ -91,8 +91,12 @@ export class StorageRouter {
       return await getSignedUrl(getB2SecondaryClient(), command, { expiresIn });
     }
 
-    if (path.startsWith("b2://") || path.startsWith("b2-primary://") || path.startsWith("s3://") || !path.includes("://")) {
-      const actualPath = path.replace("b2://", "").replace("b2-primary://", "").replace("s3://", "");
+    if (
+      path.startsWith("b2://") || path.startsWith("b2-primary://") ||
+      path.startsWith("s3://") || !path.includes("://")
+    ) {
+      const actualPath = path.replace("b2://", "").replace("b2-primary://", "")
+        .replace("s3://", "");
       const command = new GetObjectCommand({
         Bucket: Deno.env.get("B2_BUCKET_NAME")!,
         Key: actualPath,
@@ -215,8 +219,12 @@ export class StorageRouter {
       }
     }
 
-    if (path.startsWith("b2://") || path.startsWith("b2-primary://") || path.startsWith("s3://") || !path.includes("://")) {
-      const actualPath = path.replace("b2://", "").replace("b2-primary://", "").replace("s3://", "");
+    if (
+      path.startsWith("b2://") || path.startsWith("b2-primary://") ||
+      path.startsWith("s3://") || !path.includes("://")
+    ) {
+      const actualPath = path.replace("b2://", "").replace("b2-primary://", "")
+        .replace("s3://", "");
       try {
         await getB2PrimaryClient().send(
           new HeadObjectCommand({
