@@ -20,7 +20,7 @@ Deno.serve(async (req) => {
       console.warn("[sync-durations] Could not load music-metadata");
     }
 
-    // Auth check
+    // Auth check: allow cron secret or service role key
     const authHeader = req.headers.get("Authorization");
     if (!authHeader) {
       return new Response(JSON.stringify({ error: "Unauthorized" }), {
@@ -28,26 +28,39 @@ Deno.serve(async (req) => {
         headers: corsHeaders,
       });
     }
-    const {
-      data: { user },
-      error: userError,
-    } = await createClient(supabaseUrl, Deno.env.get("SUPABASE_ANON_KEY") ?? "")
-      .auth.getUser(authHeader.replace("Bearer ", ""));
-    if (userError || !user) {
-      return new Response(JSON.stringify({ error: "Unauthorized" }), {
-        status: 401,
-        headers: corsHeaders,
-      });
-    }
-    const { data: profile } = await db.from("profiles").select("user_type").eq(
-      "id",
-      user.id,
-    ).single();
-    if (!profile || !["admin", "root"].includes(profile.user_type ?? "")) {
-      return new Response(JSON.stringify({ error: "Forbidden" }), {
-        status: 403,
-        headers: corsHeaders,
-      });
+    const cronSecret = Deno.env.get("CRON_SECRET");
+    const isCronOrServiceRole =
+      (typeof cronSecret === "string" && cronSecret.length > 0 &&
+        authHeader === `Bearer ${cronSecret}`) ||
+      (typeof serviceRoleKey === "string" && serviceRoleKey.length > 0 &&
+        authHeader === `Bearer ${serviceRoleKey}`);
+
+    if (!isCronOrServiceRole) {
+      const {
+        data: { user },
+        error: userError,
+      } = await createClient(
+        supabaseUrl,
+        Deno.env.get("SUPABASE_ANON_KEY") ?? "",
+      )
+        .auth.getUser(authHeader.replace("Bearer ", ""));
+      if (userError || !user) {
+        return new Response(JSON.stringify({ error: "Unauthorized" }), {
+          status: 401,
+          headers: corsHeaders,
+        });
+      }
+      const { data: profile } = await db.from("profiles").select("user_type")
+        .eq(
+          "id",
+          user.id,
+        ).single();
+      if (!profile || !["admin", "root"].includes(profile.user_type ?? "")) {
+        return new Response(JSON.stringify({ error: "Forbidden" }), {
+          status: 403,
+          headers: corsHeaders,
+        });
+      }
     }
 
     const url = new URL(req.url);

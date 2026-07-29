@@ -13,13 +13,15 @@ Deno.serve(async (req) => {
   const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
   const adminClient = createClient(supabaseUrl, serviceRoleKey);
 
-  // Auth: check for cron secret OR admin user
+  // Auth: check for cron secret, service role key, OR admin user
   const authHeader = req.headers.get("Authorization");
   let isAdmin = false;
   const cronSecret = Deno.env.get("CRON_SECRET");
   if (
-    typeof cronSecret === "string" && cronSecret.length > 0 &&
-    authHeader === `Bearer ${cronSecret}`
+    (typeof cronSecret === "string" && cronSecret.length > 0 &&
+      authHeader === `Bearer ${cronSecret}`) ||
+    (typeof serviceRoleKey === "string" && serviceRoleKey.length > 0 &&
+      authHeader === `Bearer ${serviceRoleKey}`)
   ) {
     isAdmin = true;
   } else if (authHeader) {

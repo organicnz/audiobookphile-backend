@@ -27,10 +27,13 @@ Deno.serve(async (req) => {
       },
     });
 
-    // Verify user is an admin or the request comes from a cron job with CRON_SECRET
+    // Verify user is an admin or the request comes from a cron job with CRON_SECRET or SERVICE_ROLE_KEY
     const cronSecret = Deno.env.get("CRON_SECRET");
-    const isCron = typeof cronSecret === "string" && cronSecret.length > 0 &&
-      authHeader === `Bearer ${cronSecret}`;
+    const isCron = (typeof cronSecret === "string" && cronSecret.length > 0 &&
+      authHeader === `Bearer ${cronSecret}`) ||
+      (typeof supabaseServiceKey === "string" &&
+        supabaseServiceKey.length > 0 &&
+        authHeader === `Bearer ${supabaseServiceKey}`);
 
     if (!isCron) {
       // Check if user is admin
