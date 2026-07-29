@@ -13,7 +13,7 @@ debugRouter.get("/:id", async (c) => {
 
   const itemId = c.req.param("id");
   const { data: item } = await _adminClient.from("library_items").select(
-    "*, books(*)",
+    "*",
   ).eq("id", itemId).single();
   return c.json(item);
 });

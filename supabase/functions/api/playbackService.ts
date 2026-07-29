@@ -23,19 +23,6 @@ export class PlaybackService {
       .select(
         `
         *,
-        books (
-          *,
-          book_authors (
-            authors (
-              *
-            )
-          ),
-          book_series (
-            series (
-              *
-            )
-          )
-        ),
         book_authors (
           authors (
             *

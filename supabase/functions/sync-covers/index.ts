@@ -55,7 +55,9 @@ Deno.serve(async (req) => {
 
       const { data: items, error: itemsError } = await adminClient
         .from("library_items")
-        .select("id, cover_path, books(cover_path, title, author_names)")
+        .select(
+          "id, cover_path, title, author_names_first_last, author_names_last_first",
+        )
         .or("cover_path.is.null,cover_path.like./%")
         .limit(limit);
 
@@ -73,22 +75,9 @@ Deno.serve(async (req) => {
 
         for (const item of items) {
           let legacyPath = item.cover_path;
-          let title = "";
-          let author = "";
-
-          if (item.books) {
-            const book = Array.isArray(item.books) ? item.books[0] : item.books;
-            if (book) {
-              if (!legacyPath) legacyPath = book.cover_path;
-              title = book.title;
-              if (
-                book.author_names && Array.isArray(book.author_names) &&
-                book.author_names.length > 0
-              ) {
-                author = book.author_names[0];
-              }
-            }
-          }
+          let title = item.title || "";
+          let author = item.author_names_first_last ||
+            item.author_names_last_first || "";
 
           if (legacyPath && !legacyPath.startsWith("/")) continue;
 

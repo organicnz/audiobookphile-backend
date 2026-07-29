@@ -29,7 +29,7 @@ Deno.serve(async (req) => {
 
     const { data: item, error: itemError } = await supabase.from(
       "library_items",
-    ).select("*, books(audio_files, chapters)").eq("id", itemId).single();
+    ).select("*").eq("id", itemId).single();
 
     if (itemError || !item) {
       return new Response(JSON.stringify({ error: "Library item not found" }), {
