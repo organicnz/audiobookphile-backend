@@ -20,6 +20,7 @@ import { downloadsRouter } from "./routes/downloads.ts";
 import { bookmarksRouter } from "./routes/bookmarks.ts";
 import { searchRouter } from "./routes/search.ts";
 import { meRouter } from "./routes/me.ts";
+import { adminRouter } from "./routes/admin.ts";
 
 import { Variables } from "./_shared/types.ts";
 import { ApiError, serviceRoleMiddleware } from "./_shared/errors.ts";
@@ -165,6 +166,9 @@ app.route("/api/items", downloadsRouter);
 app.route("/api/me/bookmarks", bookmarksRouter);
 app.route("/api/me/search", searchRouter);
 app.route("/api/me", meRouter);
+app.route("/api/admin-analytics", adminRouter);
+app.route("/admin-analytics", adminRouter);
+app.route("/api/admin/analytics", adminRouter);
 
 // Fallback 404
 app.all("*", (c) => {
