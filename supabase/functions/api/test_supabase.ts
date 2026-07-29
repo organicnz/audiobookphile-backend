@@ -1,4 +1,4 @@
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "npm:@supabase/supabase-js@2.44.0";
 
 // Using the local environment variables or standard defaults
 const supabaseUrl = Deno.env.get("SUPABASE_URL") || "http://127.0.0.1:54321";
