@@ -75,7 +75,7 @@ export function generateTotpSecret(byteLength = 20): string {
 export function generateTotpUri(
   secret: string,
   accountName: string,
-  issuer = "Audiobookphile"
+  issuer = "Audiobookphile",
 ): string {
   const encodedIssuer = encodeURIComponent(issuer);
   const encodedAccount = encodeURIComponent(accountName);
@@ -89,7 +89,7 @@ export async function generateTotpCode(
   secret: string,
   timestampMs = Date.now(),
   timeStepSec = 30,
-  digits = 6
+  digits = 6,
 ): Promise<string> {
   const secretBytes = base32Decode(secret);
   const counter = Math.floor(timestampMs / 1000 / timeStepSec);
@@ -108,7 +108,7 @@ export async function generateTotpCode(
     new Uint8Array(secretBytes).buffer as ArrayBuffer,
     { name: "HMAC", hash: "SHA-1" },
     false,
-    ["sign"]
+    ["sign"],
   );
 
   const signature = await crypto.subtle.sign("HMAC", cryptoKey, counterBytes);
@@ -116,8 +116,7 @@ export async function generateTotpCode(
 
   // Dynamic truncation (RFC 4226 Section 5.4)
   const offset = hmac[hmac.length - 1] & 0x0f;
-  const binary =
-    ((hmac[offset] & 0x7f) << 24) |
+  const binary = ((hmac[offset] & 0x7f) << 24) |
     ((hmac[offset + 1] & 0xff) << 16) |
     ((hmac[offset + 2] & 0xff) << 8) |
     (hmac[offset + 3] & 0xff);
@@ -134,7 +133,7 @@ export async function verifyTotpCode(
   secret: string,
   inputCode: string,
   window = 1,
-  timestampMs = Date.now()
+  timestampMs = Date.now(),
 ): Promise<boolean> {
   if (!secret || !inputCode || inputCode.trim().length !== 6) {
     return false;
@@ -168,7 +167,8 @@ function bufferToHex(buffer: Uint8Array): string {
  */
 export async function generate2FAChallengeToken(
   userId: string,
-  secretKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "audiobookphile-2fa-secret"
+  secretKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ||
+    "audiobookphile-2fa-secret",
 ): Promise<string> {
   const timestamp = Date.now();
   const payload = `${userId}.${timestamp}`;
@@ -179,10 +179,14 @@ export async function generate2FAChallengeToken(
     encoder.encode(secretKey).buffer as ArrayBuffer,
     { name: "HMAC", hash: "SHA-256" },
     false,
-    ["sign"]
+    ["sign"],
   );
 
-  const signature = await crypto.subtle.sign("HMAC", key, encoder.encode(payload));
+  const signature = await crypto.subtle.sign(
+    "HMAC",
+    key,
+    encoder.encode(payload),
+  );
   const hex = bufferToHex(new Uint8Array(signature));
 
   return `${payload}.${hex}`;
@@ -194,8 +198,9 @@ export async function generate2FAChallengeToken(
 export async function verify2FAChallengeToken(
   token: string,
   expectedUserId: string,
-  secretKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "audiobookphile-2fa-secret",
-  maxAgeMs = 10 * 60 * 1000 // 10 minutes
+  secretKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ||
+    "audiobookphile-2fa-secret",
+  maxAgeMs = 10 * 60 * 1000, // 10 minutes
 ): Promise<boolean> {
   if (!token || !token.includes(".")) return false;
 
@@ -217,10 +222,14 @@ export async function verify2FAChallengeToken(
     encoder.encode(secretKey).buffer as ArrayBuffer,
     { name: "HMAC", hash: "SHA-256" },
     false,
-    ["sign"]
+    ["sign"],
   );
 
-  const signature = await crypto.subtle.sign("HMAC", key, encoder.encode(payload));
+  const signature = await crypto.subtle.sign(
+    "HMAC",
+    key,
+    encoder.encode(payload),
+  );
   const expectedHex = bufferToHex(new Uint8Array(signature));
 
   return providedHex === expectedHex;
@@ -240,8 +249,10 @@ export async function hashPinCode(pin: string): Promise<string> {
 /**
  * Verifies a PIN code against its stored SHA-256 hash.
  */
-export async function verifyPinCode(pin: string, hash: string): Promise<boolean> {
+export async function verifyPinCode(
+  pin: string,
+  hash: string,
+): Promise<boolean> {
   const computedHash = await hashPinCode(pin);
   return computedHash === hash;
 }
-

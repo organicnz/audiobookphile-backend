@@ -5,10 +5,10 @@ import { Variables } from "../_shared/types.ts";
 import {
   generateTotpSecret,
   generateTotpUri,
-  verifyTotpCode,
-  verify2FAChallengeToken,
   hashPinCode,
+  verify2FAChallengeToken,
   verifyPinCode,
+  verifyTotpCode,
 } from "../_shared/totp.ts";
 
 export const twoFactorRouter = new Hono<{ Variables: Variables }>();
@@ -18,7 +18,10 @@ const VerifyCodeSchema = z.object({
 });
 
 const EnrollPinSchema = z.object({
-  pinCode: z.string().min(4, "PIN must be at least 4 digits").max(8, "PIN must be at most 8 digits"),
+  pinCode: z.string().min(4, "PIN must be at least 4 digits").max(
+    8,
+    "PIN must be at most 8 digits",
+  ),
 });
 
 const EnrollBiometricSchema = z.object({
@@ -54,7 +57,9 @@ twoFactorRouter.get("/status", async (c) => {
   try {
     const { data: profile, error } = await adminSupabase
       .from("profiles")
-      .select("is_2fa_enabled, totp_secret, pin_code_hash, biometric_enrolled, two_factor_methods")
+      .select(
+        "is_2fa_enabled, totp_secret, pin_code_hash, biometric_enrolled, two_factor_methods",
+      )
       .eq("id", user.id)
       .maybeSingle();
 
@@ -67,11 +72,15 @@ twoFactorRouter.get("/status", async (c) => {
       totpEnrolled: Boolean(profile?.totp_secret),
       pinEnrolled: Boolean(profile?.pin_code_hash),
       biometricEnrolled: profile?.biometric_enrolled === true,
-      methods: profile?.two_factor_methods || (profile?.totp_secret ? ["totp"] : []),
+      methods: profile?.two_factor_methods ||
+        (profile?.totp_secret ? ["totp"] : []),
     }, 200);
   } catch (err: any) {
     console.error("[2fa] Failed to get status:", err);
-    return c.json({ error: "Failed to get two-factor authentication status" }, 500);
+    return c.json(
+      { error: "Failed to get two-factor authentication status" },
+      500,
+    );
   }
 });
 
@@ -108,7 +117,10 @@ twoFactorRouter.post("/enroll", async (c) => {
     return c.json({ secret, uri }, 200);
   } catch (err: any) {
     console.error("[2fa] Failed to enroll in 2FA:", err);
-    return c.json({ error: "Failed to initialize two-factor authentication" }, 500);
+    return c.json(
+      { error: "Failed to initialize two-factor authentication" },
+      500,
+    );
   }
 });
 
@@ -141,7 +153,9 @@ twoFactorRouter.post("/enroll-pin", async (c) => {
       return c.json({ error: "Profile not found" }, 404);
     }
 
-    const currentMethods = Array.isArray(profile.two_factor_methods) ? profile.two_factor_methods : [];
+    const currentMethods = Array.isArray(profile.two_factor_methods)
+      ? profile.two_factor_methods
+      : [];
     const updatedMethods = Array.from(new Set([...currentMethods, "pin"]));
 
     const { error } = await adminSupabase
@@ -160,10 +174,15 @@ twoFactorRouter.post("/enroll-pin", async (c) => {
     return c.json({ success: true, enrolled: "pin" }, 200);
   } catch (err: any) {
     if (err instanceof z.ZodError) {
-      return c.json({ error: err.errors[0]?.message || "Validation error" }, 400);
+      return c.json(
+        { error: err.errors[0]?.message || "Validation error" },
+        400,
+      );
     }
     console.error("[2fa] Failed to enroll in PIN 2FA:", err);
-    return c.json({ error: "Failed to enroll in PIN code two-factor authentication" }, 500);
+    return c.json({
+      error: "Failed to enroll in PIN code two-factor authentication",
+    }, 500);
   }
 });
 
@@ -194,8 +213,12 @@ twoFactorRouter.post("/enroll-biometric", async (c) => {
       return c.json({ error: "Profile not found" }, 404);
     }
 
-    const currentMethods = Array.isArray(profile.two_factor_methods) ? profile.two_factor_methods : [];
-    const updatedMethods = Array.from(new Set([...currentMethods, "biometric"]));
+    const currentMethods = Array.isArray(profile.two_factor_methods)
+      ? profile.two_factor_methods
+      : [];
+    const updatedMethods = Array.from(
+      new Set([...currentMethods, "biometric"]),
+    );
 
     const { error } = await adminSupabase
       .from("profiles")
@@ -214,10 +237,15 @@ twoFactorRouter.post("/enroll-biometric", async (c) => {
     return c.json({ success: true, enrolled: "biometric" }, 200);
   } catch (err: any) {
     if (err instanceof z.ZodError) {
-      return c.json({ error: err.errors[0]?.message || "Validation error" }, 400);
+      return c.json(
+        { error: err.errors[0]?.message || "Validation error" },
+        400,
+      );
     }
     console.error("[2fa] Failed to enroll in Biometric 2FA:", err);
-    return c.json({ error: "Failed to enroll in Facial 2FA / Biometric authentication" }, 500);
+    return c.json({
+      error: "Failed to enroll in Facial 2FA / Biometric authentication",
+    }, 500);
   }
 });
 
@@ -245,15 +273,22 @@ twoFactorRouter.post("/verify", async (c) => {
       .maybeSingle();
 
     if (fetchError || !profile || !profile.totp_secret) {
-      return c.json({ error: "Please enroll in two-factor authentication first" }, 400);
+      return c.json({
+        error: "Please enroll in two-factor authentication first",
+      }, 400);
     }
 
     const isValid = await verifyTotpCode(profile.totp_secret, code);
     if (!isValid) {
-      return c.json({ error: "Invalid verification code. Please check your authenticator app." }, 400);
+      return c.json({
+        error:
+          "Invalid verification code. Please check your authenticator app.",
+      }, 400);
     }
 
-    const currentMethods = Array.isArray(profile.two_factor_methods) ? profile.two_factor_methods : [];
+    const currentMethods = Array.isArray(profile.two_factor_methods)
+      ? profile.two_factor_methods
+      : [];
     const updatedMethods = Array.from(new Set([...currentMethods, "totp"]));
 
     const { error: updateError } = await adminSupabase
@@ -271,7 +306,10 @@ twoFactorRouter.post("/verify", async (c) => {
     return c.json({ success: true, enabled: true }, 200);
   } catch (err: any) {
     if (err instanceof z.ZodError) {
-      return c.json({ error: err.errors[0]?.message || "Validation error" }, 400);
+      return c.json(
+        { error: err.errors[0]?.message || "Validation error" },
+        400,
+      );
     }
     console.error("[2fa] Failed to verify 2FA:", err);
     return c.json({ error: "Failed to verify two-factor authentication" }, 500);
@@ -328,8 +366,11 @@ twoFactorRouter.post("/disable", async (c) => {
 
     if (!authorized) {
       return c.json(
-        { error: "Valid 6-digit authenticator code or account password is required to disable 2FA" },
-        400
+        {
+          error:
+            "Valid 6-digit authenticator code or account password is required to disable 2FA",
+        },
+        400,
       );
     }
 
@@ -351,10 +392,16 @@ twoFactorRouter.post("/disable", async (c) => {
     return c.json({ success: true, enabled: false }, 200);
   } catch (err: any) {
     if (err instanceof z.ZodError) {
-      return c.json({ error: err.errors[0]?.message || "Validation error" }, 400);
+      return c.json(
+        { error: err.errors[0]?.message || "Validation error" },
+        400,
+      );
     }
     console.error("[2fa] Failed to disable 2FA:", err);
-    return c.json({ error: "Failed to disable two-factor authentication" }, 500);
+    return c.json(
+      { error: "Failed to disable two-factor authentication" },
+      500,
+    );
   }
 });
 
@@ -373,7 +420,10 @@ twoFactorRouter.post("/verify-login", async (c) => {
 
     const isTokenValid = await verify2FAChallengeToken(tempToken, userId);
     if (!isTokenValid) {
-      return c.json({ error: "Login challenge expired. Please log in again." }, 401);
+      return c.json(
+        { error: "Login challenge expired. Please log in again." },
+        401,
+      );
     }
 
     const { data: profile, error: profileError } = await adminSupabase
@@ -387,18 +437,28 @@ twoFactorRouter.post("/verify-login", async (c) => {
     }
 
     if (!profile.is_2fa_enabled) {
-      return c.json({ error: "Two-factor authentication is not enabled for this account" }, 400);
+      return c.json({
+        error: "Two-factor authentication is not enabled for this account",
+      }, 400);
     }
 
-    const effectiveMethod = method || (code === "biometric" ? "biometric" : (code && code.length !== 6 ? "pin" : "totp"));
+    const effectiveMethod = method ||
+      (code === "biometric"
+        ? "biometric"
+        : (code && code.length !== 6 ? "pin" : "totp"));
 
     if (effectiveMethod === "biometric") {
       if (profile.biometric_enrolled !== true) {
-        return c.json({ error: "Facial 2FA is not enrolled for this account" }, 400);
+        return c.json(
+          { error: "Facial 2FA is not enrolled for this account" },
+          400,
+        );
       }
     } else if (effectiveMethod === "pin") {
       if (!profile.pin_code_hash || !code) {
-        return c.json({ error: "PIN code 2FA is not enrolled or PIN code is missing" }, 400);
+        return c.json({
+          error: "PIN code 2FA is not enrolled or PIN code is missing",
+        }, 400);
       }
       const isValid = await verifyPinCode(code, profile.pin_code_hash);
       if (!isValid) {
@@ -406,36 +466,45 @@ twoFactorRouter.post("/verify-login", async (c) => {
       }
     } else {
       if (!profile.totp_secret || !code) {
-        return c.json({ error: "Authenticator app 2FA is not enrolled or code is missing" }, 400);
+        return c.json({
+          error: "Authenticator app 2FA is not enrolled or code is missing",
+        }, 400);
       }
       const isCodeValid = await verifyTotpCode(profile.totp_secret, code);
       if (!isCodeValid) {
-        return c.json({ error: "Invalid authentication code. Please check your authenticator app." }, 401);
+        return c.json({
+          error:
+            "Invalid authentication code. Please check your authenticator app.",
+        }, 401);
       }
     }
 
-    const { data: userData } = await adminSupabase.auth.admin.getUserById(userId);
+    const { data: userData } = await adminSupabase.auth.admin.getUserById(
+      userId,
+    );
     const userEmail = userData?.user?.email;
 
     if (!userEmail) {
       return c.json({ error: "User email not found" }, 500);
     }
 
-    const { data: linkData, error: linkError } = await adminSupabase.auth.admin.generateLink({
-      type: "magiclink",
-      email: userEmail,
-    });
+    const { data: linkData, error: linkError } = await adminSupabase.auth.admin
+      .generateLink({
+        type: "magiclink",
+        email: userEmail,
+      });
 
     if (linkError || !linkData?.properties?.hashed_token) {
       console.error("[2fa] Failed to generate login session link:", linkError);
       return c.json({ error: "Failed to establish user session" }, 500);
     }
 
-    const { data: verifyData, error: verifyError } = await supabase.auth.verifyOtp({
-      email: userEmail,
-      token: linkData.properties.hashed_token,
-      type: "magiclink",
-    });
+    const { data: verifyData, error: verifyError } = await supabase.auth
+      .verifyOtp({
+        email: userEmail,
+        token: linkData.properties.hashed_token,
+        type: "magiclink",
+      });
 
     if (verifyError || !verifyData.session || !verifyData.user) {
       console.error("[2fa] Failed to verify login OTP:", verifyError);
@@ -445,7 +514,8 @@ twoFactorRouter.post("/verify-login", async (c) => {
     const userPayload = {
       user: {
         id: verifyData.user.id,
-        username: profile?.username || verifyData.user.email?.split("@")[0] || "User",
+        username: profile?.username || verifyData.user.email?.split("@")[0] ||
+          "User",
         email: verifyData.user.email,
         type: profile?.user_type || "user",
         token: verifyData.session.access_token,
@@ -456,7 +526,8 @@ twoFactorRouter.post("/verify-login", async (c) => {
         isActive: true,
         isLocked: false,
         lastSeen: Date.now(),
-        createdAt: new Date(profile?.created_at || verifyData.user.created_at).getTime(),
+        createdAt: new Date(profile?.created_at || verifyData.user.created_at)
+          .getTime(),
         permissions: {
           download: true,
           update: profile?.user_type === "admin",
@@ -477,9 +548,14 @@ twoFactorRouter.post("/verify-login", async (c) => {
     return c.json(userPayload, 200);
   } catch (err: any) {
     if (err instanceof z.ZodError) {
-      return c.json({ error: err.errors[0]?.message || "Validation error" }, 400);
+      return c.json(
+        { error: err.errors[0]?.message || "Validation error" },
+        400,
+      );
     }
     console.error("[2fa] verify-login failed:", err);
-    return c.json({ error: "An unexpected error occurred during two-factor authentication" }, 500);
+    return c.json({
+      error: "An unexpected error occurred during two-factor authentication",
+    }, 500);
   }
 });

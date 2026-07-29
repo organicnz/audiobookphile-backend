@@ -1,25 +1,34 @@
-import { assertEquals, assert } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import {
+  assert,
+  assertEquals,
+} from "https://deno.land/std@0.224.0/assert/mod.ts";
+import {
+  generate2FAChallengeToken,
+  generateTotpCode,
   generateTotpSecret,
   generateTotpUri,
-  generateTotpCode,
-  verifyTotpCode,
-  generate2FAChallengeToken,
-  verify2FAChallengeToken,
   hashPinCode,
+  verify2FAChallengeToken,
   verifyPinCode,
+  verifyTotpCode,
 } from "./_shared/totp.ts";
 
 Deno.test("TOTP - generateTotpSecret produces base32 valid string", () => {
   const secret = generateTotpSecret(20);
   assert(secret.length > 0, "Secret should not be empty");
-  assert(/^[A-Z2-7]+$/.test(secret), "Secret should contain only Base32 characters");
+  assert(
+    /^[A-Z2-7]+$/.test(secret),
+    "Secret should contain only Base32 characters",
+  );
 });
 
 Deno.test("TOTP - generateTotpUri formats standard otpauth:// URI", () => {
   const secret = "JBSWY3DPEHPK3PXP";
   const uri = generateTotpUri(secret, "test@example.com", "Audiobookphile");
-  assert(uri.startsWith("otpauth://totp/Audiobookphile:test%40example.com"), "Should format account correctly");
+  assert(
+    uri.startsWith("otpauth://totp/Audiobookphile:test%40example.com"),
+    "Should format account correctly",
+  );
   assert(uri.includes("secret=JBSWY3DPEHPK3PXP"), "Should include secret");
   assert(uri.includes("period=30"), "Should include period=30");
 });
@@ -53,16 +62,35 @@ Deno.test("TOTP - verifyTotpCode allows +/- 1 time step window", async () => {
 Deno.test("TOTP - generate2FAChallengeToken and verify2FAChallengeToken validate challenge", async () => {
   const userId = "123e4567-e89b-12d3-a456-426614174000";
   const token = await generate2FAChallengeToken(userId, "test-secret");
-  assert(token.includes("."), "Challenge token should be formatted as userId.timestamp.hmac");
+  assert(
+    token.includes("."),
+    "Challenge token should be formatted as userId.timestamp.hmac",
+  );
 
   const valid = await verify2FAChallengeToken(token, userId, "test-secret");
   assertEquals(valid, true, "Should verify valid challenge token");
 
-  const wrongUser = await verify2FAChallengeToken(token, "other-user-id", "test-secret");
-  assertEquals(wrongUser, false, "Should reject challenge token for different user");
+  const wrongUser = await verify2FAChallengeToken(
+    token,
+    "other-user-id",
+    "test-secret",
+  );
+  assertEquals(
+    wrongUser,
+    false,
+    "Should reject challenge token for different user",
+  );
 
-  const wrongSecret = await verify2FAChallengeToken(token, userId, "wrong-secret");
-  assertEquals(wrongSecret, false, "Should reject challenge token signed with different secret");
+  const wrongSecret = await verify2FAChallengeToken(
+    token,
+    userId,
+    "wrong-secret",
+  );
+  assertEquals(
+    wrongSecret,
+    false,
+    "Should reject challenge token signed with different secret",
+  );
 });
 
 Deno.test("PIN Code - hashPinCode and verifyPinCode securely hash and verify PINs", async () => {
@@ -74,6 +102,9 @@ Deno.test("PIN Code - hashPinCode and verifyPinCode securely hash and verify PIN
   assertEquals(valid, true, "Should verify correct PIN against its hash");
 
   const invalid = await verifyPinCode("654321", hash);
-  assertEquals(invalid, false, "Should reject incorrect PIN against stored hash");
+  assertEquals(
+    invalid,
+    false,
+    "Should reject incorrect PIN against stored hash",
+  );
 });
-
