@@ -38,10 +38,11 @@ Deno.serve(async (req) => {
       });
     }
 
-    const book = Array.isArray(item.books)
-      ? item.books[0]
-      : (item.books as any);
-    let audioFiles = (book?.audio_files as any[]) || [];
+    let audioFiles =
+      (Array.isArray(item.audio_files) ? item.audio_files : []) as any[];
+    if (!audioFiles.length && Array.isArray(item.library_files)) {
+      audioFiles = item.library_files as any[];
+    }
 
     if (episodeId) {
       audioFiles = audioFiles.filter((f: any) => f.episodeId === episodeId);
@@ -92,7 +93,7 @@ Deno.serve(async (req) => {
       )
     ).filter(Boolean);
 
-    const chapters = (book?.chapters as any[]) || [];
+    const chapters = (item.chapters as any[]) || [];
 
     let progressQuery = supabase.from("media_progress").select(
       "current_time_pos",

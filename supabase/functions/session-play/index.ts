@@ -70,11 +70,11 @@ Deno.serve(async (req) => {
       });
     }
 
-    const book = Array.isArray(item.books)
-      ? (item.books as any[])[0]
-      : (item.books as any);
-    const audioFilesList: any[] = book?.audio_files ||
-      item.books?.audio_files || [];
+    let audioFilesList: any[] =
+      (Array.isArray(item.audio_files) ? item.audio_files : []) as any[];
+    if (!audioFilesList.length && Array.isArray(item.library_files)) {
+      audioFilesList = item.library_files as any[];
+    }
 
     if (!audioFilesList.length) {
       return new Response(
@@ -187,14 +187,14 @@ Deno.serve(async (req) => {
       : 0;
 
     // Get Authors
-    const authors = book?.book_authors?.map((ba: any) =>
+    const authors = item.book_authors?.map((ba: any) =>
       ba.authors
     ).filter(Boolean) || [];
     const authorNames = authors.map((a: any) => a.name);
     const authorName = authorNames.join(", ") || "Unknown Author";
 
     // Get Chapters
-    const chaptersList = book?.chapters || [];
+    const chaptersList = item.chapters || [];
     const chapters = chaptersList
       .map((ch: any, index: number) => ({
         id: ch.chapter_index !== undefined
@@ -210,7 +210,7 @@ Deno.serve(async (req) => {
       .sort((a: any, b: any) => a.id - b.id);
 
     const nowMs = Date.now();
-    const totalDuration = Number(book?.duration || item.duration) ||
+    const totalDuration = Number(item.duration) ||
       currentOffset;
 
     // Generate session ID
@@ -236,7 +236,7 @@ Deno.serve(async (req) => {
       library_id: item.library_id,
       media_item_id: itemId,
       media_item_type: item.media_type || "book",
-      display_title: book?.title || item.title || "Unknown Title",
+      display_title: item.title || "Unknown Title",
       display_author: authorName,
       duration: totalDuration,
       play_method: 0,
@@ -247,7 +247,7 @@ Deno.serve(async (req) => {
       session_date: sessionDateStr,
       day_of_week: dayOfWeek,
       server_version: "Edge",
-      cover_path: item.cover_path || book?.cover_path || null,
+      cover_path: item.cover_path || null,
     });
 
     const playbackSession = {
@@ -256,10 +256,10 @@ Deno.serve(async (req) => {
       libraryId: item.library_id,
       libraryItemId: itemId,
 
-      displayTitle: book?.title || item.title || "Unknown Title",
+      displayTitle: item.title || "Unknown Title",
       displayAuthor: authorName,
-      coverPath: item.cover_path || book?.cover_path || null,
-      cover_path: item.cover_path || book?.cover_path || null,
+      coverPath: item.cover_path || null,
+      cover_path: item.cover_path || null,
 
       duration: totalDuration,
       playMethod: 0,

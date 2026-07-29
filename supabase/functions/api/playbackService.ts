@@ -46,13 +46,7 @@ export class PlaybackService {
       );
     }
 
-    const bookObj = Array.isArray((item as Record<string, unknown>)?.books)
-      ? ((item as Record<string, unknown>)?.books as unknown[])[0]
-      : (item as Record<string, unknown>)?.books;
-
-    let rawAudioFiles = (item as Record<string, unknown>)?.audio_files ||
-      (bookObj as Record<string, unknown>)?.audio_files ||
-      [];
+    let rawAudioFiles = item.audio_files || [];
     if (typeof rawAudioFiles === "string") {
       try {
         rawAudioFiles = JSON.parse(rawAudioFiles);
@@ -68,9 +62,7 @@ export class PlaybackService {
 
     // Fallback: If audio_files is empty, extract audio files from library_files
     if (!audioFilesList.length) {
-      let rawLibraryFiles = (item as Record<string, unknown>)?.library_files ||
-        (bookObj as Record<string, unknown>)?.library_files ||
-        [];
+      let rawLibraryFiles = item.library_files || [];
       if (typeof rawLibraryFiles === "string") {
         try {
           rawLibraryFiles = JSON.parse(rawLibraryFiles);
