@@ -148,35 +148,42 @@ app.use(serviceRoleMiddleware);
 app.use("*", authMiddleware);
 
 // === NATIVE HONO ROUTERS ===
-// Routes are mounted here, middleware chain applies to all
-app.route("/api", settingsRouter);
-app.route("/api/debug", debugRouter);
-app.route("/api", metadataRouter);
-app.route("/api/authors", authorsRouter);
-app.route("/api", authorsRouter);
-app.route("/api/users", usersRouter);
-app.route("/api/libraries", librariesRouter);
-app.route("/api/items", itemsRouter);
-app.route("/api", itemsRouter);
-app.route("/api", playbackRouter);
-app.route("/api", progressRouter);
-app.route("/api/playlists", playlistsRouter);
-app.route("/api/collections", collectionsRouter);
-app.route("/api/auth", authRouter);
-app.route("/api", authRouter);
-app.route("/api/auth/2fa", twoFactorRouter);
-app.route("/api/2fa", twoFactorRouter);
-app.route("/api/migrate-batch", migrateBatchRouter);
-app.route("/api/items", downloadsRouter);
-app.route("/api", downloadsRouter);
-app.route("/api/me/bookmarks", bookmarksRouter);
-app.route("/api/me/search", searchRouter);
-app.route("/api/search", searchRouter);
-app.route("/api", searchRouter);
-app.route("/api/me", meRouter);
-app.route("/api/admin-analytics", adminRouter);
-app.route("/admin-analytics", adminRouter);
-app.route("/api/admin/analytics", adminRouter);
+// Helper to register routes under both /api/... (when direct/local) and /... (when Supabase Edge Runtime strips /functions/v1/api)
+const mountRouter = (path: string, router: any) => {
+  app.route(path, router);
+  if (path.startsWith("/api/")) {
+    app.route(path.substring(4), router);
+  } else if (path === "/api") {
+    app.route("/", router);
+  }
+};
+
+mountRouter("/api", settingsRouter);
+mountRouter("/api/debug", debugRouter);
+mountRouter("/api", metadataRouter);
+mountRouter("/api/authors", authorsRouter);
+mountRouter("/api/users", usersRouter);
+mountRouter("/api/libraries", librariesRouter);
+mountRouter("/api/items", itemsRouter);
+mountRouter("/api", playbackRouter);
+mountRouter("/api", progressRouter);
+mountRouter("/api/playlists", playlistsRouter);
+mountRouter("/api/collections", collectionsRouter);
+mountRouter("/api/auth", authRouter);
+mountRouter("/api", authRouter);
+mountRouter("/api/auth/2fa", twoFactorRouter);
+mountRouter("/api/2fa", twoFactorRouter);
+mountRouter("/api/migrate-batch", migrateBatchRouter);
+mountRouter("/api/items", downloadsRouter);
+mountRouter("/api", downloadsRouter);
+mountRouter("/api/me/bookmarks", bookmarksRouter);
+mountRouter("/api/me/search", searchRouter);
+mountRouter("/api/search", searchRouter);
+mountRouter("/api", searchRouter);
+mountRouter("/api/me", meRouter);
+mountRouter("/api/admin-analytics", adminRouter);
+mountRouter("/admin-analytics", adminRouter);
+mountRouter("/api/admin/analytics", adminRouter);
 
 // Fallback 404
 app.all("*", (c) => {

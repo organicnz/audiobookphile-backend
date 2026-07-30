@@ -66,17 +66,28 @@ const publicAuthRoutes = new Set([
  * Check if route should skip auth middleware
  */
 export function shouldSkipAuth(c: Context<{ Variables: Variables }>): boolean {
-  if (publicAuthRoutes.has(c.req.path)) {
+  const path = c.req.path.replace(/\/+$/, "") || "/";
+  if (publicAuthRoutes.has(path)) {
+    return true;
+  }
+
+  const withApi = path.startsWith("/api") ? path : "/api" + path;
+  const withoutApi = path.startsWith("/api") ? path.replace(/^\/api/, "") || "/" : path;
+  if (publicAuthRoutes.has(withApi) || publicAuthRoutes.has(withoutApi)) {
     return true;
   }
 
   // Skip auth for GET cover images and author images (fetched by <img> / AsyncImage in iOS/Web without Authorization headers)
   if (c.req.method === "GET") {
-    if (c.req.path.startsWith("/api/items/") && c.req.path.endsWith("/cover")) {
+    if (
+      (withApi.startsWith("/api/items/") || withoutApi.startsWith("/items/")) &&
+      withApi.endsWith("/cover")
+    ) {
       return true;
     }
     if (
-      c.req.path.startsWith("/api/authors/") && c.req.path.endsWith("/image")
+      (withApi.startsWith("/api/authors/") || withoutApi.startsWith("/authors/")) &&
+      withApi.endsWith("/image")
     ) {
       return true;
     }
