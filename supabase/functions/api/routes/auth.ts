@@ -778,11 +778,14 @@ authRouter.post("/authorize", async (c) => {
         );
 
         if (userData?.user) {
+          // Check if any admin exists
+          const { count } = await adminSupabase.from("profiles").select("*", { count: "exact", head: true }).in("user_type", ["admin", "root"]);
+          const defaultRole = (count === 0 || count === null) ? "root" : "user";
           // User exists in auth but profile is missing — create one
           await adminSupabase.from("profiles").upsert({
             id: userId,
             username: payload.email?.split("@")[0] || "user",
-            user_type: "user",
+            user_type: defaultRole,
           });
         } else {
           return c.json({
