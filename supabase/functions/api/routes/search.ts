@@ -158,22 +158,28 @@ async function handleGenerateEmbedding(c: any) {
     return c.json({ error: "ZAI_API_KEY is not configured" }, 500);
   }
   try {
-    const aiRes = await fetch("https://open.bigmodel.cn/api/paas/v4/embeddings", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${zaiApiKey}`,
-        "Content-Type": "application/json",
+    const aiRes = await fetch(
+      "https://open.bigmodel.cn/api/paas/v4/embeddings",
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${zaiApiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: "embedding-2",
+          input: text,
+        }),
       },
-      body: JSON.stringify({
-        model: "embedding-2",
-        input: text,
-      }),
-    });
+    );
     if (!aiRes.ok) {
       return c.json({ error: "Failed to generate embedding" }, 500);
     }
     const aiData = await aiRes.json();
-    return c.json({ embedding: aiData.data?.[0]?.embedding || [], model: "embedding-2" });
+    return c.json({
+      embedding: aiData.data?.[0]?.embedding || [],
+      model: "embedding-2",
+    });
   } catch (e: any) {
     return c.json({ error: e.message || "Embedding generation failed" }, 500);
   }
@@ -181,4 +187,3 @@ async function handleGenerateEmbedding(c: any) {
 
 searchRouter.post("/generate-embedding", handleGenerateEmbedding);
 searchRouter.post("/embeddings/generate", handleGenerateEmbedding);
-

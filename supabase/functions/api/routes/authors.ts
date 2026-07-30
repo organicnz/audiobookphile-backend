@@ -186,7 +186,9 @@ async function handleSyncAuthors(c: any) {
   const force = url.searchParams.get("force") === "true";
 
   try {
-    let query = supabase.from("authors").select("id, name, image_path").limit(limit);
+    let query = supabase.from("authors").select("id, name, image_path").limit(
+      limit,
+    );
     if (!force) {
       query = query.or("image_path.is.null,image_path.eq.missing");
     }
@@ -197,17 +199,26 @@ async function handleSyncAuthors(c: any) {
     for (const author of authors || []) {
       const storagePath = await fetchAuthorAvatar(supabase, author);
       if (storagePath) {
-        await supabase.from("authors").update({ image_path: storagePath }).eq("id", author.id);
+        await supabase.from("authors").update({ image_path: storagePath }).eq(
+          "id",
+          author.id,
+        );
         updatedCount++;
       }
     }
 
-    return c.json({ success: true, updatedCount, totalChecked: (authors || []).length });
+    return c.json({
+      success: true,
+      updatedCount,
+      totalChecked: (authors || []).length,
+    });
   } catch (e: any) {
-    return c.json({ success: false, error: e.message || "Author sync failed" }, 500);
+    return c.json(
+      { success: false, error: e.message || "Author sync failed" },
+      500,
+    );
   }
 }
 
 authorsRouter.post("/sync-authors", handleSyncAuthors);
 authorsRouter.post("/sync", handleSyncAuthors);
-

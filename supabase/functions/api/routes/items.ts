@@ -451,9 +451,12 @@ itemsRouter.post("/batch", async (c) => {
 
 async function handleChapterAI(c: any) {
   const body = await c.req.json().catch(() => ({}));
-  const zaiApiKey = Deno.env.get("ZAI_API_KEY") ?? Deno.env.get("ZHIPU_API_KEY") ?? "";
+  const zaiApiKey = Deno.env.get("ZAI_API_KEY") ??
+    Deno.env.get("ZHIPU_API_KEY") ?? "";
   if (!zaiApiKey) {
-    return c.json({ error: "ZAI_API_KEY (or ZHIPU_API_KEY) is not configured on the server" }, 500);
+    return c.json({
+      error: "ZAI_API_KEY (or ZHIPU_API_KEY) is not configured on the server",
+    }, 500);
   }
   const { title, author, chapterTitle, chapterIndex } = body;
   try {
@@ -466,7 +469,9 @@ async function handleChapterAI(c: any) {
     );
     return c.json({ insights });
   } catch (e: any) {
-    return c.json({ error: e.message || "Failed to generate chapter AI insights" }, 500);
+    return c.json({
+      error: e.message || "Failed to generate chapter AI insights",
+    }, 500);
   }
 }
 
@@ -482,7 +487,9 @@ async function handleSyncCovers(c: any) {
 
     const { data: items, error: itemsError } = await supabase
       .from("library_items")
-      .select("id, cover_path, title, author_names_first_last, author_names_last_first")
+      .select(
+        "id, cover_path, title, author_names_first_last, author_names_last_first",
+      )
       .or("cover_path.is.null,cover_path.like./%")
       .limit(limit);
 
@@ -491,7 +498,8 @@ async function handleSyncCovers(c: any) {
     let updatedCount = 0;
     for (const item of items || []) {
       const title = item.title || "";
-      const author = item.author_names_first_last || item.author_names_last_first || "";
+      const author = item.author_names_first_last ||
+        item.author_names_last_first || "";
       if (item.cover_path && !item.cover_path.startsWith("/")) continue;
       if (title) {
         const fetchRes = await fetchBookMetadata(title, author);
@@ -499,21 +507,34 @@ async function handleSyncCovers(c: any) {
           const fileData = new Uint8Array(fetchRes.cover.buffer);
           const ext = fetchRes.cover.extension || "jpg";
           const storagePath = `${item.id}/cover.${ext}`;
-          const { error: upErr } = await supabase.storage.from("covers").upload(storagePath, fileData, {
-            contentType: `image/${ext === "png" ? "png" : "jpeg"}`,
-            upsert: true,
-          });
+          const { error: upErr } = await supabase.storage.from("covers").upload(
+            storagePath,
+            fileData,
+            {
+              contentType: `image/${ext === "png" ? "png" : "jpeg"}`,
+              upsert: true,
+            },
+          );
           if (!upErr) {
-            await supabase.from("library_items").update({ cover_path: storagePath }).eq("id", item.id);
+            await supabase.from("library_items").update({
+              cover_path: storagePath,
+            }).eq("id", item.id);
             updatedCount++;
           }
         }
       }
     }
 
-    return c.json({ success: true, updatedCount, totalChecked: (items || []).length });
+    return c.json({
+      success: true,
+      updatedCount,
+      totalChecked: (items || []).length,
+    });
   } catch (e: any) {
-    return c.json({ success: false, error: e.message || "Sync covers failed" }, 500);
+    return c.json(
+      { success: false, error: e.message || "Sync covers failed" },
+      500,
+    );
   }
 }
 
@@ -538,13 +559,18 @@ async function handleSyncDurations(c: any) {
         newTotalDuration += dur;
       }
       if (newTotalDuration > 0 && newTotalDuration !== book.duration) {
-        await supabase.from("library_items").update({ duration: newTotalDuration }).eq("id", book.id);
+        await supabase.from("library_items").update({
+          duration: newTotalDuration,
+        }).eq("id", book.id);
         updatedCount++;
       }
     }
     return c.json({ success: true, updatedCount });
   } catch (e: any) {
-    return c.json({ success: false, error: e.message || "Sync durations failed" }, 500);
+    return c.json({
+      success: false,
+      error: e.message || "Sync durations failed",
+    }, 500);
   }
 }
 
@@ -552,5 +578,3 @@ itemsRouter.post("/sync-covers", handleSyncCovers);
 itemsRouter.post("/sync-durations", handleSyncDurations);
 itemsRouter.get("/sync-covers", handleSyncCovers);
 itemsRouter.get("/sync-durations", handleSyncDurations);
-
-

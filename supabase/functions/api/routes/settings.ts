@@ -201,7 +201,9 @@ async function handleStorageSync(c: any) {
     }
 
     const files = (listData || []).filter((f: any) => !f.name.startsWith("."));
-    const { data: _dbItems } = await supabase.from("library_items").select("id, title");
+    const { data: _dbItems } = await supabase.from("library_items").select(
+      "id, title",
+    );
     const orphans = files.map((f: any) => ({
       name: f.name,
       path: f.name,
@@ -239,8 +241,11 @@ async function handleBackupDatabase(c: any) {
   const supabase = c.get("supabase");
   try {
     const libraries = await supabase.from("libraries").select("*").limit(1000);
-    const libraryItems = await supabase.from("library_items").select("*").limit(1000);
-    const mediaProgress = await supabase.from("media_progress").select("*").limit(1000);
+    const libraryItems = await supabase.from("library_items").select("*").limit(
+      1000,
+    );
+    const mediaProgress = await supabase.from("media_progress").select("*")
+      .limit(1000);
 
     const backupData = {
       timestamp: new Date().toISOString(),
@@ -270,4 +275,3 @@ async function handleBackupDatabase(c: any) {
 }
 
 settingsRouter.post("/backup-database", handleBackupDatabase);
-

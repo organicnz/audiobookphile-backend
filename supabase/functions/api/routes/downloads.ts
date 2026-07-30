@@ -262,4 +262,3 @@ async function handleUploadPresign(c: any) {
 
 downloadsRouter.post("/upload-presign", handleUploadPresign);
 downloadsRouter.post("/upload/presign", handleUploadPresign);
-

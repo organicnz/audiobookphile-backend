@@ -192,7 +192,8 @@ async function handleScrapeMetadata(c: any) {
   if (!title) {
     return c.json({ error: "Title is required" }, 400);
   }
-  const zaiApiKey = Deno.env.get("ZAI_API_KEY") ?? Deno.env.get("ZHIPU_API_KEY") ?? "";
+  const zaiApiKey = Deno.env.get("ZAI_API_KEY") ??
+    Deno.env.get("ZHIPU_API_KEY") ?? "";
   try {
     const enriched = await enrichMetadataWithZAI(title, author, zaiApiKey);
     return c.json({ success: true, metadata: enriched || { title, author } });
@@ -203,4 +204,3 @@ async function handleScrapeMetadata(c: any) {
 
 metadataRouter.post("/scrape-metadata", handleScrapeMetadata);
 metadataRouter.post("/metadata/scrape", handleScrapeMetadata);
-
