@@ -72,7 +72,7 @@ searchRouter.delete("/history", async (c) => {
   return c.json({ success: true });
 });
 
-searchRouter.post("/smart", async (c) => {
+async function handleSmartSearch(c: any) {
   const supabase = c.get("supabase");
   const body = await c.req.json().catch(() => ({}));
   const queryText = body.query || "";
@@ -135,9 +135,50 @@ searchRouter.post("/smart", async (c) => {
   const { data: results, error } = await dbQuery.limit(50);
   if (error) return c.json({ error: error.message }, 500);
 
-  const formattedResults = (results || []).map((item) =>
+  const formattedResults = (results || []).map((item: any) =>
     mapBookForMobile(item as unknown as LibraryItemWithBooks)
   );
 
   return c.json({ results: formattedResults, searchIntent });
-});
+}
+
+searchRouter.post("/smart", handleSmartSearch);
+searchRouter.post("/semantic", handleSmartSearch);
+searchRouter.post("/search-semantic", handleSmartSearch);
+
+async function handleGenerateEmbedding(c: any) {
+  const body = await c.req.json().catch(() => ({}));
+  const text = body.text || body.input || "";
+  if (!text) {
+    return c.json({ error: "Text or input is required" }, 400);
+  }
+  const zaiApiKey = Deno.env.get("ZAI_API_KEY") ??
+    Deno.env.get("ZHIPU_API_KEY") ?? "";
+  if (!zaiApiKey) {
+    return c.json({ error: "ZAI_API_KEY is not configured" }, 500);
+  }
+  try {
+    const aiRes = await fetch("https://open.bigmodel.cn/api/paas/v4/embeddings", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${zaiApiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "embedding-2",
+        input: text,
+      }),
+    });
+    if (!aiRes.ok) {
+      return c.json({ error: "Failed to generate embedding" }, 500);
+    }
+    const aiData = await aiRes.json();
+    return c.json({ embedding: aiData.data?.[0]?.embedding || [], model: "embedding-2" });
+  } catch (e: any) {
+    return c.json({ error: e.message || "Embedding generation failed" }, 500);
+  }
+}
+
+searchRouter.post("/generate-embedding", handleGenerateEmbedding);
+searchRouter.post("/embeddings/generate", handleGenerateEmbedding);
+

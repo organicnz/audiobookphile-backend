@@ -3,6 +3,8 @@ import { createClient } from "npm:@supabase/supabase-js@2.44.0";
 import { mapBookForMobile } from "../../api/mappers.ts";
 import { Variables } from "../_shared/types.ts";
 import { getProxyOrigin } from "../../api/_shared/proxy.ts";
+import { generateChapterAIInsights } from "../../_shared/zai.ts";
+import { fetchBookMetadata } from "../../_shared/coverFetch.ts";
 
 export const itemsRouter = new Hono<{ Variables: Variables }>();
 
@@ -446,3 +448,109 @@ itemsRouter.post("/batch", async (c) => {
   c.header("Cache-Control", "private, max-age=30");
   return c.json({ items: mappedItems });
 });
+
+async function handleChapterAI(c: any) {
+  const body = await c.req.json().catch(() => ({}));
+  const zaiApiKey = Deno.env.get("ZAI_API_KEY") ?? Deno.env.get("ZHIPU_API_KEY") ?? "";
+  if (!zaiApiKey) {
+    return c.json({ error: "ZAI_API_KEY (or ZHIPU_API_KEY) is not configured on the server" }, 500);
+  }
+  const { title, author, chapterTitle, chapterIndex } = body;
+  try {
+    const insights = await generateChapterAIInsights(
+      title || "",
+      author || "Unknown Author",
+      chapterTitle || "",
+      chapterIndex,
+      zaiApiKey,
+    );
+    return c.json({ insights });
+  } catch (e: any) {
+    return c.json({ error: e.message || "Failed to generate chapter AI insights" }, 500);
+  }
+}
+
+itemsRouter.post("/items/:id/chapters/ai", handleChapterAI);
+itemsRouter.post("/chapter-ai", handleChapterAI);
+
+async function handleSyncCovers(c: any) {
+  const supabase = c.get("supabase");
+  try {
+    const url = new URL(c.req.url);
+    const limitParam = parseInt(url.searchParams.get("limit") || "5", 10);
+    const limit = Math.min(Math.max(limitParam, 1), 20);
+
+    const { data: items, error: itemsError } = await supabase
+      .from("library_items")
+      .select("id, cover_path, title, author_names_first_last, author_names_last_first")
+      .or("cover_path.is.null,cover_path.like./%")
+      .limit(limit);
+
+    if (itemsError) throw itemsError;
+
+    let updatedCount = 0;
+    for (const item of items || []) {
+      const title = item.title || "";
+      const author = item.author_names_first_last || item.author_names_last_first || "";
+      if (item.cover_path && !item.cover_path.startsWith("/")) continue;
+      if (title) {
+        const fetchRes = await fetchBookMetadata(title, author);
+        if (fetchRes && fetchRes.cover && fetchRes.cover.buffer) {
+          const fileData = new Uint8Array(fetchRes.cover.buffer);
+          const ext = fetchRes.cover.extension || "jpg";
+          const storagePath = `${item.id}/cover.${ext}`;
+          const { error: upErr } = await supabase.storage.from("covers").upload(storagePath, fileData, {
+            contentType: `image/${ext === "png" ? "png" : "jpeg"}`,
+            upsert: true,
+          });
+          if (!upErr) {
+            await supabase.from("library_items").update({ cover_path: storagePath }).eq("id", item.id);
+            updatedCount++;
+          }
+        }
+      }
+    }
+
+    return c.json({ success: true, updatedCount, totalChecked: (items || []).length });
+  } catch (e: any) {
+    return c.json({ success: false, error: e.message || "Sync covers failed" }, 500);
+  }
+}
+
+async function handleSyncDurations(c: any) {
+  const supabase = c.get("supabase");
+  try {
+    const url = new URL(c.req.url);
+    const bookId = url.searchParams.get("bookId");
+    let query = supabase.from("library_items").select("*");
+    if (bookId) query = query.eq("id", bookId);
+    const { data: books, error } = await query;
+    if (error) throw error;
+
+    let updatedCount = 0;
+    for (const book of books || []) {
+      if (!book.audio_files) continue;
+      let files = book.audio_files as any[];
+      let _changed = false;
+      let newTotalDuration = 0;
+      for (const f of files) {
+        let dur = f.duration || f.metadata?.duration || 0;
+        newTotalDuration += dur;
+      }
+      if (newTotalDuration > 0 && newTotalDuration !== book.duration) {
+        await supabase.from("library_items").update({ duration: newTotalDuration }).eq("id", book.id);
+        updatedCount++;
+      }
+    }
+    return c.json({ success: true, updatedCount });
+  } catch (e: any) {
+    return c.json({ success: false, error: e.message || "Sync durations failed" }, 500);
+  }
+}
+
+itemsRouter.post("/sync-covers", handleSyncCovers);
+itemsRouter.post("/sync-durations", handleSyncDurations);
+itemsRouter.get("/sync-covers", handleSyncCovers);
+itemsRouter.get("/sync-durations", handleSyncDurations);
+
+

@@ -217,3 +217,102 @@ playbackRouter.post("/session/:id/close", async (c) => {
 
   return c.json(result);
 });
+
+// Aliases for legacy standalone functions
+playbackRouter.post("/session-play", async (c) => {
+  const supabase = c.get("supabase");
+  const user = c.get("user")!;
+  let body;
+  try {
+    body = await c.req.json().catch(() => ({}));
+  } catch (_e) {
+    body = {};
+  }
+  const itemId = body.itemId || body.id;
+  if (!itemId) {
+    return c.json({ success: false, error: "itemId is required" }, 400);
+  }
+  const deviceInfo = body.deviceInfo ||
+    { deviceId: "web-unknown", clientName: "Web Client" };
+  const forceDirectPlay = body.forceDirectPlay ?? false;
+  const forceTranscode = body.forceTranscode ?? false;
+  const supportedMimeTypes = body.supportedMimeTypes || [];
+
+  try {
+    const session = await PlaybackService.startSession(
+      supabase,
+      user.id,
+      itemId,
+      body.episodeId || null,
+      deviceInfo,
+      supportedMimeTypes,
+      forceDirectPlay,
+      forceTranscode,
+    );
+    return c.json(session);
+  } catch (err: unknown) {
+    const e = err as Error;
+    return c.json({ success: false, error: { message: e.message } }, 400);
+  }
+});
+
+playbackRouter.post("/playback-start", async (c) => {
+  const supabase = c.get("supabase");
+  const user = c.get("user")!;
+  let body;
+  try {
+    body = await c.req.json().catch(() => ({}));
+  } catch (_e) {
+    body = {};
+  }
+  const itemId = body.itemId || body.id;
+  if (!itemId) {
+    return c.json({ success: false, error: "itemId is required" }, 400);
+  }
+  try {
+    const session = await PlaybackService.startSession(
+      supabase,
+      user.id,
+      itemId,
+      body.episodeId || null,
+      body.deviceInfo || { deviceId: "web-unknown", clientName: "Web Client" },
+      body.supportedMimeTypes || [],
+      body.forceDirectPlay ?? false,
+      body.forceTranscode ?? false,
+    );
+    return c.json(session);
+  } catch (err: unknown) {
+    const e = err as Error;
+    return c.json({ success: false, error: { message: e.message } }, 400);
+  }
+});
+
+playbackRouter.post("/session-close", async (c) => {
+  const supabase = c.get("supabase");
+  const user = c.get("user")!;
+  let body;
+  try {
+    body = await c.req.json().catch(() => ({}));
+  } catch (_e) {
+    body = {};
+  }
+  const sessionId = body.sessionId || body.id;
+  if (!sessionId) {
+    return c.json({ success: false, error: "sessionId is required" }, 400);
+  }
+  const result = await PlaybackService.closeSession(
+    supabase,
+    user.id,
+    sessionId,
+    body.currentTime,
+    body.timeListened,
+    body.duration,
+    body.progress,
+    body.episodeId,
+  );
+  if (!result.success) {
+    return c.json(result, 400);
+  }
+  return c.json(result);
+});
+

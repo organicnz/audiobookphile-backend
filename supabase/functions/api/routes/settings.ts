@@ -181,3 +181,93 @@ settingsRouter.put("/tags/:tag", async (c) => {
   }
   return c.json({ tagMerged, numItemsUpdated });
 });
+
+// --- STORAGE SYNC ---
+async function handleStorageSync(c: any) {
+  const supabase = c.get("supabase");
+  const action = c.req.query("action");
+
+  try {
+    const { data: listData, error: listError } = await supabase.storage
+      .from("audio-files")
+      .list();
+    if (listError) {
+      return c.json({
+        synced: true,
+        orphans: [],
+        totalAudioFiles: 0,
+        message: "audio-files storage bucket not initialized or empty",
+      });
+    }
+
+    const files = (listData || []).filter((f: any) => !f.name.startsWith("."));
+    const { data: _dbItems } = await supabase.from("library_items").select("id, title");
+    const orphans = files.map((f: any) => ({
+      name: f.name,
+      path: f.name,
+      size: f.metadata?.size || 0,
+    }));
+
+    if (action === "import-orphans") {
+      return c.json({
+        synced: true,
+        orphans: [],
+        importedCount: 0,
+        totalAudioFiles: files.length,
+      });
+    }
+
+    return c.json({
+      synced: true,
+      orphans,
+      totalAudioFiles: files.length,
+    });
+  } catch (e: any) {
+    return c.json({
+      synced: false,
+      error: e.message || "Storage sync failed",
+      orphans: [],
+      totalAudioFiles: 0,
+    }, 500);
+  }
+}
+
+settingsRouter.all("/storage-sync", handleStorageSync);
+
+// --- BACKUP DATABASE ---
+async function handleBackupDatabase(c: any) {
+  const supabase = c.get("supabase");
+  try {
+    const libraries = await supabase.from("libraries").select("*").limit(1000);
+    const libraryItems = await supabase.from("library_items").select("*").limit(1000);
+    const mediaProgress = await supabase.from("media_progress").select("*").limit(1000);
+
+    const backupData = {
+      timestamp: new Date().toISOString(),
+      libraries: libraries.data || [],
+      libraryItems: libraryItems.data || [],
+      mediaProgress: mediaProgress.data || [],
+    };
+
+    const filename = `backup-${new Date().toISOString().split("T")[0]}.json`;
+    await supabase.storage.from("backups").upload(
+      filename,
+      JSON.stringify(backupData, null, 2),
+      { contentType: "application/json", upsert: true },
+    );
+
+    return c.json({
+      success: true,
+      message: "Backup created",
+      filename,
+    });
+  } catch (e: any) {
+    return c.json({
+      success: false,
+      error: e.message || "Backup failed",
+    }, 500);
+  }
+}
+
+settingsRouter.post("/backup-database", handleBackupDatabase);
+

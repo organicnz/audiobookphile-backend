@@ -103,3 +103,50 @@ progressRouter.delete("/me/progress/id/:id", async (c) => {
   if (error) throw error;
   return c.json({ success: true });
 });
+
+progressRouter.post("/playback-progress", async (c) => {
+  const supabase = c.get("supabase");
+  const user = c.get("user")!;
+  const body = await c.req.json().catch(() => ({}));
+  const libraryItemId = body.libraryItemId || body.itemId;
+  if (!libraryItemId) {
+    return c.json({ success: false, error: "libraryItemId is required" }, 400);
+  }
+  const data = await upsertMediaProgress(
+    supabase,
+    user.id,
+    libraryItemId,
+    body.episodeId ?? null,
+    {
+      progress: body.progress ?? 0,
+      duration: body.duration,
+      isFinished: body.isFinished,
+      hideFromContinueListening: body.hideFromContinueListening,
+    },
+  );
+  return c.json({ success: true, data });
+});
+
+progressRouter.post("/session-sync", async (c) => {
+  const supabase = c.get("supabase");
+  const user = c.get("user")!;
+  const body = await c.req.json().catch(() => ({}));
+  const libraryItemId = body.libraryItemId || body.itemId;
+  if (!libraryItemId) {
+    return c.json({ success: false, error: "libraryItemId is required" }, 400);
+  }
+  const data = await upsertMediaProgress(
+    supabase,
+    user.id,
+    libraryItemId,
+    body.episodeId ?? null,
+    {
+      progress: body.progress ?? 0,
+      duration: body.duration,
+      isFinished: body.isFinished,
+      hideFromContinueListening: body.hideFromContinueListening,
+    },
+  );
+  return c.json({ success: true, data });
+});
+

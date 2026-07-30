@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { StorageRouter } from "../../_shared/storage-router.ts";
 import { Variables } from "../_shared/types.ts";
+import { presignUpload } from "../../_shared/uploadPresign.ts";
 
 export const downloadsRouter = new Hono<{ Variables: Variables }>();
 
@@ -243,3 +244,22 @@ downloadsRouter.get("/:id/file/:fileId/download", async (c) => {
     return c.json({ error: (e as Error).message }, 500);
   }
 });
+
+async function handleUploadPresign(c: any) {
+  const supabase = c.get("supabase");
+  const body = await c.req.json().catch(() => ({}));
+  const { filename, contentType } = body;
+  if (!filename) {
+    return c.json({ error: "Filename is required" }, 400);
+  }
+  try {
+    const res = await presignUpload(supabase, filename, contentType);
+    return c.json(res);
+  } catch (e: any) {
+    return c.json({ error: e.message || "Presign failed" }, 500);
+  }
+}
+
+downloadsRouter.post("/upload-presign", handleUploadPresign);
+downloadsRouter.post("/upload/presign", handleUploadPresign);
+

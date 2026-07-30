@@ -1,6 +1,7 @@
 import { Hono } from "hono";
-
 import { Variables } from "../_shared/types.ts";
+import { enrichMetadataWithZAI } from "../../_shared/zai.ts";
+
 export const metadataRouter = new Hono<{ Variables: Variables }>();
 
 // --- NARRATORS ---
@@ -183,3 +184,23 @@ metadataRouter.post("/match-book", async (c) => {
     return c.json({ error: "Failed to fetch metadata" }, 500);
   }
 });
+
+async function handleScrapeMetadata(c: any) {
+  const body = await c.req.json().catch(() => ({}));
+  const title = body.title || body.bookTitle || "";
+  const author = body.author || body.authorName || "";
+  if (!title) {
+    return c.json({ error: "Title is required" }, 400);
+  }
+  const zaiApiKey = Deno.env.get("ZAI_API_KEY") ?? Deno.env.get("ZHIPU_API_KEY") ?? "";
+  try {
+    const enriched = await enrichMetadataWithZAI(title, author, zaiApiKey);
+    return c.json({ success: true, metadata: enriched || { title, author } });
+  } catch (e: any) {
+    return c.json({ error: e.message || "Failed to scrape metadata" }, 500);
+  }
+}
+
+metadataRouter.post("/scrape-metadata", handleScrapeMetadata);
+metadataRouter.post("/metadata/scrape", handleScrapeMetadata);
+

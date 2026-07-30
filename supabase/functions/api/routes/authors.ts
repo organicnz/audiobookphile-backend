@@ -178,3 +178,36 @@ authorsRouter.get("/:id/image", async (c) => {
   );
   return c.redirect(data.publicUrl);
 });
+
+async function handleSyncAuthors(c: any) {
+  const supabase = c.get("supabase");
+  const url = new URL(c.req.url);
+  const limit = parseInt(url.searchParams.get("limit") || "10", 10);
+  const force = url.searchParams.get("force") === "true";
+
+  try {
+    let query = supabase.from("authors").select("id, name, image_path").limit(limit);
+    if (!force) {
+      query = query.or("image_path.is.null,image_path.eq.missing");
+    }
+    const { data: authors, error } = await query;
+    if (error) throw error;
+
+    let updatedCount = 0;
+    for (const author of authors || []) {
+      const storagePath = await fetchAuthorAvatar(supabase, author);
+      if (storagePath) {
+        await supabase.from("authors").update({ image_path: storagePath }).eq("id", author.id);
+        updatedCount++;
+      }
+    }
+
+    return c.json({ success: true, updatedCount, totalChecked: (authors || []).length });
+  } catch (e: any) {
+    return c.json({ success: false, error: e.message || "Author sync failed" }, 500);
+  }
+}
+
+authorsRouter.post("/sync-authors", handleSyncAuthors);
+authorsRouter.post("/sync", handleSyncAuthors);
+
