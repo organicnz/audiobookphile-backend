@@ -11,6 +11,7 @@ on:
     paths:
       - 'supabase/**'
       - '.github/workflows/deploy-backend.yml'
+  workflow_dispatch:
 
 jobs:
   verify:
@@ -37,7 +38,7 @@ jobs:
   deploy:
     name: Deploy to Supabase Production
     needs: verify
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Repository
