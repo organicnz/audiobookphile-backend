@@ -11,6 +11,14 @@ import { smartSortLibraryItems } from "../../_shared/zai.ts";
 
 export const librariesRouter = new Hono<{ Variables: Variables }>();
 
+interface CacheEntry {
+  items: any[];
+  count: number | null;
+  timestamp: number;
+}
+const itemsCache = new Map<string, CacheEntry>();
+const CACHE_TTL = 1000 * 60; // 60 seconds
+
 type LibraryWithFolders = Database["public"]["Tables"]["libraries"]["Row"] & {
   library_folders: Database["public"]["Tables"]["library_folders"]["Row"][];
 };
@@ -189,10 +197,17 @@ librariesRouter.get("/:id/items", async (c) => {
   const seriesId = queryParams.get("seriesId");
 
   try {
+    const cacheKey = `${libraryId}-${dbSortField}-${isDesc}-${limit}-${page}-${search}-${authorId}-${seriesId}`;
     let items: any[] = [];
     let count: number | null = 0;
+    const now = Date.now();
+    const cached = itemsCache.get(cacheKey);
 
-    if (isFetchAll) {
+    if (cached && now - cached.timestamp < CACHE_TTL) {
+      items = cached.items;
+      count = cached.count;
+    } else {
+      if (isFetchAll) {
       const CHUNK_SIZE = 500;
       let currentOffset = 0;
       while (true) {
@@ -283,6 +298,10 @@ librariesRouter.get("/:id/items", async (c) => {
       items = data || [];
       count = totalCount;
     }
+    
+    // Save to cache
+    itemsCache.set(cacheKey, { items, count, timestamp: now });
+  }
 
     // Natural in-memory sort refinement for title & author
     if (items && items.length > 1) {
@@ -361,6 +380,10 @@ librariesRouter.get("/:id/items", async (c) => {
       runAutoDeduplicate().catch(() => {});
     }
 
+    c.header(
+      "Cache-Control",
+      "private, max-age=30, stale-while-revalidate=300",
+    );
     return c.json(response);
   } catch (e: unknown) {
     const err = e as Error;
