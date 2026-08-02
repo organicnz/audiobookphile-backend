@@ -207,12 +207,12 @@ export class PlaybackService {
           const resolved = await storage.resolveAndSign(
             storagePath,
             libraryItemId,
-            3600,
+            604800,
           );
           finalSignedUrl = resolved.signedUrl;
           resolvedCanonicalPath = resolved.canonicalPath;
         } else {
-          finalSignedUrl = await storage.getSignedUrl(storagePath, 3600);
+          finalSignedUrl = await storage.getSignedUrl(storagePath, 604800);
         }
       } catch (e: unknown) {
         const signErr = e as Error;
