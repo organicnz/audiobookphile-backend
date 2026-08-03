@@ -1,6 +1,6 @@
 import { Context, Hono } from "hono";
 import { createClient } from "npm:@supabase/supabase-js@2.44.0";
-import { mapBookForMobile } from "../../api/mappers.ts";
+import { LibraryItemWithBooks, mapBookForMobile } from "../../api/mappers.ts";
 import { Variables } from "../_shared/types.ts";
 import { getProxyOrigin } from "../../api/_shared/proxy.ts";
 import { generateChapterAIInsights } from "../../_shared/zai.ts";
@@ -15,56 +15,68 @@ itemsRouter.get("/check-existing", async (c) => {
   const libraryId = c.req.query("libraryId") || "";
   const mediaType = c.req.query("mediaType") || "book";
 
+  // Normalise helper — strips punctuation/spaces for fuzzy comparison
+  const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+  const normalizedQuery = normalize(title);
+
   try {
-    let query = supabase.from("library_items").select("media_id").eq(
-      "library_id",
-      libraryId,
-    ).eq("media_type", mediaType).eq("title", title);
+    // 1. Exact title match (fast, uses index)
+    let query = supabase
+      .from("library_items")
+      .select("id")
+      .eq("library_id", libraryId)
+      .eq("media_type", mediaType)
+      .eq("title", title);
 
     if (mediaType === "book" && author) {
-      // For books, also try to match the exact author
       query = query.eq("author_names_first_last", author);
     }
 
-    const { data } = await query.limit(1).maybeSingle();
-    if (data?.media_id) {
-      return c.json({ mediaId: data.media_id });
+    const { data: exactMatch } = await query.limit(1).maybeSingle();
+    if (exactMatch?.id) {
+      return c.json({ mediaId: exactMatch.id });
     }
 
-    // Fuzzy match fallback
-    const { data: allBooks } = await supabase.from("library_items").select(
-      "media_id, title",
-    ).eq("library_id", libraryId).eq("media_type", mediaType);
+    // 2. Fuzzy fallback — use ilike to let the DB filter candidates so we
+    //    don't load the entire library into memory. Pull at most 100 rows
+    //    whose title shares the first 3 characters (covers most typos/subtitle
+    //    variants without a full-table scan).
+    const prefix = title.slice(0, 3);
+    const { data: candidates } = await supabase
+      .from("library_items")
+      .select("id, title")
+      .eq("library_id", libraryId)
+      .eq("media_type", mediaType)
+      .ilike("title", `${prefix}%`)
+      .limit(100);
 
-    if (allBooks) {
-      const normalize = (s: string) =>
-        s.toLowerCase().replace(/[^a-z0-9]/g, "");
-      const normalizedQuery = normalize(title);
-
-      for (const book of allBooks) {
+    if (candidates) {
+      for (const book of candidates) {
         const normalizedBookTitle = normalize(book.title || "");
-        if (!normalizedBookTitle) continue;
+        if (!normalizedBookTitle || normalizedBookTitle.length <= 5) continue;
 
         if (normalizedBookTitle === normalizedQuery) {
           console.log(
-            `[items] Fuzzy matched "${title}" to existing book "${book.title}" (exact norm)`,
+            `[items] Fuzzy matched "${title}" to "${book.title}" (exact norm)`,
           );
-          return c.json({ mediaId: book.media_id });
+          return c.json({ mediaId: book.id });
         }
 
-        if (normalizedBookTitle.length > 5) {
-          if (
-            normalizedQuery.includes(normalizedBookTitle) ||
-            normalizedBookTitle.includes(normalizedQuery)
-          ) {
-            const ratio1 = normalizedBookTitle.length / normalizedQuery.length;
-            const ratio2 = normalizedQuery.length / normalizedBookTitle.length;
-            if (ratio1 > 0.5 || ratio2 > 0.5) {
-              console.log(
-                `[items] Fuzzy matched "${title}" to existing book "${book.title}" (ratio)`,
-              );
-              return c.json({ mediaId: book.media_id });
-            }
+        // Substring containment with a length-ratio guard to prevent broad false positives
+        if (
+          normalizedQuery.includes(normalizedBookTitle) ||
+          normalizedBookTitle.includes(normalizedQuery)
+        ) {
+          const ratio =
+            Math.min(normalizedBookTitle.length, normalizedQuery.length) /
+            Math.max(normalizedBookTitle.length, normalizedQuery.length);
+          if (ratio > 0.75) {
+            console.log(
+              `[items] Fuzzy matched "${title}" to "${book.title}" (ratio ${
+                ratio.toFixed(2)
+              })`,
+            );
+            return c.json({ mediaId: book.id });
           }
         }
       }
@@ -155,7 +167,9 @@ itemsRouter.get("/:id", async (c) => {
     .is("episode_id", null)
     .maybeSingle();
 
-  return c.json(mapBookForMobile(item, progressData));
+  return c.json(
+    mapBookForMobile(item as unknown as LibraryItemWithBooks, progressData),
+  );
 });
 
 itemsRouter.get("/:id/cover", async (c) => {
@@ -173,7 +187,7 @@ itemsRouter.get("/:id/cover", async (c) => {
   let coverPath = item?.cover_path;
   const force = c.req.query("force") === "1";
 
-  // If cover is null, legacy invalid, or we force a retry
+  // If cover is null, legacy invalid (starts with "/"), or we're forcing a retry
   if (
     !coverPath || coverPath.startsWith("/") ||
     (coverPath === "missing" && force)
@@ -214,39 +228,37 @@ itemsRouter.get("/:id/cover", async (c) => {
 
           await adminClient
             .from("library_items")
-            .update({
-              cover_path: coverPath,
-            })
+            .update({ cover_path: coverPath })
             .eq("id", itemId);
         } else {
+          // Metadata fetch succeeded but no cover image — persist "missing" to
+          // avoid re-fetching on every subsequent request.
           coverPath = "missing";
           await adminClient
             .from("library_items")
-            .update({
-              cover_path: "missing",
-            })
+            .update({ cover_path: "missing" })
             .eq("id", itemId);
         }
       } catch (e) {
         console.error(`[items] Dynamic cover fetch failed for ${title}:`, e);
         if (e instanceof Error && e.message === "RateLimitExceeded") {
-          // Do NOT cache 'missing' if we hit a rate limit, so we can retry later.
-          // Tell the client to back off.
+          // Do NOT persist "missing" on rate-limit — the failure is temporary.
+          // Tell the client to back off and retry.
           return c.json(
             { error: "Rate limit exceeded while fetching cover" },
             429,
           );
-        } else {
-          coverPath = "missing";
-          await adminClient
-            .from("library_items")
-            .update({
-              cover_path: "missing",
-            })
-            .eq("id", itemId);
         }
+        // Any other error (network, upload failure, etc.) — persist "missing"
+        // so we don't hammer the metadata provider on every page load.
+        coverPath = "missing";
+        await adminClient
+          .from("library_items")
+          .update({ cover_path: "missing" })
+          .eq("id", itemId);
       }
     } else {
+      // No title — can't attempt a fetch; mark missing immediately.
       coverPath = "missing";
       await adminClient.from("library_items").update({ cover_path: "missing" })
         .eq("id", itemId);

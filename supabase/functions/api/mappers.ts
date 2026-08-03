@@ -91,6 +91,9 @@ function _formatCoverPath(
 }
 
 export function mapLibraryForMobile(lib: LibraryWithFolders): MobileLibrary {
+  // ⚠️  SYNC WARNING: This mapper is duplicated in the web layer at
+  //   audiobookphile-web/src/shared/utils/mobileMappers.ts → mapLibraryForMobile
+  // If you change field mappings here, apply the same change in the web copy.
   return {
     id: lib.id,
     name: lib.name || "Library",
@@ -150,6 +153,11 @@ export function mapBookForMobile(
   item: LibraryItemWithBooks,
   progressRecord?: MediaProgressRow | null,
 ): MobileBook {
+  // ⚠️  SYNC WARNING: This mapper is duplicated in the web layer at
+  //   audiobookphile-web/src/shared/utils/mobileMappers.ts → mapBookForMobile
+  // Key difference from the web copy: this version includes duration estimation
+  // from file sizes with a 96kbps fallback. If you change field mappings here,
+  // apply the same change in the web copy (and vice versa).
   const bookRecord = item;
 
   // 1. Authors & Title

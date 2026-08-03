@@ -148,7 +148,14 @@ app.use(serviceRoleMiddleware);
 app.use("*", authMiddleware);
 
 // === NATIVE HONO ROUTERS ===
-// Helper to register routes under both /api/... (when direct/local) and /... (when Supabase Edge Runtime strips /functions/v1/api)
+// mountRouter registers each router under BOTH its full path (/api/...) AND
+// its path with the /api prefix stripped (/...). This is required because:
+//   - Local/direct requests arrive as /api/libraries, /api/items, etc.
+//   - Supabase Edge Runtime strips the function name prefix (/functions/v1/api)
+//     before the request reaches this handler, so the router sees /libraries,
+//     /items, etc. — without the /api segment.
+// DO NOT remove the double-mount. The app will break for one of those two
+// call paths if you do. If you add a new router, use mountRouter — not app.route directly.
 const mountRouter = (path: string, router: any) => {
   app.route(path, router);
   if (path.startsWith("/api/")) {
