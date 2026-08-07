@@ -7,7 +7,7 @@ Deno.test("Metadata: GET /api/metadata/:id returns error without auth", async ()
   });
 
   const res = await app.request(req);
-  const json = await res.json();
+  const _json = await res.json();
 
   assertEquals(res.status >= 400, true);
 });

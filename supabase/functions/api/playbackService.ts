@@ -158,74 +158,88 @@ export class PlaybackService {
     // Get Storage Provider
     const storage = new StorageRouter(supabase);
 
-    // Sign audio files and calculate offset
+    // Sign audio files concurrently
+    const signedTrackResults = await Promise.all(
+      sortedAudioFiles.map(async (af, i) => {
+        const metadata = ((af as any).metadata as Record<string, unknown>) || {};
+        const storagePath = String(
+          metadata.path ||
+            (af as any).storage_path ||
+            (af as any).path ||
+            (af as any).relPath ||
+            (af as any).rel_path ||
+            metadata.relPath ||
+            metadata.rel_path ||
+            metadata.filename ||
+            (af as any).filename ||
+            "",
+        );
+
+        let duration = af.duration;
+        if (needsDurationEstimation && duration === 0) {
+          if (totalBookDuration > 0 && af.size > 0 && totalFilesSize > 0) {
+            duration = (af.size / totalFilesSize) * totalBookDuration;
+          } else if (totalBookDuration > 0) {
+            duration = totalBookDuration / sortedAudioFiles.length;
+          } else {
+            duration = af.size / 12000;
+          }
+        }
+
+        let finalSignedUrl = "";
+        let isMissing = false;
+        let resolvedCanonicalPath: string | null = null;
+
+        try {
+          const isLegacyPath = storagePath.startsWith("/") ||
+            (!storagePath.includes("://") && storagePath.length > 0);
+
+          if (isLegacyPath) {
+            const resolved = await storage.resolveAndSign(
+              storagePath,
+              libraryItemId,
+              604800,
+            );
+            finalSignedUrl = resolved.signedUrl;
+            resolvedCanonicalPath = resolved.canonicalPath;
+          } else {
+            finalSignedUrl = await storage.getSignedUrl(storagePath, 604800);
+          }
+        } catch (e: unknown) {
+          const signErr = e as Error;
+          console.warn(
+            `[PlaybackService] Missing storage file at "${storagePath}": ${signErr.message}. Skipping track.`,
+          );
+          isMissing = true;
+        }
+
+        return {
+          af,
+          index: af.index ?? i,
+          duration,
+          finalSignedUrl,
+          isMissing,
+          storagePath,
+          resolvedCanonicalPath,
+          metadata,
+          filename: String(
+            metadata.filename || (af as any).filename || `Track ${i + 1}`,
+          ),
+        };
+      }),
+    );
+
     let currentOffset = 0;
     const audioTracks: Record<string, unknown>[] = [];
     const missingTracks: string[] = [];
 
-    for (let i = 0; i < sortedAudioFiles.length; i++) {
-      const af = sortedAudioFiles[i];
-      const metadata = ((af as any).metadata as Record<string, unknown>) || {};
-      const storagePath = String(
-        metadata.path ||
-          (af as any).storage_path ||
-          (af as any).path ||
-          (af as any).relPath ||
-          (af as any).rel_path ||
-          metadata.relPath ||
-          metadata.rel_path ||
-          metadata.filename ||
-          (af as any).filename ||
-          "",
-      );
-
-      let duration = af.duration;
-      if (needsDurationEstimation && duration === 0) {
-        if (totalBookDuration > 0 && af.size > 0 && totalFilesSize > 0) {
-          duration = (af.size / totalFilesSize) * totalBookDuration;
-        } else if (totalBookDuration > 0) {
-          duration = totalBookDuration / sortedAudioFiles.length;
-        } else {
-          // If totalBookDuration is unknown, estimate based on 96 kbps (12,000 bytes/sec)
-          duration = af.size / 12000;
-        }
+    for (const res of signedTrackResults) {
+      if (res.isMissing) {
+        missingTracks.push(res.storagePath);
+        continue;
       }
 
-      let finalSignedUrl = "";
-      let isMissing = false;
-      // Track the resolved canonical path so we can optionally patch the DB
-      let resolvedCanonicalPath: string | null = null;
-
-      try {
-        // Legacy bare filesystem paths (e.g. "/audiobooks/Title/file.mp3") have
-        // no storage scheme prefix. Route them through resolveAndSign which probes
-        // b2-secondary → b2-primary → supabase under {itemId}/{filename}.
-        const isLegacyPath = storagePath.startsWith("/") ||
-          (!storagePath.includes("://") && storagePath.length > 0);
-
-        if (isLegacyPath) {
-          const resolved = await storage.resolveAndSign(
-            storagePath,
-            libraryItemId,
-            604800,
-          );
-          finalSignedUrl = resolved.signedUrl;
-          resolvedCanonicalPath = resolved.canonicalPath;
-        } else {
-          finalSignedUrl = await storage.getSignedUrl(storagePath, 604800);
-        }
-      } catch (e: unknown) {
-        const signErr = e as Error;
-        console.warn(
-          `[PlaybackService] Missing storage file at "${storagePath}": ${signErr.message}. Skipping track.`,
-        );
-        missingTracks.push(storagePath);
-        isMissing = true;
-      }
-
-      // If we resolved a legacy path to a canonical one, patch the DB entry
-      // in the background so subsequent plays skip the probe overhead.
-      if (!isMissing && resolvedCanonicalPath) {
+      if (res.resolvedCanonicalPath) {
         (async () => {
           try {
             const { data: currentItem } = await supabase
@@ -239,14 +253,12 @@ export class PlaybackService {
                 currentItem.audio_files as Record<string, unknown>[]
               ).map((af: Record<string, unknown>) => {
                 const afMeta = (af.metadata as Record<string, unknown>) || {};
-                if (
-                  String(afMeta.path ?? "") === storagePath
-                ) {
+                if (String(afMeta.path ?? "") === res.storagePath) {
                   return {
                     ...af,
                     metadata: {
                       ...afMeta,
-                      path: resolvedCanonicalPath,
+                      path: res.resolvedCanonicalPath,
                     },
                   };
                 }
@@ -259,29 +271,26 @@ export class PlaybackService {
                 .eq("id", libraryItemId);
             }
           } catch (patchErr) {
-            // Non-fatal — the signed URL still works for this session
             console.warn(
-              `[PlaybackService] Failed to patch legacy path "${storagePath}" → "${resolvedCanonicalPath}":`,
+              `[PlaybackService] Failed to patch legacy path "${res.storagePath}" → "${res.resolvedCanonicalPath}":`,
               patchErr,
             );
           }
         })();
       }
 
-      if (!isMissing && finalSignedUrl) {
+      if (res.finalSignedUrl) {
         audioTracks.push({
-          index: af.index ?? i,
+          index: res.index,
           startOffset: currentOffset,
-          duration: duration,
-          title: String(
-            metadata.filename || (af as any).filename || `Track ${i + 1}`,
-          ),
-          contentUrl: finalSignedUrl,
-          mimeType: af.mime_type,
-          codec: af.codec,
+          duration: res.duration,
+          title: res.filename,
+          contentUrl: res.finalSignedUrl,
+          mimeType: res.af.mime_type,
+          codec: res.af.codec,
           isMissing: false,
         });
-        currentOffset += duration;
+        currentOffset += res.duration;
       }
     }
 
