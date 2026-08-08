@@ -16,9 +16,25 @@ if [ $? -ne 0 ]; then
     exit 1
 fi
 
-echo "Running Deno Fmt..."
+echo "Running Deno Fmt check..."
 deno fmt --check --config supabase/functions/deno.json "$@"
 if [ $? -ne 0 ]; then
-    echo "❌ Deno Fmt failed. Please format before committing."
+    echo "❌ Deno Fmt failed. Please run 'deno fmt' before committing."
     exit 1
 fi
+
+echo "Running Deno Edge Typecheck..."
+deno check supabase/functions/api/index.ts
+if [ $? -ne 0 ]; then
+    echo "❌ Deno typecheck failed. Please fix type errors before committing."
+    exit 1
+fi
+
+echo "Running Deno Unit Tests..."
+deno test -A supabase/functions/api/
+if [ $? -ne 0 ]; then
+    echo "❌ Deno unit tests failed. Please fix broken tests before committing."
+    exit 1
+fi
+
+echo "✅ Backend pre-commit verification passed cleanly!"
