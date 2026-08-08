@@ -2,7 +2,7 @@ pre-commit:
   parallel: true
   commands:
     lint-and-check:
-      glob: "*.ts"
+      glob: "*.{ts,sql,json,yml}"
       run: ./scripts/pre-commit.sh {staged_files}
 
 commit-msg:
@@ -15,3 +15,15 @@ pre-push:
   commands:
     typecheck-and-test:
       run: deno check supabase/functions/api/index.ts && deno test -A supabase/functions/api/
+
+post-merge:
+  commands:
+    deno-check:
+      glob: "supabase/functions/deno.json"
+      run: deno check supabase/functions/api/index.ts
+
+post-checkout:
+  commands:
+    deno-check:
+      glob: "supabase/functions/deno.json"
+      run: deno check supabase/functions/api/index.ts
