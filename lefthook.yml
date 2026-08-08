@@ -13,6 +13,8 @@ commit-msg:
 pre-push:
   parallel: false
   commands:
+    security-audit:
+      run: ./scripts/security-audit.sh
     typecheck-and-test:
       run: deno check supabase/functions/api/index.ts && deno test -A supabase/functions/api/
 
