@@ -9,6 +9,18 @@ if ! which deno >/dev/null; then
     exit 0
 fi
 
+# Secret Scan Guard
+echo "Running Secret Scan check..."
+FORBIDDEN_PATTERNS="eyJh|eyJhbGci|sbp_[a-zA-Z0-9]{40}|BEGIN PRIVATE KEY|service_role"
+LEAKED_FILES=$(grep -E -l "$FORBIDDEN_PATTERNS" "$@" 2>/dev/null | grep -v '\.example' | grep -v 'pre-commit.sh' || true)
+
+if [ -n "$LEAKED_FILES" ]; then
+    echo "❌ SECURITY ALERT: Potential secret / credential leak detected in:"
+    echo "$LEAKED_FILES"
+    echo "Please remove hardcoded secrets or service role keys before committing!"
+    exit 1
+fi
+
 echo "Running Deno Lint on staged files..."
 deno lint --config supabase/functions/deno.json "$@"
 if [ $? -ne 0 ]; then
