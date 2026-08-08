@@ -22,6 +22,7 @@ import { searchRouter } from "./routes/search.ts";
 import { meRouter } from "./routes/me.ts";
 import { adminRouter } from "./routes/admin.ts";
 import { twoFactorRouter } from "./routes/twoFactor.ts";
+import { aiRouter } from "./aiService.ts";
 
 import { Variables } from "./_shared/types.ts";
 import { ApiError, serviceRoleMiddleware } from "./_shared/errors.ts";
@@ -191,6 +192,7 @@ mountRouter("/api/me", meRouter);
 mountRouter("/api/admin-analytics", adminRouter);
 mountRouter("/admin-analytics", adminRouter);
 mountRouter("/api/admin/analytics", adminRouter);
+mountRouter("/api/ai", aiRouter);
 
 // Fallback 404
 app.all("*", (c) => {
