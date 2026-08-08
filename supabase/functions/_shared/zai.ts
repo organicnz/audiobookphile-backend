@@ -444,3 +444,112 @@ Format response in valid JSON with key "summary" (2-3 sentences), "keyTakeaways"
 
   return fallback;
 }
+
+/**
+ * Generates full book executive summary, key takeaways, emotional mood, and thematic tags using Z.AI (GLM-4).
+ */
+export async function generateBookAIInsights(
+  title: string,
+  author: string | null | undefined,
+  zaiApiKey: string,
+): Promise<{
+  summary: string;
+  keyTakeaways: string[];
+  mood: string;
+  themes: string[];
+}> {
+  const authorName = author || "Unknown Author";
+  const fallbackSummary = `"${title}" by ${authorName} explores key narrative themes of human resilience, transformation, and self-discovery. Through intricate storytelling, it weaves together emotional depth and thought-provoking dialogue that resonates deeply with listeners.`;
+  const fallbackTakeaways = [
+    "Core Theme: Growth through challenge and adaptability.",
+    "Character Dynamics: Complex relationships reveal deeper human truths.",
+    "Key Lesson: Perspective shapes our understanding of choices and outcomes.",
+  ];
+  const fallbackMood = "Inspiring & Thought-Provoking";
+  const fallbackThemes = ["Resilience", "Identity", "Transformation"];
+
+  const fallback = {
+    summary: fallbackSummary,
+    keyTakeaways: fallbackTakeaways,
+    mood: fallbackMood,
+    themes: fallbackThemes,
+  };
+
+  if (!title) return fallback;
+
+  const cacheKey = `book_insights_${title.toLowerCase().trim()}||${authorName.toLowerCase().trim()}`;
+  const cachedInsights = getCachedResult<{
+    summary: string;
+    keyTakeaways: string[];
+    mood: string;
+    themes: string[];
+  }>(cacheKey);
+  if (cachedInsights) return cachedInsights;
+
+  if (!zaiApiKey) return fallback;
+
+  try {
+    const prompt = `You are an expert literary scholar and audiobook critic.
+Provide a rich, structured AI insight summary for the complete audiobook "${title}" by ${authorName}.
+
+Requirements:
+- "summary": A 3-4 sentence comprehensive executive summary of the overall narrative, central thesis, or core story arcs.
+- "keyTakeaways": Array of 3-5 concise bullet points highlighting key insights, lessons, or memorable story beats.
+- "mood": String (2-3 words) describing the emotional tone/mood of the book (e.g. "Inspiring & Philosophical", "Dark & Suspenseful", "Witty & Irreverent").
+- "themes": Array of 3-5 single-word or short phrase thematic tags (e.g. ["Resilience", "Humor", "Society", "Mortality"]).
+
+Format response strictly in valid JSON with keys: "summary", "keyTakeaways", "mood", "themes".`;
+
+    const res = await fetch(
+      "https://open.bigmodel.cn/api/paas/v4/chat/completions",
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${zaiApiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: "glm-4-flash",
+          messages: [
+            {
+              role: "system",
+              content: "You respond strictly in valid JSON format.",
+            },
+            { role: "user", content: prompt },
+          ],
+          temperature: 0.3,
+        }),
+      },
+    );
+
+    if (res.ok) {
+      const zaiData = await res.json();
+      const rawContent = zaiData.choices?.[0]?.message?.content ?? "{}";
+      const cleaned = rawContent
+        .replace(/```json\s*/gi, "")
+        .replace(/```\s*/g, "")
+        .trim();
+      const match = cleaned.match(/\{[\s\S]*\}/);
+      if (match) {
+        const parsed = JSON.parse(match[0]);
+        const result = {
+          summary: parsed.summary || fallbackSummary,
+          keyTakeaways: Array.isArray(parsed.keyTakeaways) && parsed.keyTakeaways.length > 0
+            ? parsed.keyTakeaways
+            : fallbackTakeaways,
+          mood: parsed.mood || fallbackMood,
+          themes: Array.isArray(parsed.themes) && parsed.themes.length > 0
+            ? parsed.themes
+            : fallbackThemes,
+        };
+        setCachedResult(cacheKey, result);
+        return result;
+      }
+    }
+  } catch (err: unknown) {
+    const e = err as Error;
+    console.warn("[z.ai] Book AI insights error:", e.message);
+  }
+
+  return fallback;
+}

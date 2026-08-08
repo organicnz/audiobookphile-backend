@@ -35,3 +35,20 @@ export type Variables = {
   requireUser: () => Promise<AuthUser>;
   requestId: string;
 };
+
+export type ChapterAIInsights = {
+  summary: string;
+  keyTakeaways: string[];
+  mood?: string;
+};
+
+export type BookAIInsights = {
+  bookId: string;
+  title: string;
+  author: string | null;
+  summary: string;
+  keyTakeaways: string[];
+  mood: string;
+  themes: string[];
+  isCached: boolean;
+};

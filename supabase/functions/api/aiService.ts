@@ -1,10 +1,13 @@
 import { createClient } from "npm:@supabase/supabase-js@2.44.0";
-import { Hono } from "npm:hono@^4.6.0";
+import { Context, Hono } from "npm:hono@^4.6.0";
 import { z } from "npm:zod@^3.23.8";
 import { zValidator } from "npm:@hono/zod-validator@^0.4.0";
 import { ApiError } from "./_shared/errors.ts";
+import { Variables } from "./_shared/types.ts";
+import { handleChapterAI } from "./routes/items.ts";
+import { generateBookAIInsights } from "../_shared/zai.ts";
 
-export const aiRouter = new Hono();
+export const aiRouter = new Hono<{ Variables: Variables }>();
 
 const insightsRequestSchema = z.object({
   bookId: z.string().min(1),
@@ -12,7 +15,7 @@ const insightsRequestSchema = z.object({
   author: z.string().optional().nullable(),
 });
 
-interface BookInsights {
+export interface BookInsights {
   bookId: string;
   title: string;
   author: string | null;
@@ -23,79 +26,81 @@ interface BookInsights {
   isCached: boolean;
 }
 
+export async function ensureBookAIInsights(
+  supabase: any,
+  bookId: string,
+  title: string,
+  author: string | null | undefined,
+): Promise<BookInsights> {
+  const zaiApiKey = Deno.env.get("ZAI_API_KEY") ?? Deno.env.get("ZHIPU_API_KEY") ?? "";
+
+  // 1. Check DB cache
+  const { data: existing, error: dbError } = await supabase
+    .from("book_insights")
+    .select("*")
+    .eq("book_id", bookId)
+    .maybeSingle();
+
+  if (!dbError && existing) {
+    return {
+      bookId: existing.book_id,
+      title: existing.book_title,
+      author: existing.book_author,
+      summary: existing.summary,
+      keyTakeaways: existing.key_takeaways || [],
+      mood: existing.mood || "Reflective",
+      themes: existing.themes || [],
+      isCached: true,
+    };
+  }
+
+  // 2. Generate with LLM AI Engine
+  const generated = await generateBookAIInsights(title, author, zaiApiKey);
+
+  // 3. Persist to PostgreSQL book_insights table
+  const { error: insertError } = await supabase.from("book_insights").upsert({
+    book_id: bookId,
+    book_title: title,
+    book_author: author || null,
+    summary: generated.summary,
+    key_takeaways: generated.keyTakeaways,
+    mood: generated.mood,
+    themes: generated.themes,
+    updated_at: new Date().toISOString(),
+  });
+
+  if (insertError) {
+    console.warn("[aiService] Failed to persist book insights to DB:", insertError.message);
+  }
+
+  return {
+    bookId,
+    title,
+    author: author || null,
+    summary: generated.summary,
+    keyTakeaways: generated.keyTakeaways,
+    mood: generated.mood,
+    themes: generated.themes,
+    isCached: false,
+  };
+}
+
 aiRouter.post(
   "/insights",
   zValidator("json", insightsRequestSchema),
   async (c) => {
     const { bookId, title, author } = c.req.valid("json");
-    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-    const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const supabase = createClient(supabaseUrl, supabaseServiceKey);
+    const supabase = c.get("supabase");
 
     try {
-      // 1. Query book_insights database table for cached insights
-      const { data: existing, error: dbError } = await supabase
-        .from("book_insights")
-        .select("*")
-        .eq("book_id", bookId)
-        .maybeSingle();
-
-      if (!dbError && existing) {
-        return c.json<BookInsights>({
-          bookId: existing.book_id,
-          title: existing.book_title,
-          author: existing.book_author,
-          summary: existing.summary,
-          keyTakeaways: existing.key_takeaways || [],
-          mood: existing.mood || "Reflective",
-          themes: existing.themes || [],
-          isCached: true,
-        });
-      }
-
-      // 2. Compile structured AI insights
-      const compiledSummary = `"${title}"${
-        author ? ` by ${author}` : ""
-      } explores key narrative themes of human resilience, transformation, and self-discovery. Through intricate storytelling, it weaves together emotional depth and thought-provoking dialogue that resonates deeply with listeners.`;
-
-      const compiledTakeaways = [
-        "Core Theme: Growth through challenge and adaptability.",
-        "Character Dynamics: Complex relationships reveal deeper human truths.",
-        "Key Lesson: Perspective shapes our understanding of choices and outcomes.",
-      ];
-
-      const compiledMood = "Inspiring & Thought-Provoking";
-      const compiledThemes = ["Resilience", "Identity", "Transformation"];
-
-      // 3. Persist to PostgreSQL database
-      const { error: insertError } = await supabase.from("book_insights").upsert({
-        book_id: bookId,
-        book_title: title,
-        book_author: author || null,
-        summary: compiledSummary,
-        key_takeaways: compiledTakeaways,
-        mood: compiledMood,
-        themes: compiledThemes,
-        updated_at: new Date().toISOString(),
-      });
-
-      if (insertError) {
-        console.warn("[aiRouter] Failed to persist insights to DB:", insertError.message);
-      }
-
-      return c.json<BookInsights>({
-        bookId,
-        title,
-        author: author || null,
-        summary: compiledSummary,
-        keyTakeaways: compiledTakeaways,
-        mood: compiledMood,
-        themes: compiledThemes,
-        isCached: false,
-      });
+      const insights = await ensureBookAIInsights(supabase, bookId, title, author);
+      return c.json<BookInsights>(insights);
     } catch (err: any) {
       console.error("[aiRouter] Error generating insights:", err);
       throw new ApiError(err.message || "Failed to generate insights", "AI_INSIGHTS_ERROR", 500);
     }
   }
 );
+
+aiRouter.post("/chapter", handleChapterAI);
+aiRouter.post("/chapter-ai", handleChapterAI);

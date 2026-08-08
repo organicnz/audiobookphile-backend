@@ -5,6 +5,7 @@ import { Variables } from "../_shared/types.ts";
 import { getProxyOrigin } from "../../api/_shared/proxy.ts";
 import { generateChapterAIInsights } from "../../_shared/zai.ts";
 import { fetchBookMetadata } from "../../_shared/coverFetch.ts";
+import { ensureBookAIInsights } from "../aiService.ts";
 
 export const itemsRouter = new Hono<{ Variables: Variables }>();
 
@@ -461,7 +462,7 @@ itemsRouter.post("/batch", async (c) => {
   return c.json({ items: mappedItems });
 });
 
-async function handleChapterAI(c: any) {
+export async function handleChapterAI(c: Context<{ Variables: Variables }>) {
   const body = await c.req.json().catch(() => ({}));
   const zaiApiKey = Deno.env.get("ZAI_API_KEY") ??
     Deno.env.get("ZHIPU_API_KEY") ?? "";
@@ -487,10 +488,10 @@ async function handleChapterAI(c: any) {
   }
 }
 
-itemsRouter.post("/items/:id/chapters/ai", handleChapterAI);
+itemsRouter.post("/:id/chapters/ai", handleChapterAI);
 itemsRouter.post("/chapter-ai", handleChapterAI);
 
-async function handleSyncCovers(c: any) {
+async function handleSyncCovers(c: Context<{ Variables: Variables }>) {
   const supabase = c.get("supabase");
   try {
     const url = new URL(c.req.url);
@@ -539,8 +540,8 @@ async function handleSyncCovers(c: any) {
 
     return c.json({
       success: true,
-      updatedCount,
-      totalChecked: (items || []).length,
+      updated: updatedCount,
+      message: `Updated covers for ${updatedCount} books`,
     });
   } catch (e: any) {
     return c.json(
@@ -550,34 +551,34 @@ async function handleSyncCovers(c: any) {
   }
 }
 
-async function handleSyncDurations(c: any) {
+async function handleSyncDurations(c: Context<{ Variables: Variables }>) {
   const supabase = c.get("supabase");
   try {
-    const url = new URL(c.req.url);
-    const bookId = url.searchParams.get("bookId");
-    let query = supabase.from("library_items").select("*");
-    if (bookId) query = query.eq("id", bookId);
-    const { data: books, error } = await query;
+    const { data: items, error } = await supabase
+      .from("library_items")
+      .select("id, audio_files")
+      .or("duration.is.null,duration.eq.0");
+
     if (error) throw error;
 
     let updatedCount = 0;
-    for (const book of books || []) {
-      if (!book.audio_files) continue;
-      let files = book.audio_files as any[];
-      let _changed = false;
-      let newTotalDuration = 0;
-      for (const f of files) {
-        let dur = f.duration || f.metadata?.duration || 0;
-        newTotalDuration += dur;
-      }
-      if (newTotalDuration > 0 && newTotalDuration !== book.duration) {
-        await supabase.from("library_items").update({
-          duration: newTotalDuration,
-        }).eq("id", book.id);
+    for (const item of items || []) {
+      const files = (item.audio_files as any[]) || [];
+      const totalDuration = files.reduce((acc, f) => acc + (f.duration || 0), 0);
+      if (totalDuration > 0) {
+        await supabase
+          .from("library_items")
+          .update({ duration: Math.round(totalDuration) })
+          .eq("id", item.id);
         updatedCount++;
       }
     }
-    return c.json({ success: true, updatedCount });
+
+    return c.json({
+      success: true,
+      updated: updatedCount,
+      message: `Updated duration for ${updatedCount} items`,
+    });
   } catch (e: any) {
     return c.json({
       success: false,
@@ -590,3 +591,39 @@ itemsRouter.post("/sync-covers", handleSyncCovers);
 itemsRouter.post("/sync-durations", handleSyncDurations);
 itemsRouter.get("/sync-covers", handleSyncCovers);
 itemsRouter.get("/sync-durations", handleSyncDurations);
+itemsRouter.post("/sync-insights", handleSyncBookInsights);
+itemsRouter.get("/sync-insights", handleSyncBookInsights);
+
+async function handleSyncBookInsights(c: Context<{ Variables: Variables }>) {
+  const supabase = c.get("supabase");
+  try {
+    const url = new URL(c.req.url);
+    const limitParam = parseInt(url.searchParams.get("limit") || "5", 10);
+    const limit = Math.min(Math.max(limitParam, 1), 20);
+
+    const { data: items, error: itemsError } = await supabase
+      .from("library_items")
+      .select("id, title, author_names_first_last, author_names_last_first")
+      .limit(limit);
+
+    if (itemsError) throw itemsError;
+
+    let processedCount = 0;
+    for (const item of items || []) {
+      const title = item.title || "";
+      const author = item.author_names_first_last || item.author_names_last_first || null;
+      if (title) {
+        await ensureBookAIInsights(supabase, item.id, title, author);
+        processedCount++;
+      }
+    }
+
+    return c.json({
+      success: true,
+      processed: processedCount,
+      message: `Processed AI insights for ${processedCount} books`,
+    });
+  } catch (e: any) {
+    return c.json({ error: e.message || "Failed to sync book insights" }, 500);
+  }
+}

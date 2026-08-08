@@ -9,7 +9,7 @@ import { metadataRouter } from "./routes/metadata.ts";
 import { authorsRouter } from "./routes/authors.ts";
 import { usersRouter } from "./routes/users.ts";
 import { librariesRouter } from "./routes/libraries.ts";
-import { itemsRouter } from "./routes/items.ts";
+import { itemsRouter, handleChapterAI } from "./routes/items.ts";
 import { playbackRouter } from "./routes/playback.ts";
 import { progressRouter } from "./routes/progress.ts";
 import { playlistsRouter } from "./routes/playlists.ts";
@@ -189,10 +189,13 @@ mountRouter("/api/me/search", searchRouter);
 mountRouter("/api/search", searchRouter);
 mountRouter("/api", searchRouter);
 mountRouter("/api/me", meRouter);
-mountRouter("/api/admin-analytics", adminRouter);
-mountRouter("/admin-analytics", adminRouter);
 mountRouter("/api/admin/analytics", adminRouter);
 mountRouter("/api/ai", aiRouter);
+
+const chapterAiRouter = new Hono<{ Variables: Variables }>();
+chapterAiRouter.post("/chapter-ai", handleChapterAI);
+chapterAiRouter.post("/ai/chapter", handleChapterAI);
+mountRouter("/api", chapterAiRouter);
 
 // Fallback 404
 app.all("*", (c) => {
