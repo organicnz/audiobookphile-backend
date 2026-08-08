@@ -6,14 +6,17 @@
     "npm:@aws-sdk/client-s3@^3.693.0": "3.1085.0",
     "npm:@aws-sdk/s3-request-presigner@3.1085.0": "3.1085.0",
     "npm:@aws-sdk/s3-request-presigner@^3.693.0": "3.1085.0",
+    "npm:@hono/zod-validator@0.4": "0.4.3_hono@4.13.0_zod@3.23.8",
     "npm:@sentry/deno@8.32.0": "8.32.0",
     "npm:@supabase/supabase-js@2": "2.44.0",
     "npm:@supabase/supabase-js@2.44.0": "2.44.0",
     "npm:hono@4.4.0": "4.4.0",
+    "npm:hono@^4.6.0": "4.13.0",
     "npm:music-metadata@10.2.0": "10.2.0",
     "npm:music-metadata@10.8.0": "10.8.0",
     "npm:openai@^4.52.5": "4.104.0_zod@3.23.8",
-    "npm:zod@3.23.8": "3.23.8"
+    "npm:zod@3.23.8": "3.23.8",
+    "npm:zod@^3.23.8": "3.23.8"
   },
   "jsr": {
     "@supabase/functions-js@2.110.2": {
@@ -237,6 +240,13 @@
     },
     "@borewit/text-codec@0.2.2": {
       "integrity": "sha512-DDaRehssg1aNrH4+2hnj1B7vnUGEjU6OIlyRdkMd0aUdIUvKXrJfXsy8LVtXAy7DRvYVluWbMspsRhz2lcW0mQ=="
+    },
+    "@hono/zod-validator@0.4.3_hono@4.13.0_zod@3.23.8": {
+      "integrity": "sha512-xIgMYXDyJ4Hj6ekm9T9Y27s080Nl9NXHcJkOvkXPhubOLj8hZkOL8pDnnXfvCf5xEE8Q4oMFenQUZZREUY2gqQ==",
+      "dependencies": [
+        "hono@4.13.0",
+        "zod"
+      ]
     },
     "@sec-ant/readable-stream@0.4.1": {
       "integrity": "sha512-831qok9r2t8AlxLko40y2ebgSDhenenCatLVeW/uBtnHPyhHOvG0C7TvfgecV+wHzIm5KUICgzmVpWS+IMEAeg=="
@@ -538,6 +548,9 @@
       "dependencies": [
         "function-bind"
       ]
+    },
+    "hono@4.13.0": {
+      "integrity": "sha512-jhunvfHWxd7J5EFfSgH4xsYJzSe/lfqbUCxiyyeaQasUsXeEHXtzVid+7EOGByc5JnFa23SSFL3Y2RV/z1T+eQ=="
     },
     "hono@4.4.0": {
       "integrity": "sha512-Bb2GHk8jmlLIuxc3U+7UBGOoA5lByJTAFnRdH2N2fqEVy9TEQzJ9saIJUQ/ZqBvEvgEFe7UjPFNSFi8cyeU+3Q=="
