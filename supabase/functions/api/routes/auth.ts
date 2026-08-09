@@ -459,9 +459,14 @@ authRouter.post("/magic-link", async (c) => {
     });
 
     if (error) {
+      console.error(
+        "[magic-link] Supabase signInWithOtp error:",
+        error.message,
+        error.code,
+      );
       return c.json({
-        error: authErrorHandlers.VALIDATION_ERROR().message,
-        code: authErrorHandlers.VALIDATION_ERROR().code,
+        error: error.message || authErrorHandlers.VALIDATION_ERROR().message,
+        code: error.code || authErrorHandlers.VALIDATION_ERROR().code,
       }, authErrorHandlers.VALIDATION_ERROR().statusCode);
     }
 
