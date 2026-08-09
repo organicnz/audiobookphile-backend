@@ -479,54 +479,33 @@ twoFactorRouter.post("/verify-login", async (c) => {
       }
     }
 
-    const { data: userData } = await adminSupabase.auth.admin.getUserById(
-      userId,
-    );
-    const userEmail = userData?.user?.email;
+    // Directly create a session for the user — no OTP round-trip needed since
+    // 2FA has already been verified above.
+    const { data: sessionData, error: sessionError } = await adminSupabase.auth
+      .admin
+      .createSession({ user_id: userId });
 
-    if (!userEmail) {
-      return c.json({ error: "User email not found" }, 500);
-    }
-
-    const { data: linkData, error: linkError } = await adminSupabase.auth.admin
-      .generateLink({
-        type: "magiclink",
-        email: userEmail,
-      });
-
-    if (linkError || !linkData?.properties?.hashed_token) {
-      console.error("[2fa] Failed to generate login session link:", linkError);
-      return c.json({ error: "Failed to establish user session" }, 500);
-    }
-
-    const { data: verifyData, error: verifyError } = await supabase.auth
-      .verifyOtp({
-        email: userEmail,
-        token: linkData.properties.hashed_token,
-        type: "magiclink",
-      });
-
-    if (verifyError || !verifyData.session || !verifyData.user) {
-      console.error("[2fa] Failed to verify login OTP:", verifyError);
+    if (sessionError || !sessionData?.session || !sessionData?.user) {
+      console.error("[2fa] Failed to create session:", sessionError);
       return c.json({ error: "Failed to establish user session" }, 500);
     }
 
     const userPayload = {
       user: {
-        id: verifyData.user.id,
-        username: profile?.username || verifyData.user.email?.split("@")[0] ||
+        id: sessionData.user.id,
+        username: profile?.username || sessionData.user.email?.split("@")[0] ||
           "User",
-        email: verifyData.user.email,
+        email: sessionData.user.email,
         type: profile?.user_type || "user",
-        token: verifyData.session.access_token,
-        refreshToken: verifyData.session.refresh_token,
+        token: sessionData.session.access_token,
+        refreshToken: sessionData.session.refresh_token,
         mediaProgress: [],
         seriesHideFromContinueListening: [],
         bookmarks: [],
         isActive: true,
         isLocked: false,
         lastSeen: Date.now(),
-        createdAt: new Date(profile?.created_at || verifyData.user.created_at)
+        createdAt: new Date(profile?.created_at || sessionData.user.created_at)
           .getTime(),
         permissions: {
           download: true,
