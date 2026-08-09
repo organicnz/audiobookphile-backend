@@ -32,7 +32,8 @@ export async function ensureBookAIInsights(
   title: string,
   author: string | null | undefined,
 ): Promise<BookInsights> {
-  const zaiApiKey = Deno.env.get("ZAI_API_KEY") ?? Deno.env.get("ZHIPU_API_KEY") ?? "";
+  const zaiApiKey = Deno.env.get("ZAI_API_KEY") ??
+    Deno.env.get("ZHIPU_API_KEY") ?? "";
 
   // 1. Check DB cache
   const { data: existing, error: dbError } = await supabase
@@ -70,7 +71,10 @@ export async function ensureBookAIInsights(
   });
 
   if (insertError) {
-    console.warn("[aiService] Failed to persist book insights to DB:", insertError.message);
+    console.warn(
+      "[aiService] Failed to persist book insights to DB:",
+      insertError.message,
+    );
   }
 
   return {
@@ -93,14 +97,23 @@ aiRouter.post(
     const supabase = c.get("supabase");
 
     try {
-      const insights = await ensureBookAIInsights(supabase, bookId, title, author);
+      const insights = await ensureBookAIInsights(
+        supabase,
+        bookId,
+        title,
+        author,
+      );
       return c.json<BookInsights>(insights);
     } catch (err: any) {
       console.error("[aiRouter] Error generating insights:", err);
-      throw new ApiError(err.message || "Failed to generate insights", "AI_INSIGHTS_ERROR", 500);
+      throw new ApiError(
+        err.message || "Failed to generate insights",
+        "AI_INSIGHTS_ERROR",
+        500,
+      );
     }
-  }
+  },
 );
 
-aiRouter.post("/chapter", handleChapterAI);
-aiRouter.post("/chapter-ai", handleChapterAI);
+aiRouter.post("/chapter", handleChapterAI as any);
+aiRouter.post("/chapter-ai", handleChapterAI as any);
