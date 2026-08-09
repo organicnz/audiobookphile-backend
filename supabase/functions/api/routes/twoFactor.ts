@@ -409,7 +409,6 @@ twoFactorRouter.post("/disable", async (c) => {
  * POST /verify-login - Verify 2FA challenge during sign in
  */
 twoFactorRouter.post("/verify-login", async (c) => {
-  const supabase = c.get("supabase");
   const supabaseUrl = c.get("supabaseUrl");
   const serviceRoleKey = c.get("serviceRoleKey");
   const adminSupabase = createClient(supabaseUrl, serviceRoleKey);
