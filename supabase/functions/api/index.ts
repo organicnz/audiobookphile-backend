@@ -190,6 +190,7 @@ mountRouter("/api/search", searchRouter);
 mountRouter("/api", searchRouter);
 mountRouter("/api/me", meRouter);
 mountRouter("/api/admin/analytics", adminRouter);
+mountRouter("/api/admin-analytics", adminRouter);
 mountRouter("/api/ai", aiRouter);
 
 const chapterAiRouter = new Hono<{ Variables: Variables }>();
