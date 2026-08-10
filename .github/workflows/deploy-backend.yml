@@ -35,6 +35,9 @@ jobs:
       - name: Deno Check (Type Safety)
         run: deno check index.ts
 
+      - name: Deno Tests (Authorization Matrix & Security)
+        run: deno test --allow-env --allow-net auth_test.ts jwt_test.ts metadata_test.ts playback_test.ts two_factor_test.ts auth_matrix_test.ts
+
   deploy:
     name: Deploy to Supabase Production
     needs: verify

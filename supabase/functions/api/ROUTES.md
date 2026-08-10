@@ -13,7 +13,7 @@ user-scoped), **admin** (`requireAdminRole` — admin or root, DB-fresh per requ
 | users.ts | GET `/`, POST `/`, PATCH `/ :id` (role changes never on self), DELETE `/ :id` (self allowed) |
 | libraries.ts | POST `/`, PATCH `/ :id`, DELETE `/ :id`, POST `/ :id/scan`, `/ :id/smart-sort`, `/ :id/deduplicate` |
 | settings.ts | **whole router** — filesystem, backups, api-keys, sessions, feeds, shares, genres, tags, storage-sync, backup-database |
-| metadata.ts | **whole router** — narrators/tags/genres CRUD, match-book, scrape-metadata |
+| metadata.ts | **whole router** — mounted bare under `/api`; real paths: PATCH/DELETE `/api/narrators/:id`, DELETE `/api/tags/:id`, DELETE `/api/genres/:id`, POST `/api/match-book`, POST `/api/scrape-metadata`, POST `/api/metadata/scrape` |
 | authors.ts | PATCH `/ :id`, DELETE `/ :id`, POST `/ :id/match`, POST `/ :id/image`, DELETE `/ :id/image`, POST `/sync-authors` |
 | items.ts | DELETE `/ :id/cover`, POST/PATCH `/ :id/cover`, sync-covers, sync-durations, sync-insights |
 | downloads.ts | POST `/upload-presign`, POST `/upload/presign` |
