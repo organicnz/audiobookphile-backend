@@ -12,6 +12,7 @@
     "npm:@supabase/supabase-js@2.44.0": "2.44.0",
     "npm:hono@4.4.0": "4.4.0",
     "npm:hono@^4.6.0": "4.13.0",
+    "npm:jose@5.9.6": "5.9.6",
     "npm:music-metadata@10.2.0": "10.2.0",
     "npm:music-metadata@10.8.0": "10.8.0",
     "npm:openai@^4.52.5": "4.104.0_zod@3.23.8",
@@ -567,6 +568,9 @@
     "is-stream@4.0.1": {
       "integrity": "sha512-Dnz92NInDqYckGEUJv689RbRiTSEHCQ7wOVeALbkOz999YpqT46yMRIGtSNl2iCL1waAZSx40+h59NV/EwzV/A=="
     },
+    "jose@5.9.6": {
+      "integrity": "sha512-AMlnetc9+CV9asI19zHmrgS/WYsWUwCn2R7RzlbJWD7F9eWYUTGyBmU9o6PxngtLGOiDGPRu+Uc4fhKzbpteZQ=="
+    },
     "link@2.1.2": {
       "integrity": "sha512-n+OitQgtITNBGiWmEMgMiXo/fkf3yeyLm2nXm87vO4DDpaYrx57AZs/PMDk25qJIv+l586V226B2mA1H/n9zvg==",
       "bin": true
@@ -768,6 +772,7 @@
       "npm:@sentry/deno@8.32.0",
       "npm:@supabase/supabase-js@2.44.0",
       "npm:hono@4.4.0",
+      "npm:jose@5.9.6",
       "npm:music-metadata@10.2.0",
       "npm:zod@3.23.8"
     ]

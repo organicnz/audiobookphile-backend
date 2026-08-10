@@ -320,7 +320,6 @@ const handleCoverUpload = async (c: Context) => {
   if (!requireAdminRole(user)) {
     return c.json({ error: "Forbidden: Admin access required" }, 403);
   }
-  const supabase = c.get("supabase");
 
   const supabaseUrl = c.get("supabaseUrl");
   const serviceRoleKey = c.get("serviceRoleKey");
