@@ -1,17 +1,14 @@
 import { Hono } from "hono";
 import { createClient } from "npm:@supabase/supabase-js@2.44.0";
 import { Variables } from "../_shared/types.ts";
+import { requireAdminRole } from "../_shared/auth.ts";
 
 export const migrateBatchRouter = new Hono<{ Variables: Variables }>();
 
 migrateBatchRouter.post("/", async (c) => {
-  const user = c.get("user")!;
-  const supabase = c.get("supabase");
-
-  const { data: profile } = await supabase.from("profiles").select("user_type")
-    .eq("id", user.id).single();
-  if (profile?.user_type !== "admin") {
-    return c.json({ error: "Forbidden" }, 403);
+  const user = c.get("user");
+  if (!requireAdminRole(user)) {
+    return c.json({ error: "Forbidden: Admin access required" }, 403);
   }
 
   const supabaseUrl = c.get("supabaseUrl");

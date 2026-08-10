@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { StorageRouter } from "../../_shared/storage-router.ts";
 import { Variables } from "../_shared/types.ts";
+import { requireAdminRole } from "../_shared/auth.ts";
 import { presignUpload } from "../../_shared/uploadPresign.ts";
 
 export const downloadsRouter = new Hono<{ Variables: Variables }>();
@@ -246,6 +247,9 @@ downloadsRouter.get("/:id/file/:fileId/download", async (c) => {
 });
 
 async function handleUploadPresign(c: any) {
+  if (!requireAdminRole(c.get("user"))) {
+    return c.json({ error: "Forbidden: Admin access required" }, 403);
+  }
   const supabase = c.get("supabase");
   const body = await c.req.json().catch(() => ({}));
   const { filename, contentType } = body;

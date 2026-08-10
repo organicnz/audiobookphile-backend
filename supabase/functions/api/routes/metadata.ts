@@ -1,8 +1,32 @@
 import { Hono } from "hono";
+import type { MiddlewareHandler } from "hono";
 import { Variables } from "../_shared/types.ts";
+import { requireAdminRole } from "../_shared/auth.ts";
 import { enrichMetadataWithZAI } from "../../_shared/zai.ts";
 
 export const metadataRouter = new Hono<{ Variables: Variables }>();
+
+// Global metadata maintenance (narrators/tags/genres CRUD, external match &
+// scrape) touches server-wide content — strictly admin/root only. Guards are
+// bound to the router's own patterns (NOT "*") so they never intercept other
+// routers mounted under /api.
+const adminGuard: MiddlewareHandler<{ Variables: Variables }> = async (c, next) => {
+  if (!requireAdminRole(c.get("user"))) {
+    return c.json({ error: "Forbidden: Admin access required" }, 403);
+  }
+  await next();
+};
+
+for (const pattern of [
+  "/narrators/:id",
+  "/tags/:id",
+  "/genres/:id",
+  "/match-book",
+  "/scrape-metadata",
+  "/metadata/scrape",
+]) {
+  metadataRouter.use(pattern, adminGuard);
+}
 
 // --- NARRATORS ---
 metadataRouter.patch("/narrators/:id", async (c) => {

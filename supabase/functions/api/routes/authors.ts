@@ -2,11 +2,16 @@ import { Hono } from "hono";
 import { createClient } from "npm:@supabase/supabase-js@2.44.0";
 // getProxyOrigin removed
 import { Variables } from "../_shared/types.ts";
+import { requireAdminRole } from "../_shared/auth.ts";
 import { fetchAuthorAvatar } from "../../_shared/avatarFetcher.ts";
 
 export const authorsRouter = new Hono<{ Variables: Variables }>();
 
 authorsRouter.patch("/:id", async (c) => {
+  const user = c.get("user");
+  if (!requireAdminRole(user)) {
+    return c.json({ error: "Forbidden: Admin access required" }, 403);
+  }
   const supabase = c.get("supabase");
   const authorId = c.req.param("id");
   const body = await c.req.json();
@@ -27,6 +32,10 @@ authorsRouter.patch("/:id", async (c) => {
 });
 
 authorsRouter.delete("/:id", async (c) => {
+  const user = c.get("user");
+  if (!requireAdminRole(user)) {
+    return c.json({ error: "Forbidden: Admin access required" }, 403);
+  }
   const supabase = c.get("supabase");
   const authorId = c.req.param("id");
 
@@ -36,10 +45,11 @@ authorsRouter.delete("/:id", async (c) => {
 });
 
 authorsRouter.post("/:id/match", async (c) => {
-  const _user = c.get("user")!;
+  const user = c.get("user");
+  if (!requireAdminRole(user)) {
+    return c.json({ error: "Forbidden: Admin access required" }, 403);
+  }
   const supabase = c.get("supabase");
-
-  const _requiresServiceRole = true;
 
   const supabaseUrl = c.get("supabaseUrl");
   const serviceRoleKey = c.get("serviceRoleKey");
@@ -109,14 +119,11 @@ authorsRouter.post("/:id/match", async (c) => {
 });
 
 authorsRouter.post("/:id/image", async (c) => {
-  const user = c.get("user")!;
-  const supabase = c.get("supabase");
-
-  const { data: profile } = await supabase.from("profiles").select("user_type")
-    .eq("id", user.id).single();
-  if (profile?.user_type !== "admin") {
-    return c.json({ error: "Forbidden" }, 403);
+  const user = c.get("user");
+  if (!requireAdminRole(user)) {
+    return c.json({ error: "Forbidden: Admin access required" }, 403);
   }
+  const supabase = c.get("supabase");
 
   const supabaseUrl = c.get("supabaseUrl");
   const serviceRoleKey = c.get("serviceRoleKey");
@@ -142,14 +149,11 @@ authorsRouter.post("/:id/image", async (c) => {
 });
 
 authorsRouter.delete("/:id/image", async (c) => {
-  const user = c.get("user")!;
-  const supabase = c.get("supabase");
-
-  const { data: profile } = await supabase.from("profiles").select("user_type")
-    .eq("id", user.id).single();
-  if (profile?.user_type !== "admin") {
-    return c.json({ error: "Forbidden" }, 403);
+  const user = c.get("user");
+  if (!requireAdminRole(user)) {
+    return c.json({ error: "Forbidden: Admin access required" }, 403);
   }
+  const supabase = c.get("supabase");
 
   const authorId = c.req.param("id");
 
@@ -180,6 +184,9 @@ authorsRouter.get("/:id/image", async (c) => {
 });
 
 async function handleSyncAuthors(c: any) {
+  if (!requireAdminRole(c.get("user"))) {
+    return c.json({ error: "Forbidden: Admin access required" }, 403);
+  }
   const supabase = c.get("supabase");
   const url = new URL(c.req.url);
   const limit = parseInt(url.searchParams.get("limit") || "10", 10);

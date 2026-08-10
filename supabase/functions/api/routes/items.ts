@@ -2,6 +2,7 @@ import { Context, Hono } from "hono";
 import { createClient } from "npm:@supabase/supabase-js@2.44.0";
 import { LibraryItemWithBooks, mapBookForMobile } from "../../api/mappers.ts";
 import { Variables } from "../_shared/types.ts";
+import { requireAdminRole } from "../_shared/auth.ts";
 import { getProxyOrigin } from "../../api/_shared/proxy.ts";
 import { generateChapterAIInsights } from "../../_shared/zai.ts";
 import { fetchBookMetadata } from "../../_shared/coverFetch.ts";
@@ -291,8 +292,10 @@ itemsRouter.get("/:id/cover", async (c) => {
 });
 
 itemsRouter.delete("/:id/cover", async (c) => {
-  const _user = c.get("user")!;
-  const _requiresServiceRole = true;
+  const user = c.get("user");
+  if (!requireAdminRole(user)) {
+    return c.json({ error: "Forbidden: Admin access required" }, 403);
+  }
 
   const supabaseUrl = c.get("supabaseUrl");
   const serviceRoleKey = c.get("serviceRoleKey");
@@ -313,13 +316,11 @@ itemsRouter.delete("/:id/cover", async (c) => {
 });
 
 const handleCoverUpload = async (c: Context) => {
-  const _user = c.get("user")!;
+  const user = c.get("user");
+  if (!requireAdminRole(user)) {
+    return c.json({ error: "Forbidden: Admin access required" }, 403);
+  }
   const supabase = c.get("supabase");
-
-  const _requiresServiceRole = true;
-
-  const { data: _profile } = await supabase.from("profiles").select("user_type")
-    .eq("id", _user.id).single();
 
   const supabaseUrl = c.get("supabaseUrl");
   const serviceRoleKey = c.get("serviceRoleKey");
@@ -492,6 +493,9 @@ itemsRouter.post("/:id/chapters/ai", handleChapterAI);
 itemsRouter.post("/chapter-ai", handleChapterAI);
 
 async function handleSyncCovers(c: Context<{ Variables: Variables }>) {
+  if (!requireAdminRole(c.get("user"))) {
+    return c.json({ error: "Forbidden: Admin access required" }, 403);
+  }
   const supabase = c.get("supabase");
   try {
     const url = new URL(c.req.url);
@@ -552,6 +556,9 @@ async function handleSyncCovers(c: Context<{ Variables: Variables }>) {
 }
 
 async function handleSyncDurations(c: Context<{ Variables: Variables }>) {
+  if (!requireAdminRole(c.get("user"))) {
+    return c.json({ error: "Forbidden: Admin access required" }, 403);
+  }
   const supabase = c.get("supabase");
   try {
     const { data: items, error } = await supabase
@@ -595,6 +602,9 @@ itemsRouter.post("/sync-insights", handleSyncBookInsights);
 itemsRouter.get("/sync-insights", handleSyncBookInsights);
 
 async function handleSyncBookInsights(c: Context<{ Variables: Variables }>) {
+  if (!requireAdminRole(c.get("user"))) {
+    return c.json({ error: "Forbidden: Admin access required" }, 403);
+  }
   const supabase = c.get("supabase");
   try {
     const url = new URL(c.req.url);
