@@ -478,8 +478,13 @@ twoFactorRouter.post("/verify-login", async (c) => {
       }
     }
 
-    // Directly create a session for the user — no OTP round-trip needed since
-    // 2FA has already been verified above.
+    // 2FA has been verified above; all that remains is minting a GoTrue
+    // session for the user. A magic-link OTP is minted via the admin API and
+    // consumed with its pre-hashed token: admin generateLink returns
+    // `hashed_token` = SHA-224(email + otp), i.e. the exact hash stored on
+    // auth.users.recovery_token. It must be passed as `token_hash` — passing
+    // it as `token` makes GoTrue re-hash it (email + token) and reject the
+    // verify with "Token has expired or is invalid".
     const { data: userData } = await adminSupabase.auth.admin.getUserById(
       userId,
     );
@@ -500,12 +505,9 @@ twoFactorRouter.post("/verify-login", async (c) => {
       return c.json({ error: "Failed to establish user session" }, 500);
     }
 
-    // Use the admin client (service role) to verify the OTP — the anon client
-    // cannot consume admin-generated tokens.
     const { data: verifyData, error: verifyError } = await adminSupabase.auth
       .verifyOtp({
-        email: userEmail,
-        token: linkData.properties.hashed_token,
+        token_hash: linkData.properties.hashed_token,
         type: "magiclink",
       });
 
