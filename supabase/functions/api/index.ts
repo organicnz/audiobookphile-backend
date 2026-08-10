@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
+import { createClient } from "npm:@supabase/supabase-js@2.44.0";
 import { Sentry } from "../_shared/sentry.ts";
 
 // Native Hono Routers
@@ -51,18 +52,44 @@ app.use(
 );
 
 // 2. Health check (before auth so it's always accessible)
-app.get("/api/health", (c) => {
+app.get("/api/health", async (c) => {
   const zaiConfigured = Boolean(
     Deno.env.get("ZAI_API_KEY") || Deno.env.get("ZHIPU_API_KEY"),
   );
+  const url = Deno.env.get("SUPABASE_URL") || "";
+  const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
+  const tables = [
+    "profiles",
+    "libraries",
+    "library_items",
+    "media_progress",
+    "book_insights",
+    "authors",
+  ];
+  const tableStatus: Record<string, string> = {};
+  if (url && serviceRoleKey) {
+    const client = createClient(url, serviceRoleKey);
+    await Promise.all(
+      tables.map(async (table) => {
+        const { error } = await client.from(table).select("id", {
+          count: "exact",
+          head: true,
+        });
+        tableStatus[table] = error ? "error" : "ok";
+      }),
+    );
+  } else {
+    for (const table of tables) tableStatus[table] = "unconfigured";
+  }
   return c.json({
     status: "ok",
     timestamp: new Date().toISOString(),
     version: "2026.07.24",
     services: {
-      database: "connected",
+      database: url && serviceRoleKey ? "connected" : "unconfigured",
       zai: zaiConfigured ? "configured" : "unconfigured",
     },
+    tables: tableStatus,
   });
 });
 
@@ -124,6 +151,15 @@ const handleApiError = (err: unknown, c: any) => {
       } (${(err as Error).constructor.name})`,
     );
     if (Deno.env.get("NODE_ENV") === "production") {
+      Sentry.setContext("request", {
+        method: c.req.method,
+        path: c.req.path,
+        requestId: c.get("requestId"),
+      });
+      const userId = c.get("userId") as string | undefined;
+      if (userId) {
+        Sentry.setUser({ id: userId });
+      }
       Sentry.captureException(err);
     }
     return c.json({ error: "Internal Server Error" }, 500);
