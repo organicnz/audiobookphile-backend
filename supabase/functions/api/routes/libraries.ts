@@ -7,6 +7,7 @@ import {
 import { Database } from "../../../../src/types/supabase.ts";
 import { z } from "zod";
 import { Variables } from "../_shared/types.ts";
+import { requireAdminRole } from "../_shared/auth.ts";
 import { smartSortLibraryItems } from "../../_shared/zai.ts";
 
 export const librariesRouter = new Hono<{ Variables: Variables }>();
@@ -40,6 +41,10 @@ librariesRouter.get("/", async (c) => {
 });
 
 librariesRouter.post("/", async (c) => {
+  const user = c.get("user");
+  if (!requireAdminRole(user)) {
+    return c.json({ error: "Forbidden: Admin access required" }, 403);
+  }
   const supabase = c.get("supabase");
   const rawBody = await c.req.json();
   const LibraryCreatePayload = z.object({
@@ -93,6 +98,10 @@ librariesRouter.post("/", async (c) => {
 });
 
 librariesRouter.patch("/:id", async (c) => {
+  const user = c.get("user");
+  if (!requireAdminRole(user)) {
+    return c.json({ error: "Forbidden: Admin access required" }, 403);
+  }
   const supabase = c.get("supabase");
   const libraryId = c.req.param("id");
   const rawBody = await c.req.json();
@@ -148,6 +157,10 @@ librariesRouter.patch("/:id", async (c) => {
 });
 
 librariesRouter.delete("/:id", async (c) => {
+  const user = c.get("user");
+  if (!requireAdminRole(user)) {
+    return c.json({ error: "Forbidden: Admin access required" }, 403);
+  }
   const supabase = c.get("supabase");
   const libraryId = c.req.param("id");
   const { error } = await supabase.from("libraries").delete().eq(
@@ -399,6 +412,10 @@ librariesRouter.get("/:id/items", async (c) => {
 });
 
 librariesRouter.post("/:id/smart-sort", async (c) => {
+  const user = c.get("user");
+  if (!requireAdminRole(user)) {
+    return c.json({ error: "Forbidden: Admin access required" }, 403);
+  }
   const supabase = c.get("supabase");
   const libraryId = c.req.param("id");
   const body = await c.req.json().catch(() => ({}));
@@ -787,6 +804,10 @@ librariesRouter.get("/:id/matchall", async (c) => {
 });
 
 librariesRouter.post("/:id/scan", (c) => {
+  const user = c.get("user");
+  if (!requireAdminRole(user)) {
+    return c.json({ error: "Forbidden: Admin access required" }, 403);
+  }
   return c.json({ result: "UPTODATE" });
 });
 
@@ -1257,6 +1278,10 @@ librariesRouter.get("/:id/narrators", async (c) => {
 });
 
 librariesRouter.post("/:id/deduplicate", async (c) => {
+  const user = c.get("user");
+  if (!requireAdminRole(user)) {
+    return c.json({ error: "Forbidden: Admin access required" }, 403);
+  }
   const supabase = c.get("supabase");
 
   try {

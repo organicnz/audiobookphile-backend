@@ -11,7 +11,7 @@ import { Hono } from "hono";
 import { createClient } from "npm:@supabase/supabase-js@2.44.0";
 import { Variables } from "../_shared/types.ts";
 import { getProxyOrigin } from "../../api/_shared/proxy.ts";
-import { authErrorHandlers, decodeJWT } from "../_shared/auth.ts";
+import { authErrorHandlers, decodeJWT, requireAdminRole } from "../_shared/auth.ts";
 import { generate2FAChallengeToken } from "../_shared/totp.ts";
 import { z } from "zod";
 
@@ -580,7 +580,7 @@ authRouter.post("/verify", async (c) => {
 authRouter.post("/invite", async (c) => {
   try {
     const user = c.get("user");
-    if (!user || (user.type !== "admin" && !user.permissions.update)) {
+    if (!requireAdminRole(user)) {
       return c.json({
         error: authErrorHandlers.UNAUTHORIZED().message,
         code: authErrorHandlers.UNAUTHORIZED().code,

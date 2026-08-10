@@ -16,6 +16,20 @@ import { createClient } from "npm:@supabase/supabase-js@2.44.0";
 import { Context, Next } from "hono";
 import { Variables } from "./types.ts";
 
+export const isRole = (role: string | undefined | null, allowed: string[]): boolean =>
+  role !== null && role !== undefined && allowed.includes(role);
+
+/**
+ * Admin-role check. Both "admin" and "root" are privileged roles. `c.get("user")`
+ * is populated by authMiddleware from the profiles table on every request, so this
+ * check is always DB-fresh and never relies on JWT claims.
+ */
+export const ADMIN_ROLES = ["admin", "root"] as const;
+
+export function requireAdminRole(user: { type?: string } | undefined | null): boolean {
+  return !!user && ADMIN_ROLES.includes(user.type as (typeof ADMIN_ROLES)[number]);
+}
+
 // Auth errors - centralize all auth-related errors
 export const authErrorHandlers = {
   UNAUTHORIZED: () => new ApiError("Unauthorized", "UNAUTHORIZED", 401),
@@ -249,6 +263,7 @@ export async function authMiddleware(
     }
 
     // Step 5: Set user in context
+    const isPrivileged = requireAdminRole(profile);
     c.set("user", {
       id: userId,
       username: profile.username,
@@ -256,12 +271,12 @@ export async function authMiddleware(
       type: profile.user_type,
       permissions: {
         download: true,
-        update: profile.user_type === "admin",
-        delete: profile.user_type === "admin",
-        upload: profile.user_type === "admin",
-        accessAllLibraries: profile.user_type === "admin",
-        accessAllTags: profile.user_type === "admin",
-        accessExplicitContent: profile.user_type === "admin",
+        update: isPrivileged,
+        delete: isPrivileged,
+        upload: isPrivileged,
+        accessAllLibraries: isPrivileged,
+        accessAllTags: isPrivileged,
+        accessExplicitContent: isPrivileged,
       },
       librariesAccessible: [],
       itemTagsAccessible: [],

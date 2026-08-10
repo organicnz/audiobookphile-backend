@@ -1,28 +1,17 @@
 import { Hono } from "hono";
 import { createClient } from "npm:@supabase/supabase-js@2.44.0";
 import { Variables } from "../_shared/types.ts";
+import { requireAdminRole } from "../_shared/auth.ts";
 
 export const usersRouter = new Hono<{ Variables: Variables }>();
 
-// Check if the provided user is admin (to allow operations on other users)
-async function _canManage(userId: string, _user: any): Promise<boolean> {
-  const { data: profile } = await createClient("http://localhost", "").from(
-    "profiles",
-  ).select("user_type").eq("id", userId).single();
-  if (profile?.user_type !== "admin") {
-    return false;
-  }
-  return true;
-}
-
 usersRouter.get("/", async (c) => {
-  const _user = c.get("user")!;
+  const user = c.get("user")!;
+  if (!requireAdminRole(user)) {
+    return c.json({ error: "Forbidden: Admin access required" }, 403);
+  }
   const supabaseUrl = c.get("supabaseUrl");
   const serviceRoleKey = c.get("serviceRoleKey");
-  const _supabase = c.get("supabase");
-
-  // Require admin service role
-  const _requiresServiceRole = true;
 
   const adminSupabase = createClient(supabaseUrl, serviceRoleKey);
 
@@ -66,13 +55,12 @@ usersRouter.get("/", async (c) => {
 });
 
 usersRouter.post("/", async (c) => {
-  const _user = c.get("user")!;
+  const user = c.get("user")!;
+  if (!requireAdminRole(user)) {
+    return c.json({ error: "Forbidden: Admin access required" }, 403);
+  }
   const supabaseUrl = c.get("supabaseUrl");
   const serviceRoleKey = c.get("serviceRoleKey");
-  const _supabase = c.get("supabase");
-
-  // Require admin service role
-  const _requiresServiceRole = true;
 
   const adminSupabase = createClient(supabaseUrl, serviceRoleKey);
   const body = await c.req.json();
@@ -106,20 +94,12 @@ usersRouter.delete("/:id", async (c) => {
   const supabaseUrl = c.get("supabaseUrl");
   const serviceRoleKey = c.get("serviceRoleKey");
   const adminSupabase = createClient(supabaseUrl, serviceRoleKey);
-  const supabase = c.get("supabase");
 
   const userId = c.req.param("id");
 
-  // Verify admin or self
-  const _requiresServiceRole = user.id === userId;
-
-  if (user.id !== userId) {
-    const { data: profile } = await supabase.from("profiles").select(
-      "user_type",
-    ).eq("id", user.id).single();
-    if (profile?.user_type !== "admin") {
-      return c.json({ error: "Forbidden" }, 403);
-    }
+  // Self-deletion is allowed; managing other users is strictly admin-only
+  if (user.id !== userId && !requireAdminRole(user)) {
+    return c.json({ error: "Forbidden: Admin access required" }, 403);
   }
 
   const { error } = await adminSupabase.auth.admin.deleteUser(userId);
@@ -132,23 +112,20 @@ usersRouter.patch("/:id", async (c) => {
   const supabaseUrl = c.get("supabaseUrl");
   const serviceRoleKey = c.get("serviceRoleKey");
   const adminSupabase = createClient(supabaseUrl, serviceRoleKey);
-  const supabase = c.get("supabase");
 
   const userId = c.req.param("id");
 
-  // Verify admin or self
-  const _requiresServiceRole = user.id === userId;
-
-  if (user.id !== userId) {
-    const { data: profile } = await supabase.from("profiles").select(
-      "user_type",
-    ).eq("id", user.id).single();
-    if (profile?.user_type !== "admin") {
-      return c.json({ error: "Forbidden" }, 403);
-    }
-  }
-
   const body = await c.req.json();
+
+  // Role changes are strictly admin-only and can never be applied to yourself
+  // (prevents self-elevation). Any management of other users also requires admin.
+  if (body.type) {
+    if (user.id === userId || !requireAdminRole(user)) {
+      return c.json({ error: "Forbidden: Admin access required" }, 403);
+    }
+  } else if (user.id !== userId && !requireAdminRole(user)) {
+    return c.json({ error: "Forbidden: Admin access required" }, 403);
+  }
 
   if (body.password) {
     const { error: authError } = await adminSupabase.auth.admin.updateUserById(
