@@ -13,6 +13,7 @@
  */
 import { ApiError } from "./errors.ts";
 import { createClient } from "npm:@supabase/supabase-js@2.44.0";
+import { jwtVerify } from "jose";
 import { Context, Next } from "hono";
 import { Variables } from "./types.ts";
 
@@ -114,6 +115,9 @@ export function shouldSkipAuth(c: Context<{ Variables: Variables }>): boolean {
  * Decode JWT token to extract user information
  * @param token - JWT token string
  * @returns Decoded JWT payload or null
+ *
+ * WARNING: decode-only. Performs NO signature verification — never use
+ * for authorization decisions. Use verifyJWT() instead.
  */
 export function decodeJWT(token: string): any {
   try {
@@ -128,6 +132,31 @@ export function decodeJWT(token: string): any {
     return JSON.parse(decoded);
   } catch (e) {
     console.error("[authMiddleware] JWT decode error:", e);
+    return null;
+  }
+}
+
+/**
+ * Cryptographically verify a JWT (HS256, GoTrue project secret) and return
+ * the verified payload, or null when the signature is invalid/tampered.
+ *
+ * Access tokens from Supabase GoTrue are signed with the project's
+ * SUPABASE_JWT_SECRET. Every authorization decision in the API must use the
+ * verified payload returned by this function — never decodeJWT().
+ */
+export async function verifyJWT(token: string): Promise<any | null> {
+  try {
+    const secret = Deno.env.get("SUPABASE_JWT_SECRET");
+    if (!secret) {
+      console.error("[verifyJWT] SUPABASE_JWT_SECRET is not configured");
+      return null;
+    }
+    const { payload } = await jwtVerify(token, new TextEncoder().encode(secret), {
+      algorithms: ["HS256"],
+    });
+    return payload;
+  } catch (err) {
+    console.error("[verifyJWT] Signature verification failed:", (err as Error)?.message);
     return null;
   }
 }
@@ -218,8 +247,8 @@ export async function authMiddleware(
   );
 
   try {
-    // Step 1: Decode JWT token
-    const payload = decodeJWT(token);
+    // Step 1: Verify JWT signature against the project secret (HS256)
+    const payload = await verifyJWT(token);
 
     if (!payload) {
       throw authErrorHandlers.INVALID_TOKEN();

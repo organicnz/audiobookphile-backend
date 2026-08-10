@@ -11,7 +11,7 @@ import { Hono } from "hono";
 import { createClient } from "npm:@supabase/supabase-js@2.44.0";
 import { Variables } from "../_shared/types.ts";
 import { getProxyOrigin } from "../../api/_shared/proxy.ts";
-import { authErrorHandlers, decodeJWT, requireAdminRole } from "../_shared/auth.ts";
+import { authErrorHandlers, decodeJWT, requireAdminRole, verifyJWT } from "../_shared/auth.ts";
 import { generate2FAChallengeToken } from "../_shared/totp.ts";
 import { z } from "zod";
 
@@ -235,8 +235,8 @@ authRouter.post("/logout", async (c) => {
       "";
 
     if (jwt) {
-      // Decode the JWT to extract the user ID (sub claim)
-      const payload = decodeJWT(jwt);
+      // Verify signature first — only sign out a session the client actually owns
+      const payload = await verifyJWT(jwt);
       if (payload?.sub) {
         const supabaseUrl = c.get("supabaseUrl");
         const serviceRoleKey = c.get("serviceRoleKey");
@@ -326,7 +326,8 @@ authRouter.post("/reset-password", async (c) => {
     const targetToken = authHeaderToken || accessToken || token;
 
     if (targetToken) {
-      const payload = decodeJWT(targetToken);
+      // Change-password affects another user's credentials — verify the token's signature
+      const payload = await verifyJWT(targetToken);
       if (!payload || !payload.sub) {
         return c.json({
           error: authErrorHandlers.INVALID_TOKEN().message,
@@ -759,8 +760,8 @@ authRouter.post("/authorize", async (c) => {
     const adminSupabase = createClient(supabaseUrl, serviceRoleKey);
 
     if (jwt) {
-      // Extract payload from JWT — Supabase uses 'sub' for user ID
-      const payload = decodeJWT(jwt);
+      // Extract payload from verified JWT — critical session-establishment path
+      const payload = await verifyJWT(jwt);
 
       if (!payload) {
         return c.json({
