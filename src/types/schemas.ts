@@ -130,6 +130,7 @@ export const BookMetadataSchema = z.object({
 });
 
 export const BookMediaSchema = z.object({
+  id: z.string().nullish(),
   libraryFiles: z.array(LibraryFileSchema).nullish(),
   chapters: z.array(ChapterSchema).nullish(),
   duration: z.number().nullish(),
