@@ -26,13 +26,15 @@ adminRouter.all("*", async (c) => {
       .from("libraries")
       .select("*", { count: "exact", head: true });
 
-    // Count library items
+    // Count library items by media type (books/podcasts tables do not exist)
     const { count: totalBooks } = await adminSupabase
-      .from("books")
-      .select("*", { count: "exact", head: true });
+      .from("library_items")
+      .select("*", { count: "exact", head: true })
+      .eq("media_type", "book");
     const { count: totalPodcasts } = await adminSupabase
-      .from("podcasts")
-      .select("*", { count: "exact", head: true });
+      .from("library_items")
+      .select("*", { count: "exact", head: true })
+      .eq("media_type", "podcast");
 
     const totalItems = (totalBooks || 0) + (totalPodcasts || 0);
 
