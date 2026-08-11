@@ -29,8 +29,8 @@ export const authRouter = new Hono<{ Variables: Variables }>();
 
 /** Login body schema */
 export const LoginBodySchema = z.object({
-  username: z.string().min(1, "Username is required"),
-  password: z.string().min(8, "Password must be at least 8 characters"),
+  username: z.string().min(1, "Username or email is required"),
+  password: z.string().min(1, "Password is required"),
 });
 
 /** Signup body schema */
@@ -178,8 +178,10 @@ authRouter.post("/login", async (c) => {
   } catch (err) {
     if (err instanceof z.ZodError) {
       // Validation error
+      const message = err.issues?.[0]?.message ||
+        authErrorHandlers.VALIDATION_ERROR().message;
       return c.json({
-        error: authErrorHandlers.VALIDATION_ERROR().message,
+        error: message,
         code: authErrorHandlers.VALIDATION_ERROR().code,
       }, authErrorHandlers.VALIDATION_ERROR().statusCode);
     }
