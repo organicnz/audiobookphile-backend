@@ -13,7 +13,7 @@ Deno.test("Playback: POST /api/items/:id/play fails gracefully with invalid UUID
   const res = await app.request(req);
   const json = await res.json();
 
-  // It should reject with 401 or 400 because there is no auth token, 
+  // It should reject with 401 or 400 because there is no auth token,
   // but if it bypasses auth in test, we want to make sure it handles invalid item gracefully.
   // Wait, let's just assert the structure of the error.
   assertEquals(res.status >= 400, true);

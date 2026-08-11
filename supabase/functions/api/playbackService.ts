@@ -161,7 +161,8 @@ export class PlaybackService {
     // Sign audio files concurrently
     const signedTrackResults = await Promise.all(
       sortedAudioFiles.map(async (af, i) => {
-        const metadata = ((af as any).metadata as Record<string, unknown>) || {};
+        const metadata = ((af as any).metadata as Record<string, unknown>) ||
+          {};
         const storagePath = String(
           metadata.path ||
             (af as any).storage_path ||

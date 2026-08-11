@@ -11,8 +11,14 @@ import { Hono } from "hono";
 import { createClient } from "npm:@supabase/supabase-js@2.44.0";
 import { Variables } from "../_shared/types.ts";
 import { getProxyOrigin } from "../../api/_shared/proxy.ts";
-import { authErrorHandlers, decodeJWT, requireAdminRole, verifyJWT } from "../_shared/auth.ts";
+import {
+  authErrorHandlers,
+  decodeJWT,
+  requireAdminRole,
+  verifyJWT,
+} from "../_shared/auth.ts";
 import { generate2FAChallengeToken } from "../_shared/totp.ts";
+import { buildUserPayload } from "../_shared/payloads.ts";
 import { z } from "zod";
 
 export const authRouter = new Hono<{ Variables: Variables }>();
@@ -24,13 +30,13 @@ export const authRouter = new Hono<{ Variables: Variables }>();
 /** Login body schema */
 export const LoginBodySchema = z.object({
   username: z.string().min(1, "Username is required"),
-  password: z.string().min(6, "Password must be at least 6 characters"),
+  password: z.string().min(8, "Password must be at least 8 characters"),
 });
 
 /** Signup body schema */
 export const SignupBodySchema = z.object({
   email: z.string().email("Invalid email address"),
-  password: z.string().min(6, "Password must be at least 6 characters"),
+  password: z.string().min(8, "Password must be at least 8 characters"),
   username: z.string().optional(),
 });
 
@@ -46,14 +52,14 @@ export const ForgotPasswordBodySchema = z.object({
 
 /** Reset password body schema */
 export const ResetPasswordBodySchema = z.object({
-  password: z.string().min(6, "Password must be at least 6 characters"),
+  password: z.string().min(8, "Password must be at least 8 characters"),
   token: z.string().optional(),
   accessToken: z.string().optional(),
 });
 
 /** Change password body schema */
 export const ChangePasswordBodySchema = z.object({
-  newPassword: z.string().min(6, "New password must be at least 6 characters"),
+  newPassword: z.string().min(8, "New password must be at least 8 characters"),
 });
 
 /** Authorize body schema (optional) */
@@ -119,10 +125,7 @@ authRouter.post("/login", async (c) => {
     if (authError || !authData.user) {
       // Check if user exists but credentials are wrong
       const { data: existingProfile } = await adminSupabase.from("profiles")
-        .select("id").eq("username", loginUsername).eq(
-          "username",
-          loginUsername,
-        ).maybeSingle();
+        .select("id").eq("username", loginUsername).maybeSingle();
 
       if (existingProfile) {
         // User exists but credentials are wrong
@@ -158,39 +161,18 @@ authRouter.post("/login", async (c) => {
     }
 
     // Build user payload for client
-    const userPayload = {
-      user: {
-        id: authData.user.id,
-        username: profile?.username || authData.user.email?.split("@")[0] ||
-          "User",
-        email: authData.user.email,
-        type: profile?.user_type || "user",
-        token: authData.session?.access_token || "",
-        refreshToken: authData.session?.refresh_token || null,
-        mediaProgress: [],
-        seriesHideFromContinueListening: [],
-        bookmarks: [],
-        isActive: true,
-        isLocked: false,
-        lastSeen: Date.now(),
-        createdAt: new Date(profile?.created_at || authData.user.created_at)
-          .getTime(),
-        permissions: {
-          download: true,
-          update: profile?.user_type === "admin",
-          delete: profile?.user_type === "admin",
-          upload: profile?.user_type === "admin",
-          accessAllLibraries: true,
-          accessAllTags: true,
-          accessExplicitContent: true,
-        },
-        librariesAccessible: [],
-        itemTagsAccessible: [],
+    const userPayload = buildUserPayload(
+      profile,
+      {
+        access_token: authData.session?.access_token || "",
+        refresh_token: authData.session?.refresh_token,
       },
-      userDefaultLibraryId: profile?.default_library_id || null,
-      serverSettings: {},
-      source: "local",
-    };
+      {
+        id: authData.user.id,
+        email: authData.user.email,
+        created_at: authData.user.created_at,
+      },
+    );
 
     return c.json(userPayload, 200);
   } catch (err) {
@@ -523,39 +505,15 @@ authRouter.post("/verify", async (c) => {
     const { data: profile } = await adminSupabase.from("profiles")
       .select("*").eq("id", verifyData.user.id).maybeSingle();
 
-    const userPayload = {
-      user: {
+    const userPayload = buildUserPayload(
+      profile,
+      verifyData.session,
+      {
         id: verifyData.user.id,
-        username: profile?.username || verifyData.user.email?.split("@")[0] ||
-          "User",
         email: verifyData.user.email,
-        type: profile?.user_type || "user",
-        token: verifyData.session.access_token,
-        refreshToken: verifyData.session.refresh_token,
-        mediaProgress: [],
-        seriesHideFromContinueListening: [],
-        bookmarks: [],
-        isActive: true,
-        isLocked: false,
-        lastSeen: Date.now(),
-        createdAt: new Date(profile?.created_at || verifyData.user.created_at)
-          .getTime(),
-        permissions: {
-          download: true,
-          update: profile?.user_type === "admin",
-          delete: profile?.user_type === "admin",
-          upload: profile?.user_type === "admin",
-          accessAllLibraries: true,
-          accessAllTags: true,
-          accessExplicitContent: true,
-        },
-        librariesAccessible: [],
-        itemTagsAccessible: [],
+        created_at: verifyData.user.created_at,
       },
-      userDefaultLibraryId: profile?.default_library_id || null,
-      serverSettings: {},
-      source: "local",
-    };
+    );
 
     return c.json(userPayload, 200);
   } catch (err) {
@@ -686,39 +644,18 @@ authRouter.post("/refresh", async (c) => {
       }, authErrorHandlers.USER_NOT_FOUND().statusCode);
     }
 
-    const userPayload = {
-      user: {
-        id: sessionData.user!.id,
-        username: profile?.username || sessionData.user!.email?.split("@")[0] ||
-          "User",
-        email: sessionData.user!.email,
-        type: profile?.user_type || "user",
-        token: sessionData.session.access_token,
-        refreshToken: sessionData.session.refresh_token || token,
-        mediaProgress: [],
-        seriesHideFromContinueListening: [],
-        bookmarks: [],
-        isActive: true,
-        isLocked: false,
-        lastSeen: Date.now(),
-        createdAt: new Date(profile?.created_at || sessionData.user!.created_at)
-          .getTime(),
-        permissions: {
-          download: true,
-          update: profile?.user_type === "admin",
-          delete: profile?.user_type === "admin",
-          upload: profile?.user_type === "admin",
-          accessAllLibraries: true,
-          accessAllTags: true,
-          accessExplicitContent: true,
-        },
-        librariesAccessible: [],
-        itemTagsAccessible: [],
+    const userPayload = buildUserPayload(
+      profile,
+      {
+        access_token: sessionData.session.access_token,
+        refresh_token: sessionData.session.refresh_token || token,
       },
-      userDefaultLibraryId: profile?.default_library_id || null,
-      serverSettings: {},
-      source: "local",
-    };
+      {
+        id: sessionData.user!.id,
+        email: sessionData.user!.email,
+        created_at: sessionData.user!.created_at,
+      },
+    );
 
     return c.json(userPayload, 200);
   } catch (err) {
@@ -858,38 +795,11 @@ authRouter.post("/authorize", async (c) => {
     )
       .eq("id", user.id).maybeSingle();
 
-    const userPayload = {
-      user: {
-        id: user.id,
-        username: finalProfile?.username || user.email?.split("@")[0] || "User",
-        email: user.email,
-        type: finalProfile?.user_type || "user",
-        token: activeToken,
-        refreshToken: newRefreshToken || null,
-        mediaProgress: [],
-        seriesHideFromContinueListening: [],
-        bookmarks: [],
-        isActive: true,
-        isLocked: false,
-        lastSeen: Date.now(),
-        createdAt: new Date(finalProfile?.created_at || user.created_at)
-          .getTime(),
-        permissions: {
-          download: true,
-          update: finalProfile?.user_type === "admin",
-          delete: finalProfile?.user_type === "admin",
-          upload: finalProfile?.user_type === "admin",
-          accessAllLibraries: true,
-          accessAllTags: true,
-          accessExplicitContent: true,
-        },
-        librariesAccessible: [],
-        itemTagsAccessible: [],
-      },
-      userDefaultLibraryId: finalProfile?.default_library_id || null,
-      serverSettings: {},
-      source: "local",
-    };
+    const userPayload = buildUserPayload(
+      finalProfile,
+      { access_token: activeToken, refresh_token: newRefreshToken },
+      { id: user.id, email: user.email, created_at: user.created_at },
+    );
 
     return c.json(userPayload, 200);
   } catch (err) {

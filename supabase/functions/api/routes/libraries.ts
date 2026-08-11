@@ -210,7 +210,8 @@ librariesRouter.get("/:id/items", async (c) => {
   const seriesId = queryParams.get("seriesId");
 
   try {
-    const cacheKey = `${libraryId}-${dbSortField}-${isDesc}-${limit}-${page}-${search}-${authorId}-${seriesId}`;
+    const cacheKey =
+      `${libraryId}-${dbSortField}-${isDesc}-${limit}-${page}-${search}-${authorId}-${seriesId}`;
     let items: any[] = [];
     let count: number | null = 0;
     const now = Date.now();
@@ -221,10 +222,58 @@ librariesRouter.get("/:id/items", async (c) => {
       count = cached.count;
     } else {
       if (isFetchAll) {
-      const CHUNK_SIZE = 500;
-      let currentOffset = 0;
-      while (true) {
-        let batchQuery = supabase
+        const CHUNK_SIZE = 500;
+        let currentOffset = 0;
+        while (true) {
+          let batchQuery = supabase
+            .from("library_items")
+            .select("*, book_authors(authors(*)), book_series(series(*))", {
+              count: "exact",
+            })
+            .eq("library_id", libraryId);
+
+          if (search) {
+            batchQuery = batchQuery.or(
+              `title.ilike.%${search}%,author_names_first_last.ilike.%${search}%,description.ilike.%${search}%,narrator_names.ilike.%${search}%,subtitle.ilike.%${search}%,publisher.ilike.%${search}%`,
+            );
+          }
+          if (authorId) {
+            batchQuery = batchQuery.eq("book_authors.author_id", authorId);
+          }
+          if (seriesId) {
+            batchQuery = batchQuery.eq("book_series.series_id", seriesId);
+          }
+
+          batchQuery = batchQuery.order(dbSortField, { ascending: !isDesc })
+            .range(currentOffset, currentOffset + CHUNK_SIZE - 1);
+
+          const { data, error, count: totalCount } = await batchQuery;
+
+          if (error) {
+            return c.json(
+              {
+                error: error.message || error,
+                details: error.details,
+                hint: error.hint,
+              },
+              500,
+            );
+          }
+
+          count = totalCount;
+          if (!data || data.length === 0) break;
+
+          items.push(...data);
+          if (
+            data.length < CHUNK_SIZE ||
+            (count !== null && items.length >= count)
+          ) {
+            break;
+          }
+          currentOffset += CHUNK_SIZE;
+        }
+      } else {
+        let query = supabase
           .from("library_items")
           .select("*, book_authors(authors(*)), book_series(series(*))", {
             count: "exact",
@@ -232,21 +281,23 @@ librariesRouter.get("/:id/items", async (c) => {
           .eq("library_id", libraryId);
 
         if (search) {
-          batchQuery = batchQuery.or(
+          query = query.or(
             `title.ilike.%${search}%,author_names_first_last.ilike.%${search}%,description.ilike.%${search}%,narrator_names.ilike.%${search}%,subtitle.ilike.%${search}%,publisher.ilike.%${search}%`,
           );
         }
         if (authorId) {
-          batchQuery = batchQuery.eq("book_authors.author_id", authorId);
+          query = query.eq("book_authors.author_id", authorId);
         }
         if (seriesId) {
-          batchQuery = batchQuery.eq("book_series.series_id", seriesId);
+          query = query.eq("book_series.series_id", seriesId);
         }
 
-        batchQuery = batchQuery.order(dbSortField, { ascending: !isDesc })
-          .range(currentOffset, currentOffset + CHUNK_SIZE - 1);
+        query = query.order(dbSortField, { ascending: !isDesc }).range(
+          offset,
+          offset + limit - 1,
+        );
 
-        const { data, error, count: totalCount } = await batchQuery;
+        const { data, error, count: totalCount } = await query;
 
         if (error) {
           return c.json(
@@ -259,62 +310,13 @@ librariesRouter.get("/:id/items", async (c) => {
           );
         }
 
+        items = data || [];
         count = totalCount;
-        if (!data || data.length === 0) break;
-
-        items.push(...data);
-        if (
-          data.length < CHUNK_SIZE || (count !== null && items.length >= count)
-        ) {
-          break;
-        }
-        currentOffset += CHUNK_SIZE;
-      }
-    } else {
-      let query = supabase
-        .from("library_items")
-        .select("*, book_authors(authors(*)), book_series(series(*))", {
-          count: "exact",
-        })
-        .eq("library_id", libraryId);
-
-      if (search) {
-        query = query.or(
-          `title.ilike.%${search}%,author_names_first_last.ilike.%${search}%,description.ilike.%${search}%,narrator_names.ilike.%${search}%,subtitle.ilike.%${search}%,publisher.ilike.%${search}%`,
-        );
-      }
-      if (authorId) {
-        query = query.eq("book_authors.author_id", authorId);
-      }
-      if (seriesId) {
-        query = query.eq("book_series.series_id", seriesId);
       }
 
-      query = query.order(dbSortField, { ascending: !isDesc }).range(
-        offset,
-        offset + limit - 1,
-      );
-
-      const { data, error, count: totalCount } = await query;
-
-      if (error) {
-        return c.json(
-          {
-            error: error.message || error,
-            details: error.details,
-            hint: error.hint,
-          },
-          500,
-        );
-      }
-
-      items = data || [];
-      count = totalCount;
+      // Save to cache
+      itemsCache.set(cacheKey, { items, count, timestamp: now });
     }
-    
-    // Save to cache
-    itemsCache.set(cacheKey, { items, count, timestamp: now });
-  }
 
     // Natural in-memory sort refinement for title & author
     if (items && items.length > 1) {

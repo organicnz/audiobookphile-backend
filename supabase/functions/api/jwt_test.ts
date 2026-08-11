@@ -21,9 +21,13 @@ Deno.test("verifyJWT: accepts a token signed with the project secret", async () 
 
 Deno.test("verifyJWT: rejects a forged token with no signature", async () => {
   Deno.env.set("SUPABASE_JWT_SECRET", TEST_SECRET);
-  const forged = `${encodeB64url(JSON.stringify({ alg: "none", typ: "JWT" }))}.${encodeB64url(
-    JSON.stringify({ sub: "victim-uuid", email: "victim@x.io" }),
-  )}.`;
+  const forged = `${
+    encodeB64url(JSON.stringify({ alg: "none", typ: "JWT" }))
+  }.${
+    encodeB64url(
+      JSON.stringify({ sub: "victim-uuid", email: "victim@x.io" }),
+    )
+  }.`;
 
   const payload = await verifyJWT(forged);
   assertEquals(payload, null);

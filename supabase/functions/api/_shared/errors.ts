@@ -25,23 +25,6 @@ export class ApiError extends Error {
   }
 }
 
-/**
- * Auth error handlers — convenience factories for common auth errors.
- */
-export const _authErrorHandlers = {
-  UNAUTHORIZED: () => new ApiError("Unauthorized", "UNAUTHORIZED", 401),
-  INVALID_TOKEN: () => new ApiError("Invalid token", "INVALID_TOKEN", 401),
-  TOKEN_EXPIRED: () => new ApiError("Token expired", "TOKEN_EXPIRED", 401),
-  SESSION_EXPIRED: () =>
-    new ApiError("Session expired", "SESSION_EXPIRED", 401),
-  NO_SESSION: () => new ApiError("No session", "NO_SESSION", 401),
-  USER_NOT_FOUND: () => new ApiError("User not found", "USER_NOT_FOUND", 401),
-  USER_DEACTIVATED: () =>
-    new ApiError("Account deactivated", "USER_DEACTIVATED", 401),
-  VALIDATION_ERROR: () =>
-    new ApiError("Validation error", "VALIDATION_ERROR", 400),
-};
-
 import { Context, Next } from "hono";
 import { Variables } from "./types.ts";
 
@@ -53,7 +36,7 @@ export const serviceRoleMiddleware = async (
   c: Context<{ Variables: Variables }>,
   next: Next,
 ) => {
-  const supabaseUrl = Deno.env.get("SUPABASE_URL") || "http://localhost:54321";
+  const supabaseUrl = Deno.env.get("SUPABASE_URL") as string;
   const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ||
     Deno.env.get("SUPABASE_ANON_KEY") || "dummy_key";
   const supabase = createClient(supabaseUrl, serviceRoleKey || "anon", {

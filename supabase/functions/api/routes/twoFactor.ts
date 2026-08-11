@@ -10,6 +10,7 @@ import {
   verifyPinCode,
   verifyTotpCode,
 } from "../_shared/totp.ts";
+import { buildUserPayload } from "../_shared/payloads.ts";
 
 export const twoFactorRouter = new Hono<{ Variables: Variables }>();
 
@@ -459,9 +460,17 @@ twoFactorRouter.post("/verify-login", async (c) => {
           error: "PIN code 2FA is not enrolled or PIN code is missing",
         }, 400);
       }
-      const isValid = await verifyPinCode(code, profile.pin_code_hash);
-      if (!isValid) {
+      const pinResult = await verifyPinCode(code, profile.pin_code_hash);
+      const isPinValid = pinResult === true ||
+        (typeof pinResult === "object" && pinResult.valid);
+      if (!isPinValid) {
         return c.json({ error: "Invalid PIN code. Please try again." }, 401);
+      }
+      // Migrate legacy SHA-256 hash to PBKDF2 transparently
+      if (typeof pinResult === "object" && pinResult.rehash) {
+        await adminSupabase.from("profiles").update({
+          pin_code_hash: pinResult.rehash,
+        }).eq("id", userId);
       }
     } else {
       if (!profile.totp_secret || !code) {
@@ -516,39 +525,15 @@ twoFactorRouter.post("/verify-login", async (c) => {
       return c.json({ error: "Failed to establish user session" }, 500);
     }
 
-    const userPayload = {
-      user: {
+    const userPayload = buildUserPayload(
+      profile,
+      verifyData.session,
+      {
         id: verifyData.user.id,
-        username: profile?.username || verifyData.user.email?.split("@")[0] ||
-          "User",
         email: verifyData.user.email,
-        type: profile?.user_type || "user",
-        token: verifyData.session.access_token,
-        refreshToken: verifyData.session.refresh_token,
-        mediaProgress: [],
-        seriesHideFromContinueListening: [],
-        bookmarks: [],
-        isActive: true,
-        isLocked: false,
-        lastSeen: Date.now(),
-        createdAt: new Date(profile?.created_at || verifyData.user.created_at)
-          .getTime(),
-        permissions: {
-          download: true,
-          update: profile?.user_type === "admin",
-          delete: profile?.user_type === "admin",
-          upload: profile?.user_type === "admin",
-          accessAllLibraries: true,
-          accessAllTags: true,
-          accessExplicitContent: true,
-        },
-        librariesAccessible: [],
-        itemTagsAccessible: [],
+        created_at: verifyData.user.created_at,
       },
-      userDefaultLibraryId: profile?.default_library_id || null,
-      serverSettings: {},
-      source: "local",
-    };
+    );
 
     return c.json(userPayload, 200);
   } catch (err: any) {

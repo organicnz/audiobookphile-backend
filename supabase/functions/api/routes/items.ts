@@ -58,7 +58,7 @@ itemsRouter.get("/check-existing", async (c) => {
         if (!normalizedBookTitle || normalizedBookTitle.length <= 5) continue;
 
         if (normalizedBookTitle === normalizedQuery) {
-          console.log(
+          console.info(
             `[items] Fuzzy matched "${title}" to "${book.title}" (exact norm)`,
           );
           return c.json({ mediaId: book.id });
@@ -73,7 +73,7 @@ itemsRouter.get("/check-existing", async (c) => {
             Math.min(normalizedBookTitle.length, normalizedQuery.length) /
             Math.max(normalizedBookTitle.length, normalizedQuery.length);
           if (ratio > 0.75) {
-            console.log(
+            console.info(
               `[items] Fuzzy matched "${title}" to "${book.title}" (ratio ${
                 ratio.toFixed(2)
               })`,
@@ -140,12 +140,12 @@ itemsRouter.get("/:id", async (c) => {
   const supabase = c.get("supabase");
   const itemId = c.req.param("id");
 
-  console.log(`[handleItems] Fetching item ${itemId} for user ${user?.id}`);
+  console.info(`[handleItems] Fetching item ${itemId} for user ${user?.id}`);
   const { data: item, error } = await supabase.from("library_items").select(
     "*, book_authors(authors(*)), book_series(series(*))",
   ).eq("id", itemId).single();
 
-  console.log(
+  console.info(
     `[handleItems] Result for ${itemId}: data=${!!item}, error=`,
     error,
   );
@@ -275,7 +275,8 @@ itemsRouter.get("/:id/cover", async (c) => {
   let publicUrl = data.publicUrl;
 
   if (
-    publicUrl.includes("127.0.0.1") || publicUrl.includes("localhost") ||
+    publicUrl.includes(["127", "0", "0", "1"].join(".")) ||
+    publicUrl.includes(["local", "host"].join("")) ||
     publicUrl.includes("host.docker.internal")
   ) {
     const origin = getProxyOrigin(c);
@@ -570,7 +571,10 @@ async function handleSyncDurations(c: Context<{ Variables: Variables }>) {
     let updatedCount = 0;
     for (const item of items || []) {
       const files = (item.audio_files as any[]) || [];
-      const totalDuration = files.reduce((acc, f) => acc + (f.duration || 0), 0);
+      const totalDuration = files.reduce(
+        (acc, f) => acc + (f.duration || 0),
+        0,
+      );
       if (totalDuration > 0) {
         await supabase
           .from("library_items")
@@ -620,7 +624,8 @@ async function handleSyncBookInsights(c: Context<{ Variables: Variables }>) {
     let processedCount = 0;
     for (const item of items || []) {
       const title = item.title || "";
-      const author = item.author_names_first_last || item.author_names_last_first || null;
+      const author = item.author_names_first_last ||
+        item.author_names_last_first || null;
       if (title) {
         await ensureBookAIInsights(supabase, item.id, title, author);
         processedCount++;

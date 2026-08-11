@@ -193,6 +193,19 @@ export async function generate2FAChallengeToken(
 }
 
 /**
+ * Constant-time comparison of two hex strings to prevent timing attacks.
+ * Always compares all bytes regardless of where the first mismatch occurs.
+ */
+function constantTimeEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let result = 0;
+  for (let i = 0; i < a.length; i++) {
+    result |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  }
+  return result === 0;
+}
+
+/**
  * Verifies an HMAC-SHA256 challenge token for 2FA login.
  */
 export async function verify2FAChallengeToken(
@@ -232,13 +245,55 @@ export async function verify2FAChallengeToken(
   );
   const expectedHex = bufferToHex(new Uint8Array(signature));
 
-  return providedHex === expectedHex;
+  return constantTimeEqual(providedHex, expectedHex);
+}
+
+// ============================================================
+// PIN Code Hashing — PBKDF2 with per-user random salt
+// ============================================================
+
+const PBKDF2_ITERATIONS = 100_000;
+const PBKDF2_HASH = "SHA-256";
+const PBKDF2_KEY_LENGTH = 32; // 256 bits
+
+/**
+ * Hashes a PIN code using PBKDF2 (100K iterations, random 16-byte salt).
+ * Returns format: `salt_hex:derived_hex`
+ */
+export async function hashPinCode(pin: string): Promise<string> {
+  const salt = new Uint8Array(16);
+  crypto.getRandomValues(salt);
+
+  const encoder = new TextEncoder();
+  const keyMaterial = await crypto.subtle.importKey(
+    "raw",
+    encoder.encode(pin),
+    "PBKDF2",
+    false,
+    ["deriveBits"],
+  );
+
+  const derivedBits = await crypto.subtle.deriveBits(
+    {
+      name: "PBKDF2",
+      salt: salt,
+      iterations: PBKDF2_ITERATIONS,
+      hash: PBKDF2_HASH,
+    },
+    keyMaterial,
+    PBKDF2_KEY_LENGTH * 8,
+  );
+
+  const saltHex = bufferToHex(salt);
+  const derivedHex = bufferToHex(new Uint8Array(derivedBits));
+  return `${saltHex}:${derivedHex}`;
 }
 
 /**
- * Hashes a PIN code using Web Crypto SHA-256 for secure backend database storage.
+ * Legacy SHA-256 PIN hash (for migration detection only).
+ * DO NOT use for new hashes — kept solely to verify old-format PINs.
  */
-export async function hashPinCode(pin: string): Promise<string> {
+async function legacyHashPinCode(pin: string): Promise<string> {
   const encoder = new TextEncoder();
   const data = encoder.encode(`abp_pin_salt_${pin}`);
   const hashBuffer = await crypto.subtle.digest("SHA-256", data);
@@ -247,12 +302,57 @@ export async function hashPinCode(pin: string): Promise<string> {
 }
 
 /**
- * Verifies a PIN code against its stored SHA-256 hash.
+ * Verifies a PIN code against its stored hash.
+ *
+ * Supports both formats:
+ *  - New PBKDF2: `salt_hex:derived_hex` (contains `:`)
+ *  - Legacy SHA-256: plain hex string (no `:`)
+ *
+ * When a legacy hash matches, returns `{ valid: true, rehash: newHash }`
+ * so the caller can upgrade the stored hash in the database.
  */
 export async function verifyPinCode(
   pin: string,
   hash: string,
-): Promise<boolean> {
-  const computedHash = await hashPinCode(pin);
-  return computedHash === hash;
+): Promise<boolean | { valid: boolean; rehash?: string }> {
+  // New PBKDF2 format: salt_hex:derived_hex
+  if (hash.includes(":")) {
+    const [saltHex, storedDerivedHex] = hash.split(":");
+    const salt = new Uint8Array(
+      (saltHex.match(/.{2}/g) || []).map((byte) => parseInt(byte, 16)),
+    );
+
+    const encoder = new TextEncoder();
+    const keyMaterial = await crypto.subtle.importKey(
+      "raw",
+      encoder.encode(pin),
+      "PBKDF2",
+      false,
+      ["deriveBits"],
+    );
+
+    const derivedBits = await crypto.subtle.deriveBits(
+      {
+        name: "PBKDF2",
+        salt: salt,
+        iterations: PBKDF2_ITERATIONS,
+        hash: PBKDF2_HASH,
+      },
+      keyMaterial,
+      PBKDF2_KEY_LENGTH * 8,
+    );
+
+    const computedHex = bufferToHex(new Uint8Array(derivedBits));
+    return constantTimeEqual(computedHex, storedDerivedHex);
+  }
+
+  // Legacy SHA-256 format: plain hex (no colon)
+  const legacyHash = await legacyHashPinCode(pin);
+  if (constantTimeEqual(legacyHash, hash)) {
+    // PIN is valid — return new PBKDF2 hash for migration
+    const newHash = await hashPinCode(pin);
+    return { valid: true, rehash: newHash };
+  }
+
+  return false;
 }

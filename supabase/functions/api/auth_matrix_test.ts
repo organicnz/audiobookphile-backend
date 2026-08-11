@@ -1,4 +1,7 @@
-import { assert, assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
+import {
+  assert,
+  assertEquals,
+} from "https://deno.land/std@0.224.0/assert/mod.ts";
 import { SignJWT } from "jose";
 import { app } from "./index.ts";
 
@@ -95,7 +98,9 @@ globalThis.fetch = async (input: any, init?: RequestInit) => {
     const method = (init?.method ?? "GET").toUpperCase();
     const maybeId = path.split("/").pop()!;
     if (method === "GET" && PUBLIC_IDS.has(maybeId)) {
-      return jsonResponse({ user: { id: maybeId, email: `${maybeId}@test.local` } });
+      return jsonResponse({
+        user: { id: maybeId, email: `${maybeId}@test.local` },
+      });
     }
     if (method === "GET") {
       return jsonResponse({
@@ -118,7 +123,10 @@ globalThis.fetch = async (input: any, init?: RequestInit) => {
 const PUBLIC_IDS = new Set(Object.keys(PROFILES));
 
 async function mintToken(sub: string, secret = SECRET): Promise<string> {
-  return await new SignJWT({ email: `${sub}@test.local`, role: "authenticated" })
+  return await new SignJWT({
+    email: `${sub}@test.local`,
+    role: "authenticated",
+  })
     .setProtectedHeader({ alg: "HS256" })
     .setSubject(sub)
     .setIssuedAt()
@@ -132,7 +140,9 @@ async function requestStatus(
   token?: string,
   body?: object,
 ): Promise<number> {
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
   if (token) headers["Authorization"] = `Bearer ${token}`;
   const res = await app.request(
     new Request(`http://localhost${path}`, {
@@ -212,7 +222,12 @@ const protectedRoutes: Array<[string, string]> = [
 Deno.test("AuthZ Matrix: every protected route rejects members", async () => {
   const token = await mintToken("member-1");
   for (const [method, path] of protectedRoutes) {
-    const status = await requestStatus(method, path, token, method === "GET" ? undefined : {});
+    const status = await requestStatus(
+      method,
+      path,
+      token,
+      method === "GET" ? undefined : {},
+    );
     assertAccess(true, status, `member ${method} ${path}`);
   }
 });
@@ -234,38 +249,91 @@ Deno.test("AuthZ Matrix: admin and root reach every protected route", async () =
 
 Deno.test("AuthZ Matrix: guests without tokens are rejected", async () => {
   for (const [method, path] of protectedRoutes) {
-    const status = await requestStatus(method, path, undefined, method === "GET" ? undefined : {});
+    const status = await requestStatus(
+      method,
+      path,
+      undefined,
+      method === "GET" ? undefined : {},
+    );
     assertEquals(status, 401, `guest ${method} ${path}`);
   }
 });
 
 Deno.test("AuthZ Matrix: self-service and role-change rules", async () => {
   const member = await mintToken("member-1");
-  const member2 = await mintToken("member-2");
+  const _member2 = await mintToken("member-2");
   const admin = await mintToken("admin-1");
 
   // Self-elevation is impossible for members (role change on self or any other user)
-  assertAccess(true, await requestStatus("PATCH", "/api/users/member-1", member, { type: "admin" }), "member self-elevation");
-  assertAccess(true, await requestStatus("PATCH", "/api/users/admin-1", member, { type: "admin" }), "member elevates admin");
+  assertAccess(
+    true,
+    await requestStatus("PATCH", "/api/users/member-1", member, {
+      type: "admin",
+    }),
+    "member self-elevation",
+  );
+  assertAccess(
+    true,
+    await requestStatus("PATCH", "/api/users/admin-1", member, {
+      type: "admin",
+    }),
+    "member elevates admin",
+  );
   // Plain self-edit stays allowed
-  assertAccess(false, await requestStatus("PATCH", "/api/users/member-1", member, { username: "renamed" }), "member self rename");
+  assertAccess(
+    false,
+    await requestStatus("PATCH", "/api/users/member-1", member, {
+      username: "renamed",
+    }),
+    "member self rename",
+  );
   // Self-deletion is allowed; deleting others requires admin
-  assertAccess(false, await requestStatus("DELETE", "/api/users/member-1", member), "member self delete");
-  assertAccess(true, await requestStatus("DELETE", "/api/users/member-2", member), "member deletes other");
+  assertAccess(
+    false,
+    await requestStatus("DELETE", "/api/users/member-1", member),
+    "member self delete",
+  );
+  assertAccess(
+    true,
+    await requestStatus("DELETE", "/api/users/member-2", member),
+    "member deletes other",
+  );
   // Admins can never change their OWN role
-  assertAccess(true, await requestStatus("PATCH", "/api/users/admin-1", admin, { type: "root" }), "admin self elevation");
+  assertAccess(
+    true,
+    await requestStatus("PATCH", "/api/users/admin-1", admin, { type: "root" }),
+    "admin self elevation",
+  );
   // Admins manage other users
-  assertAccess(false, await requestStatus("PATCH", "/api/users/member-1", admin, { type: "admin" }), "admin promotes member");
-  assertAccess(false, await requestStatus("DELETE", "/api/users/member-2", admin), "admin deletes member");
+  assertAccess(
+    false,
+    await requestStatus("PATCH", "/api/users/member-1", admin, {
+      type: "admin",
+    }),
+    "admin promotes member",
+  );
+  assertAccess(
+    false,
+    await requestStatus("DELETE", "/api/users/member-2", admin),
+    "admin deletes member",
+  );
 });
 
 Deno.test("AuthZ Matrix: forged and tampered tokens are rejected", async () => {
   // Signed with a different secret — must fail signature verification
   const forged = await mintToken("member-1", "attacker-controlled-secret");
-  assertEquals(await requestStatus("GET", "/api/users", forged), 401, "forged signature");
+  assertEquals(
+    await requestStatus("GET", "/api/users", forged),
+    401,
+    "forged signature",
+  );
 
   // Complete garbage
-  assertEquals(await requestStatus("GET", "/api/users", "not.a.jwt"), 401, "garbage token");
+  assertEquals(
+    await requestStatus("GET", "/api/users", "not.a.jwt"),
+    401,
+    "garbage token",
+  );
 });
 
 Deno.test("AuthZ Matrix: user-facing routes remain open to members", async () => {
@@ -283,10 +351,19 @@ Deno.test("AuthZ Matrix: user-facing routes remain open to members", async () =>
     ["GET", "/api/users/me/preferences"],
   ];
   for (const [method, path] of openRoutes) {
-    const status = await requestStatus(method, path, member, method === "GET" ? undefined : {});
+    const status = await requestStatus(
+      method,
+      path,
+      member,
+      method === "GET" ? undefined : {},
+    );
     assertAccess(false, status, `member ${method} ${path} (user-facing)`);
   }
 
   // Health check is public
-  assertEquals(await requestStatus("GET", "/api/health", undefined), 200, "public health");
+  assertEquals(
+    await requestStatus("GET", "/api/health", undefined),
+    200,
+    "public health",
+  );
 });

@@ -17,8 +17,10 @@ import { jwtVerify } from "jose";
 import { Context, Next } from "hono";
 import { Variables } from "./types.ts";
 
-export const isRole = (role: string | undefined | null, allowed: string[]): boolean =>
-  role !== null && role !== undefined && allowed.includes(role);
+export const isRole = (
+  role: string | undefined | null,
+  allowed: string[],
+): boolean => role !== null && role !== undefined && allowed.includes(role);
 
 /**
  * Admin-role check. Both "admin" and "root" are privileged roles. `c.get("user")`
@@ -27,8 +29,11 @@ export const isRole = (role: string | undefined | null, allowed: string[]): bool
  */
 export const ADMIN_ROLES = ["admin", "root"] as const;
 
-export function requireAdminRole(user: { type?: string } | undefined | null): boolean {
-  return !!user && ADMIN_ROLES.includes(user.type as (typeof ADMIN_ROLES)[number]);
+export function requireAdminRole(
+  user: { type?: string } | undefined | null,
+): boolean {
+  return !!user &&
+    ADMIN_ROLES.includes(user.type as (typeof ADMIN_ROLES)[number]);
 }
 
 // Auth errors - centralize all auth-related errors
@@ -62,8 +67,6 @@ const publicAuthRoutes = new Set([
   "/api/forgot-password",
   "/api/auth/reset-password",
   "/api/reset-password",
-  "/api/auth/change-password",
-  "/api/change-password",
   "/api/auth/authorize",
   "/api/authorize",
   "/api/auth/verify-token",
@@ -87,7 +90,9 @@ export function shouldSkipAuth(c: Context<{ Variables: Variables }>): boolean {
   }
 
   const withApi = path.startsWith("/api") ? path : "/api" + path;
-  const withoutApi = path.startsWith("/api") ? path.replace(/^\/api/, "") || "/" : path;
+  const withoutApi = path.startsWith("/api")
+    ? path.replace(/^\/api/, "") || "/"
+    : path;
   if (publicAuthRoutes.has(withApi) || publicAuthRoutes.has(withoutApi)) {
     return true;
   }
@@ -101,7 +106,8 @@ export function shouldSkipAuth(c: Context<{ Variables: Variables }>): boolean {
       return true;
     }
     if (
-      (withApi.startsWith("/api/authors/") || withoutApi.startsWith("/authors/")) &&
+      (withApi.startsWith("/api/authors/") ||
+        withoutApi.startsWith("/authors/")) &&
       withApi.endsWith("/image")
     ) {
       return true;
@@ -151,12 +157,19 @@ export async function verifyJWT(token: string): Promise<any | null> {
       console.error("[verifyJWT] SUPABASE_JWT_SECRET is not configured");
       return null;
     }
-    const { payload } = await jwtVerify(token, new TextEncoder().encode(secret), {
-      algorithms: ["HS256"],
-    });
+    const { payload } = await jwtVerify(
+      token,
+      new TextEncoder().encode(secret),
+      {
+        algorithms: ["HS256"],
+      },
+    );
     return payload;
   } catch (err) {
-    console.error("[verifyJWT] Signature verification failed:", (err as Error)?.message);
+    console.error(
+      "[verifyJWT] Signature verification failed:",
+      (err as Error)?.message,
+    );
     return null;
   }
 }
@@ -281,14 +294,29 @@ export async function authMiddleware(
 
     // Step 4: Fetch user profile with details
     const userIdFromProfile = userId;
-    const { data: profile, error: profileError } = await adminSupabase
+    let { data: profile, error: profileError } = await adminSupabase
       .from("profiles")
       .select("*")
       .eq("id", userIdFromProfile)
       .maybeSingle();
 
     if (profileError || !profile) {
-      throw authErrorHandlers.USER_NOT_FOUND();
+      // User exists in GoTrue but lacks a profile row — auto-create it
+      const defaultUsername = payload.email?.split("@")[0] || "User";
+      const { data: newProfile, error: insertError } = await adminSupabase
+        .from("profiles")
+        .insert({
+          id: userIdFromProfile,
+          username: defaultUsername,
+          user_type: "user",
+        })
+        .select("*")
+        .single();
+
+      if (insertError || !newProfile) {
+        throw authErrorHandlers.USER_NOT_FOUND();
+      }
+      profile = newProfile;
     }
 
     // Step 5: Set user in context

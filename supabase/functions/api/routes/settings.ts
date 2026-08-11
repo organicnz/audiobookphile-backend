@@ -9,36 +9,41 @@ export const settingsRouter = new Hono<{ Variables: Variables }>();
 // feeds, shares, genres, tags, backup-database) are server-global by nature
 // — strictly admin/root only. Guards are bound to the router's own patterns
 // (NOT "*") so they never intercept other routers mounted under /api.
-const adminGuard: MiddlewareHandler<{ Variables: Variables }> = async (c, next) => {
+const adminGuard: MiddlewareHandler<{ Variables: Variables }> = async (
+  c,
+  next,
+) => {
   if (!requireAdminRole(c.get("user"))) {
     return c.json({ error: "Forbidden: Admin access required" }, 403);
   }
   await next();
 };
 
-for (const pattern of [
-  "/filesystem",
-  "/backups",
-  "/backups/:id",
-  "/backups/:id/apply",
-  "/api-keys",
-  "/api-keys/:id",
-  "/sessions",
-  "/sessions/open",
-  "/sessions/batch/delete",
-  "/sessions/:id",
-  "/session/:id/close",
-  "/share/mediaitem",
-  "/share/mediaitem/:id",
-  "/feeds",
-  "/feeds/:type/:id/open",
-  "/feeds/:id/close",
-  "/custom-metadata-providers",
-  "/custom-metadata-providers/:id",
-  "/genres/:genre",
-  "/tags/:tag",
-  "/backup-database",
-]) {
+for (
+  const pattern of [
+    "/filesystem",
+    "/backups",
+    "/backups/:id",
+    "/backups/:id/apply",
+    "/api-keys",
+    "/api-keys/:id",
+    "/sessions",
+    "/sessions/open",
+    "/sessions/batch/delete",
+    "/sessions/:id",
+    "/session/:id/close",
+    "/share/mediaitem",
+    "/share/mediaitem/:id",
+    "/feeds",
+    "/feeds/:type/:id/open",
+    "/feeds/:id/close",
+    "/custom-metadata-providers",
+    "/custom-metadata-providers/:id",
+    "/genres/:genre",
+    "/tags/:tag",
+    "/backup-database",
+  ]
+) {
   settingsRouter.use(pattern, adminGuard);
 }
 

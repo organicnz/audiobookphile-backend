@@ -96,12 +96,19 @@ Deno.test("TOTP - generate2FAChallengeToken and verify2FAChallengeToken validate
 Deno.test("PIN Code - hashPinCode and verifyPinCode securely hash and verify PINs", async () => {
   const pin = "123456";
   const hash = await hashPinCode(pin);
-  assertEquals(hash.length, 64, "SHA-256 hash should be 64 hex characters");
+  assertEquals(
+    hash.length,
+    97,
+    "PBKDF2 hash should be 97 chars (32 hex salt + colon + 64 hex hash)",
+  );
 
-  const valid = await verifyPinCode(pin, hash);
+  const result = await verifyPinCode(pin, hash);
+  const valid = result === true || (typeof result === "object" && result.valid);
   assertEquals(valid, true, "Should verify correct PIN against its hash");
 
-  const invalid = await verifyPinCode("654321", hash);
+  const invalidResult = await verifyPinCode("654321", hash);
+  const invalid = invalidResult === true ||
+    (typeof invalidResult === "object" && invalidResult.valid);
   assertEquals(
     invalid,
     false,
