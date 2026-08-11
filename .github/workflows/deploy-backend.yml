@@ -30,7 +30,7 @@ jobs:
           deno-version: v2.x
 
       - name: Security Audit
-        run: ./scripts/security-audit.sh
+        run: ${{ github.workspace }}/scripts/security-audit.sh
 
       - name: Deno Lint
         run: deno lint index.ts routes/ _shared/
