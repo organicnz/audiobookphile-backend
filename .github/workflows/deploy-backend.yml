@@ -2,15 +2,15 @@ name: Deploy Supabase Backend (Migrations & Edge API)
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
     paths:
-      - 'supabase/**'
-      - '.github/workflows/deploy-backend.yml'
+      - "supabase/**"
+      - ".github/workflows/deploy-backend.yml"
   pull_request:
-    branches: [ main ]
+    branches: [main]
     paths:
-      - 'supabase/**'
-      - '.github/workflows/deploy-backend.yml'
+      - "supabase/**"
+      - ".github/workflows/deploy-backend.yml"
   workflow_dispatch:
 
 jobs:
@@ -36,7 +36,7 @@ jobs:
         run: deno check index.ts
 
       - name: Deno Tests (Authorization Matrix & Security)
-        run: deno test --allow-env --allow-net auth_test.ts jwt_test.ts metadata_test.ts playback_test.ts two_factor_test.ts auth_matrix_test.ts
+        run: deno test --allow-env --allow-net auth_test.ts jwt_test.ts metadata_test.ts playback_test.ts two_factor_test.ts auth_matrix_test.ts contracts_test.ts
 
   deploy:
     name: Deploy to Supabase Production

@@ -10,7 +10,7 @@ import { metadataRouter } from "./routes/metadata.ts";
 import { authorsRouter } from "./routes/authors.ts";
 import { usersRouter } from "./routes/users.ts";
 import { librariesRouter } from "./routes/libraries.ts";
-import { itemsRouter, handleChapterAI } from "./routes/items.ts";
+import { handleChapterAI, itemsRouter } from "./routes/items.ts";
 import { playbackRouter } from "./routes/playback.ts";
 import { progressRouter } from "./routes/progress.ts";
 import { playlistsRouter } from "./routes/playlists.ts";
@@ -28,6 +28,7 @@ import { aiRouter } from "./aiService.ts";
 import { Variables } from "./_shared/types.ts";
 import { ApiError, serviceRoleMiddleware } from "./_shared/errors.ts";
 import { authMiddleware } from "./_shared/auth.ts";
+import { runContractChecks } from "./_shared/contracts.ts";
 
 const app = new Hono<{ Variables: Variables }>();
 
@@ -51,7 +52,25 @@ app.use(
   }),
 );
 
-// 2. Health check (before auth so it's always accessible)
+// 2. Alias deprecation log (P2.1): the canonical paths are the runtime-stripped
+// ones (Supabase Edge Runtime removes /functions/v1/api). Log once per
+// /api-prefixed alias path so migration off the legacy prefix is observable.
+// NOTE: must be registered before any exact /api route — Hono skips path
+// middleware registered after an exact-route match for that route.
+const aliasPathsSeen = new Set<string>();
+app.use("/api/*", async (c, next) => {
+  const path = c.req.path;
+  if (!aliasPathsSeen.has(path)) {
+    aliasPathsSeen.add(path);
+    const canonical = path.replace(/^\/api/, "") || "/";
+    console.warn(
+      JSON.stringify({ level: "warn", event: "route-alias", path, canonical }),
+    );
+  }
+  await next();
+});
+
+// 3. Health check (before auth so it's always accessible)
 app.get("/api/health", async (c) => {
   const zaiConfigured = Boolean(
     Deno.env.get("ZAI_API_KEY") || Deno.env.get("ZHIPU_API_KEY"),
@@ -81,7 +100,8 @@ app.get("/api/health", async (c) => {
   } else {
     for (const table of tables) tableStatus[table] = "unconfigured";
   }
-  return c.json({
+
+  const payload: Record<string, unknown> = {
     status: "ok",
     timestamp: new Date().toISOString(),
     version: "2026.07.24",
@@ -90,17 +110,27 @@ app.get("/api/health", async (c) => {
       zai: zaiConfigured ? "configured" : "unconfigured",
     },
     tables: tableStatus,
-  });
+  };
+
+  // Contract shape checks (P1.3). The nested /api/health check sends
+  // x-contract-check so it does not recurse into itself.
+  if (c.req.header("x-contract-check") !== "1") {
+    payload.contracts = await runContractChecks(app);
+  }
+
+  return c.json(payload);
 });
 
-// 3. Structured Logging Middleware
+// 4. Structured Logging Middleware
 app.use(async (c, next) => {
   const start = Date.now();
-  await next();
-  const duration = Date.now() - start;
+  // Set the request id BEFORE next() so error envelopes thrown by handlers
+  // (serialised by handleApiError) always carry requestId.
   const requestId = crypto.randomUUID();
   c.res.headers.set("X-Request-ID", requestId);
   c.set("requestId", requestId);
+  await next();
+  const duration = Date.now() - start;
 
   // Only log in production
   if (Deno.env.get("NODE_ENV") === "production") {

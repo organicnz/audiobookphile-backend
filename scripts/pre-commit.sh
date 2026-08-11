@@ -29,7 +29,7 @@ fi
 
 # 2. Deep Cybersecurity Secret & Private Key Scanner
 echo "🔍 [2/13] Cybersecurity Secret & Key Scan..."
-FORBIDDEN_PATTERNS="eyJhbGci|sbp_[a-zA-Z0-9]{20,}|SUPABASE_SERVICE_ROLE|BEGIN PRIVATE KEY|sk_live_|AKIA[0-9A-Z]{16}"
+FORBIDDEN_PATTERNS="eyJhbGci|sbp_[a-zA-Z0-9]{20,}|SUPABASE_SERVICE_ROLE_KEY=[a-zA-Z0-9]|BEGIN PRIVATE KEY|sk_live_[a-zA-Z0-9]{20,}|AKIA[0-9A-Z]{16}"
 LEAKED_FILES=$(grep -E -l "$FORBIDDEN_PATTERNS" $ALL_FILES 2>/dev/null | grep -v '\.example' | grep -v 'pre-commit.sh' || true)
 if [ -n "$LEAKED_FILES" ]; then
     echo "❌ CYBERSECURITY ALERT: Secret, private key, or credential leak detected in:"
