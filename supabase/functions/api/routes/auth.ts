@@ -123,23 +123,10 @@ authRouter.post("/login", async (c) => {
       .signInWithPassword({ email: emailToUse, password: loginPassword });
 
     if (authError || !authData.user) {
-      // Check if user exists but credentials are wrong
-      const { data: existingProfile } = await adminSupabase.from("profiles")
-        .select("id").eq("username", loginUsername).maybeSingle();
-
-      if (existingProfile) {
-        // User exists but credentials are wrong
-        return c.json({
-          error: authErrorHandlers.INVALID_TOKEN().message,
-          code: authErrorHandlers.INVALID_TOKEN().code,
-        }, authErrorHandlers.INVALID_TOKEN().statusCode);
-      }
-
-      // User doesn't exist
       return c.json({
-        error: authErrorHandlers.USER_NOT_FOUND().message,
-        code: authErrorHandlers.USER_NOT_FOUND().code,
-      }, authErrorHandlers.USER_NOT_FOUND().statusCode);
+        error: authError?.message || "Invalid email/username or password",
+        code: "INVALID_CREDENTIALS",
+      }, 401);
     }
 
     const { data: profile } = await adminSupabase.from("profiles").select("*")
