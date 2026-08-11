@@ -31,4 +31,12 @@ if [ -n "$CREATE_CLIENT_FILES" ]; then
     done
 fi
 
+# 4. Cryptographic Token Security (Math.random)
+MATH_RANDOM=$(grep -r -n -E 'Math\.random\(' supabase/functions/ 2>/dev/null | grep -v 'node_modules' || true)
+if [ -n "$MATH_RANDOM" ]; then
+    echo "❌ SECURITY AUDIT FAILED: Insecure random number generator found (use crypto.randomUUID or crypto.getRandomValues):"
+    echo "$MATH_RANDOM"
+    exit 1
+fi
+
 echo "✅ Backend Security & Package Audit Passed Cleanly!"
