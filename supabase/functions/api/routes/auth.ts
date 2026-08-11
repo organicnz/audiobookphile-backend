@@ -96,9 +96,16 @@ export const InviteUserBodySchema = z.object({
  */
 authRouter.post("/login", async (c) => {
   try {
-    const supabase = c.get("supabase");
     const supabaseUrl = c.get("supabaseUrl");
     const serviceRoleKey = c.get("serviceRoleKey");
+    const anonKey = Deno.env.get("SUPABASE_ANON_KEY") ||
+      Deno.env.get("NEXT_PUBLIC_SUPABASE_ANON_KEY") ||
+      serviceRoleKey;
+
+    const anonSupabase = createClient(supabaseUrl, anonKey, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+
     const body = await c.req.json();
 
     const loginData = LoginBodySchema.parse(body);
@@ -119,7 +126,7 @@ authRouter.post("/login", async (c) => {
       }
     }
 
-    const { data: authData, error: authError } = await supabase.auth
+    const { data: authData, error: authError } = await anonSupabase.auth
       .signInWithPassword({ email: emailToUse, password: loginPassword });
 
     if (authError || !authData.user) {
@@ -417,12 +424,21 @@ authRouter.post("/change-password", async (c) => {
  */
 authRouter.post("/magic-link", async (c) => {
   try {
-    const supabase = c.get("supabase");
+    const supabaseUrl = c.get("supabaseUrl");
+    const serviceRoleKey = c.get("serviceRoleKey");
+    const anonKey = Deno.env.get("SUPABASE_ANON_KEY") ||
+      Deno.env.get("NEXT_PUBLIC_SUPABASE_ANON_KEY") ||
+      serviceRoleKey;
+
+    const anonSupabase = createClient(supabaseUrl, anonKey, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+
     const body = await c.req.json();
     const { email, redirectTo } = MagicLinkBodySchema.parse(body);
 
     const siteUrl = getProxyOrigin(c);
-    const { error } = await supabase.auth.signInWithOtp({
+    const { error } = await anonSupabase.auth.signInWithOtp({
       email,
       options: {
         shouldCreateUser: false,
