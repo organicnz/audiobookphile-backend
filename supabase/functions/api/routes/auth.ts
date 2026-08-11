@@ -243,37 +243,52 @@ authRouter.post("/logout", async (c) => {
  */
 authRouter.post("/forgot-password", async (c) => {
   try {
-    const supabase = c.get("supabase");
+    const supabaseUrl = c.get("supabaseUrl");
+    const serviceRoleKey = c.get("serviceRoleKey");
+    const anonKey = Deno.env.get("SUPABASE_ANON_KEY") ||
+      Deno.env.get("NEXT_PUBLIC_SUPABASE_ANON_KEY") ||
+      serviceRoleKey;
+
+    const anonSupabase = createClient(supabaseUrl, anonKey, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+
     const body = await c.req.json();
 
     const formData = ForgotPasswordBodySchema.parse(body);
     const { email } = formData;
 
     const siteUrl = getProxyOrigin(c);
-    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+    const { error } = await anonSupabase.auth.resetPasswordForEmail(email, {
       redirectTo: `${siteUrl}/auth/callback?next=/reset-password`,
     });
 
     if (error) {
+      console.error(
+        "[forgot-password] Supabase resetPasswordForEmail error:",
+        error.message,
+        error.code,
+      );
       return c.json({
-        error: authErrorHandlers.VALIDATION_ERROR().message,
-        code: authErrorHandlers.VALIDATION_ERROR().code,
-      }, authErrorHandlers.VALIDATION_ERROR().statusCode);
+        error: error.message || "Failed to send reset email.",
+        code: error.code || "RESET_PASSWORD_ERROR",
+      }, 400);
     }
 
     return c.json({ success: true, message: "Reset link sent to email" }, 200);
   } catch (err) {
     if (err instanceof z.ZodError) {
+      const message = err.issues?.[0]?.message || "Validation error";
       return c.json({
-        error: authErrorHandlers.VALIDATION_ERROR().message,
-        code: authErrorHandlers.VALIDATION_ERROR().code,
-      }, authErrorHandlers.VALIDATION_ERROR().statusCode);
+        error: message,
+        code: "VALIDATION_ERROR",
+      }, 400);
     }
-    if (err instanceof Error && err.message === "Validation error") {
+    if (err instanceof Error && err.message) {
       return c.json({
-        error: authErrorHandlers.VALIDATION_ERROR().message,
-        code: authErrorHandlers.VALIDATION_ERROR().code,
-      }, authErrorHandlers.VALIDATION_ERROR().statusCode);
+        error: err.message,
+        code: "VALIDATION_ERROR",
+      }, 400);
     }
     throw err;
   }
@@ -483,11 +498,20 @@ authRouter.post("/magic-link", async (c) => {
  */
 authRouter.post("/verify", async (c) => {
   try {
-    const supabase = c.get("supabase");
+    const supabaseUrl = c.get("supabaseUrl");
+    const serviceRoleKey = c.get("serviceRoleKey");
+    const anonKey = Deno.env.get("SUPABASE_ANON_KEY") ||
+      Deno.env.get("NEXT_PUBLIC_SUPABASE_ANON_KEY") ||
+      serviceRoleKey;
+
+    const anonSupabase = createClient(supabaseUrl, anonKey, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+
     const body = await c.req.json();
     const { email, token, type } = VerifyOtpBodySchema.parse(body);
 
-    const { data: verifyData, error: verifyError } = await supabase.auth
+    const { data: verifyData, error: verifyError } = await anonSupabase.auth
       .verifyOtp({
         email,
         token,
@@ -500,7 +524,8 @@ authRouter.post("/verify", async (c) => {
 
     if (verifyError || !verifyData.session || !verifyData.user) {
       return c.json({
-        error: authErrorHandlers.INVALID_TOKEN().message,
+        error: verifyError?.message ||
+          authErrorHandlers.INVALID_TOKEN().message,
         code: authErrorHandlers.INVALID_TOKEN().code,
       }, authErrorHandlers.INVALID_TOKEN().statusCode);
     }
