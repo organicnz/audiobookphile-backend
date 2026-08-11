@@ -36,7 +36,8 @@ export const serviceRoleMiddleware = async (
   c: Context<{ Variables: Variables }>,
   next: Next,
 ) => {
-  const supabaseUrl = Deno.env.get("SUPABASE_URL") as string;
+  const supabaseUrl = Deno.env.get("SUPABASE_URL") ||
+    "https://placeholder.supabase.co";
   const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ||
     Deno.env.get("SUPABASE_ANON_KEY") || "dummy_key";
   const supabase = createClient(supabaseUrl, serviceRoleKey || "anon", {
