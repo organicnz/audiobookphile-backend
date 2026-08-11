@@ -458,8 +458,10 @@ authRouter.post("/magic-link", async (c) => {
     return c.json({ success: true, message: "Magic link sent to email" }, 200);
   } catch (err) {
     if (err instanceof z.ZodError) {
+      const message = err.issues?.[0]?.message ||
+        authErrorHandlers.VALIDATION_ERROR().message;
       return c.json({
-        error: authErrorHandlers.VALIDATION_ERROR().message,
+        error: message,
         code: authErrorHandlers.VALIDATION_ERROR().code,
       }, authErrorHandlers.VALIDATION_ERROR().statusCode);
     }
