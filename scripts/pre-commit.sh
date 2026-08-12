@@ -155,10 +155,13 @@ fi
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 echo "🔍 [12/13] Deno Lint & Format check..."
-deno lint --config supabase/functions/deno.json "$@" && deno fmt --check --config supabase/functions/deno.json "$@"
-if [ $? -ne 0 ]; then
-    echo "❌ Deno Lint/Fmt failed."
-    exit 1
+# deno lint/fmt only accepts code files — skip when no TS/SQL files are staged
+if [ -n "$TS_FILES" ] || [ -n "$SQL_FILES" ]; then
+  deno lint --config supabase/functions/deno.json $TS_FILES && deno fmt --check --config supabase/functions/deno.json $TS_FILES $SQL_FILES
+  if [ $? -ne 0 ]; then
+      echo "❌ Deno Lint/Fmt failed."
+      exit 1
+  fi
 fi
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
