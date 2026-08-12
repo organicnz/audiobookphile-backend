@@ -331,9 +331,23 @@ export function parseAttestationObject(
 async function importP256PublicKey(
   rawPublicKey: Uint8Array,
 ): Promise<CryptoKey> {
+  // WebCrypto "raw" requires the uncompressed point (0x04 || x || y, 65
+  // bytes). Credentials stored as bare 64-byte (x || y) coordinates —
+  // as produced by extractP256PublicKey and exportKey("raw") — must be
+  // normalized before import, otherwise importKey throws "invalid P-256
+  // elliptic curve point".
+  let raw = rawPublicKey;
+  if (raw.length === 64) {
+    const uncompressed = new Uint8Array(65);
+    uncompressed[0] = 0x04;
+    uncompressed.set(raw, 1);
+    raw = uncompressed;
+  } else if (raw.length !== 65 || raw[0] !== 0x04) {
+    throw new Error("WebAuthn: invalid P-256 public key encoding");
+  }
   return crypto.subtle.importKey(
     "raw",
-    rawPublicKey as unknown as ArrayBuffer,
+    raw as unknown as ArrayBuffer,
     { name: "ECDSA", namedCurve: "P-256" },
     false,
     ["verify"],

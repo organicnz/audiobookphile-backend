@@ -267,8 +267,51 @@ Deno.test("WebAuthn - verifyAssertion accepts a genuine signed assertion", async
     clientDataJSON: clientData,
     signature,
   });
+
   assertEquals(result.signCount, 3, "Sign counter should be forwarded");
 });
+
+Deno.test(
+  "WebAuthn - verifyAssertion accepts 64-byte (x || y) stored keys",
+  async () => {
+    // Regression: WebCrypto importKey("raw") needs the 65-byte uncompressed
+    // point, but stored credentials use bare 64-byte coordinates.
+    const { privateKey, publicKey } = await generateKeyPair();
+    const credentialPublicKey = (await rawPublicKey(publicKey)).slice(1);
+    assert(credentialPublicKey.length === 64, "expected 64-byte key slice");
+    const challenge = generateChallenge();
+
+    const rpIdHash = new Uint8Array(
+      await crypto.subtle.digest("SHA-256", new TextEncoder().encode(RP_ID)),
+    );
+    const authData = authenticatorData(rpIdHash, 0x01, 3);
+    const clientData = clientDataJSON("webauthn.get", challenge, ORIGIN);
+    const clientDataHash = new Uint8Array(
+      await crypto.subtle.digest("SHA-256", clientData),
+    );
+
+    const signedData = new Uint8Array(authData.length + 32);
+    signedData.set(authData, 0);
+    signedData.set(clientDataHash, authData.length);
+    const signature = new Uint8Array(
+      await crypto.subtle.sign(
+        { name: "ECDSA", hash: "SHA-256" },
+        privateKey,
+        signedData,
+      ),
+    );
+
+    const result = await verifyAssertion({
+      credentialPublicKey,
+      storedCounter: 2,
+      authenticatorData: authData,
+      clientDataJSON: clientData,
+      signature,
+    });
+
+    assertEquals(result.signCount, 3, "Sign counter should be forwarded");
+  },
+);
 
 Deno.test("WebAuthn - verifyAssertion accepts DER-encoded signature", async () => {
   const { privateKey, publicKey } = await generateKeyPair();
