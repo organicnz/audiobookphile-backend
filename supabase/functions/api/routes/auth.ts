@@ -144,14 +144,14 @@ authRouter.post("/login", async (c) => {
       // on the profile and signed into the challenge token. verify-login /
       // webauthn login-verify require the nonce to match and consume it.
       const nonce = crypto.randomUUID();
-      const lockedUntil = profile?.two_factor_locked_until
+      const lockUntil = profile?.two_factor_locked_until
         ? new Date(profile.two_factor_locked_until).getTime()
-        : 0;
-      // Clear the brute-force guard ONLY when the lock has expired; the
-      // attempt counter must survive across challenge issuances, otherwise
-      // an attacker can reset it by logging in repeatedly.
+        : null;
+      // Clear the brute-force guard ONLY when a lock existed and has since
+      // expired; the attempt counter must survive across challenge
+      // issuances, otherwise an attacker can reset it by logging in again.
       const guardReset: Record<string, unknown> = {};
-      if (lockedUntil <= Date.now()) {
+      if (lockUntil !== null && lockUntil <= Date.now()) {
         guardReset.two_factor_failed_attempts = 0;
         guardReset.two_factor_locked_until = null;
       }
