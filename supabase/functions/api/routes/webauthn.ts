@@ -34,6 +34,7 @@ export const webauthnRouter = new Hono<{ Variables: Variables }>();
 
 const RegisterOptionsSchema = z.object({
   deviceName: z.string().max(64).optional(),
+  excludeCredentials: z.array(z.string().min(1)).optional(),
 });
 
 const RegisterVerifySchema = z.object({
@@ -147,7 +148,10 @@ webauthnRouter.post("/register/options", async (c) => {
       pubKeyCredParams: [{ type: "public-key", alg: -7 }], // ES256
       timeout: 60_000,
       attestation: "none",
-      excludeCredentials: [],
+      excludeCredentials: (body.excludeCredentials || []).map((id: string) => ({
+        type: "public-key",
+        id,
+      })),
       authenticatorSelection: {
         residentKey: "preferred",
         userVerification: "preferred",
