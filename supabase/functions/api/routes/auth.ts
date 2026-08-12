@@ -144,10 +144,20 @@ authRouter.post("/login", async (c) => {
       // on the profile and signed into the challenge token. verify-login /
       // webauthn login-verify require the nonce to match and consume it.
       const nonce = crypto.randomUUID();
+      const lockedUntil = profile?.two_factor_locked_until
+        ? new Date(profile.two_factor_locked_until).getTime()
+        : 0;
+      // Clear the brute-force guard ONLY when the lock has expired; the
+      // attempt counter must survive across challenge issuances, otherwise
+      // an attacker can reset it by logging in repeatedly.
+      const guardReset: Record<string, unknown> = {};
+      if (lockedUntil <= Date.now()) {
+        guardReset.two_factor_failed_attempts = 0;
+        guardReset.two_factor_locked_until = null;
+      }
       await adminSupabase.from("profiles").update({
         two_factor_challenge_nonce: nonce,
-        two_factor_failed_attempts: 0,
-        two_factor_locked_until: null,
+        ...guardReset,
       }).eq("id", authData.user.id);
 
       const { data: passkeys } = await adminSupabase
