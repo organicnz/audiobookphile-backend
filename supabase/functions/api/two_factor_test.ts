@@ -1,6 +1,7 @@
 import {
   assert,
   assertEquals,
+  assertRejects,
 } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import {
   generate2FAChallengeToken,
@@ -12,6 +13,11 @@ import {
   verifyPinCode,
   verifyTotpCode,
 } from "./_shared/totp.ts";
+import {
+  evaluate2FALockout,
+  lockoutError,
+  MAX_2FA_FAILED_ATTEMPTS,
+} from "./_shared/twoFactorGuard.ts";
 
 Deno.test("TOTP - generateTotpSecret produces base32 valid string", () => {
   const secret = generateTotpSecret(20);
@@ -61,23 +67,40 @@ Deno.test("TOTP - verifyTotpCode allows +/- 1 time step window", async () => {
 
 Deno.test("TOTP - generate2FAChallengeToken and verify2FAChallengeToken validate challenge", async () => {
   const userId = "123e4567-e89b-12d3-a456-426614174000";
-  const token = await generate2FAChallengeToken(userId, "test-secret");
-  assert(
-    token.includes("."),
-    "Challenge token should be formatted as userId.timestamp.hmac",
-  );
+  const nonce = "abc-123-nonce";
+  const secret = "test-signing-secret";
+  const token = await generate2FAChallengeToken(userId, nonce, secret);
 
-  const valid = await verify2FAChallengeToken(token, userId, "test-secret");
-  assertEquals(valid, true, "Should verify valid challenge token");
+  const parts = token.split(".");
+  assertEquals(
+    parts.length,
+    4,
+    "Token should be userId.timestamp.nonce.signature",
+  );
+  assertEquals(parts[0], userId, "First part should be the user id");
+  assertEquals(parts[2], nonce, "Third part should be the nonce");
+
+  const payload = await verify2FAChallengeToken(token, userId, secret);
+  assert(payload, "Should verify valid challenge token");
+  assertEquals(payload.userId, userId);
+  assertEquals(
+    payload.nonce,
+    nonce,
+    "Nonce must be recoverable for single-use check",
+  );
+  assert(
+    typeof payload.timestamp === "number" && payload.timestamp > 0,
+    "Timestamp must be embedded",
+  );
 
   const wrongUser = await verify2FAChallengeToken(
     token,
     "other-user-id",
-    "test-secret",
+    secret,
   );
   assertEquals(
     wrongUser,
-    false,
+    null,
     "Should reject challenge token for different user",
   );
 
@@ -88,9 +111,109 @@ Deno.test("TOTP - generate2FAChallengeToken and verify2FAChallengeToken validate
   );
   assertEquals(
     wrongSecret,
-    false,
+    null,
     "Should reject challenge token signed with different secret",
   );
+});
+
+Deno.test("TOTP - challenge token rejects tampering and malformed shapes", async () => {
+  const userId = "123e4567-e89b-12d3-a456-426614174000";
+  const secret = "test-signing-secret";
+  const token = await generate2FAChallengeToken(userId, "nonce-1", secret);
+
+  const tamperedSignature = token.slice(0, token.length - 2) + "00";
+  const tamperedToken = await verify2FAChallengeToken(
+    tamperedSignature,
+    userId,
+    secret,
+  );
+  assertEquals(tamperedToken, null, "Tampered signature must be rejected");
+
+  const tamperedNonce = token.split(".").map((p, i) => i === 2 ? "other" : p)
+    .join(".");
+  const nonceToken = await verify2FAChallengeToken(
+    tamperedNonce,
+    userId,
+    secret,
+  );
+  assertEquals(nonceToken, null, "Tampered nonce must be rejected");
+
+  assertEquals(
+    await verify2FAChallengeToken("", userId, secret),
+    null,
+    "Empty token must be rejected",
+  );
+  assertEquals(
+    await verify2FAChallengeToken("a.b.c", userId, secret),
+    null,
+    "3-part token must be rejected",
+  );
+  assertEquals(
+    await verify2FAChallengeToken("a.b.c.d.e", userId, secret),
+    null,
+    "5-part token must be rejected",
+  );
+});
+
+Deno.test("TOTP - challenge token expires after max age", async () => {
+  const userId = "123e4567-e89b-12d3-a456-426614174000";
+  const secret = "test-signing-secret";
+  const token = await generate2FAChallengeToken(userId, "nonce-2", secret);
+
+  const expired = await verify2FAChallengeToken(token, userId, secret, -1);
+  assertEquals(expired, null, "Negative max-age must reject the token");
+});
+
+Deno.test("TOTP - challenge signing fails closed without SUPABASE_JWT_SECRET", async () => {
+  const previous = Deno.env.get("SUPABASE_JWT_SECRET");
+  Deno.env.delete("SUPABASE_JWT_SECRET");
+  try {
+    await assertRejects(
+      () => generate2FAChallengeToken("some-user", "nonce"),
+      Error,
+      "SUPABASE_JWT_SECRET is not configured",
+    );
+  } finally {
+    if (previous !== undefined) Deno.env.set("SUPABASE_JWT_SECRET", previous);
+  }
+});
+
+Deno.test("2FA guard - evaluate2FALockout exposes attempt budget", () => {
+  const fresh = evaluate2FALockout({});
+  assertEquals(fresh.locked, false);
+  assertEquals(fresh.attemptsRemaining, MAX_2FA_FAILED_ATTEMPTS);
+
+  const afterFailures = evaluate2FALockout({ two_factor_failed_attempts: 3 });
+  assertEquals(afterFailures.locked, false);
+  assertEquals(afterFailures.attemptsRemaining, MAX_2FA_FAILED_ATTEMPTS - 3);
+
+  const locked = evaluate2FALockout({
+    two_factor_failed_attempts: 5,
+    two_factor_locked_until: new Date(Date.now() + 10 * 60 * 1000)
+      .toISOString(),
+  });
+  assertEquals(locked.locked, true);
+  assert(locked.remainingSeconds > 0, "Remaining seconds must be positive");
+
+  const lockExpired = evaluate2FALockout({
+    two_factor_failed_attempts: 5,
+    two_factor_locked_until: new Date(Date.now() - 60 * 1000).toISOString(),
+  });
+  assertEquals(lockExpired.locked, false, "Expired lock must be cleared");
+  assertEquals(lockExpired.attemptsRemaining, 0);
+});
+
+Deno.test("2FA guard - lockoutError surfaces code and lockout seconds", () => {
+  const state = evaluate2FALockout({
+    two_factor_failed_attempts: 5,
+    two_factor_locked_until: new Date(Date.now() + 10 * 60 * 1000)
+      .toISOString(),
+  });
+  const err = lockoutError(state);
+  assertEquals(err.code, "2FA_LOCKED");
+  assertEquals(err.locked, true);
+  assert(typeof err.lockoutSeconds === "number" && err.lockoutSeconds > 0);
+  assert(err.error.includes("locked"));
 });
 
 Deno.test("PIN Code - hashPinCode and verifyPinCode securely hash and verify PINs", async () => {

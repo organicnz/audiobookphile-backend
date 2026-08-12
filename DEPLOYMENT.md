@@ -1,3 +1,29 @@
+# Deployment Guide
+
+> ## Deploying via CI/CD (standard path — no credentials needed)
+>
+> **All migrations and Edge Function deploys are handled by the GitHub
+> Actions pipeline (`.github/workflows/deploy-backend.yml`).** Secrets
+> (`SUPABASE_ACCESS_TOKEN`, `SUPABASE_DB_PASSWORD`, `SUPABASE_PROJECT_ID`)
+> are configured in GitHub. Do not ask for the database password — you do
+> not need it.
+>
+> 1. Commit your changes and push to `main`. The workflow runs on push
+>    for any change under `supabase/**` (or the workflow file itself).
+> 2. The `verify` job runs the security audit, `deno lint`, `deno check`,
+>    and the full Deno test suite (including `webauthn_test.ts`).
+> 3. The `deploy` job (main only) links the project, applies pending
+>    migrations with `supabase db push`, then deploys the `api` Edge
+>    Function with `supabase functions deploy api --no-verify-jwt`.
+> 4. Watch the run: `gh run watch --branch main` or the GitHub UI.
+>
+> Local dry-run equivalents (no deployment):
+> ```bash
+> cd supabase/functions/api
+> deno lint . && deno check index.ts
+> deno test --allow-env --allow-net auth_test.ts jwt_test.ts metadata_test.ts playback_test.ts two_factor_test.ts webauthn_test.ts auth_matrix_test.ts contracts_test.ts
+> ```
+
 # Deployment Guide: RLS Policies
 
 This guide covers the deployment of Row Level Security (RLS) policies for the audiobookphile backend database schema. It includes step-by-step instructions, testing procedures, and rollback procedures.

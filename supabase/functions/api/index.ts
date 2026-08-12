@@ -23,6 +23,7 @@ import { searchRouter } from "./routes/search.ts";
 import { meRouter } from "./routes/me.ts";
 import { adminRouter } from "./routes/admin.ts";
 import { twoFactorRouter } from "./routes/twoFactor.ts";
+import { webauthnRouter } from "./routes/webauthn.ts";
 import { aiRouter } from "./aiService.ts";
 
 import { Variables } from "./_shared/types.ts";
@@ -247,6 +248,8 @@ mountRouter("/api/auth", authRouter);
 mountRouter("/api", authRouter);
 mountRouter("/api/auth/2fa", twoFactorRouter);
 mountRouter("/api/2fa", twoFactorRouter);
+mountRouter("/api/auth/2fa/webauthn", webauthnRouter);
+mountRouter("/api/2fa/webauthn", webauthnRouter);
 mountRouter("/api/migrate-batch", migrateBatchRouter);
 mountRouter("/api/items", downloadsRouter);
 mountRouter("/api", downloadsRouter);

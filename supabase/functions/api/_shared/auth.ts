@@ -13,7 +13,7 @@
  */
 import { ApiError } from "./errors.ts";
 import { createClient } from "npm:@supabase/supabase-js@2.44.0";
-import { jwtVerify } from "jose";
+import { createRemoteJWKSet, jwtVerify } from "jose";
 import { Context, Next } from "hono";
 import { Variables } from "./types.ts";
 
@@ -77,6 +77,10 @@ const publicAuthRoutes = new Set([
   "/api/signup",
   "/api/auth/2fa/verify-login",
   "/api/2fa/verify-login",
+  "/api/auth/2fa/webauthn/login/options",
+  "/api/2fa/webauthn/login/options",
+  "/api/auth/2fa/webauthn/login/verify",
+  "/api/2fa/webauthn/login/verify",
   "/api/health", // Health check should be public
 ]);
 
@@ -143,34 +147,73 @@ export function decodeJWT(token: string): any {
 }
 
 /**
- * Cryptographically verify a JWT (HS256, GoTrue project secret) and return
- * the verified payload, or null when the signature is invalid/tampered.
+ * GoTrue publishes the current access-token signing keys (ECDSA ES256) at
+ * this endpoint. Fetched lazily by jose on first verify and cached; key
+ * rotation is handled automatically via the `kid` header of each token.
+ * Resolved lazily so module import works in sandboxes without env access
+ * (e.g. `deno test` without --allow-env).
+ */
+let remoteJWKSet: ReturnType<typeof createRemoteJWKSet> | null = null;
+
+function getRemoteJWKSet() {
+  if (!remoteJWKSet) {
+    const base = Deno.env.get("SUPABASE_URL") ||
+      "https://placeholder.supabase.co";
+    remoteJWKSet = createRemoteJWKSet(
+      new URL(`${base}/auth/v1/.well-known/jwks.json`),
+    );
+  }
+  return remoteJWKSet;
+}
+
+/**
+ * Cryptographically verify a JWT and return the verified payload, or null
+ * when the signature is invalid/tampered.
  *
- * Access tokens from Supabase GoTrue are signed with the project's
- * SUPABASE_JWT_SECRET. Every authorization decision in the API must use the
- * verified payload returned by this function — never decodeJWT().
+ * GoTrue signs access tokens with ES256 (ECDSA) using a per-project key
+ * published at the JWKS endpoint. Legacy tokens (and any HS256-signed
+ * tokens) are verified against the project's SUPABASE_JWT_SECRET. Every
+ * authorization decision in the API must use the verified payload returned
+ * by this function — never decodeJWT().
  */
 export async function verifyJWT(token: string): Promise<any | null> {
+  let secret: string | undefined;
   try {
-    const secret = Deno.env.get("SUPABASE_JWT_SECRET");
+    secret = Deno.env.get("SUPABASE_JWT_SECRET");
+  } catch {
+    secret = undefined;
+  }
+
+  try {
+    const { payload } = await jwtVerify(token, getRemoteJWKSet());
+    return payload;
+  } catch (jwksErr) {
+    // Fall back to HS256 verification for legacy/symmetric-signed tokens.
     if (!secret) {
-      console.error("[verifyJWT] SUPABASE_JWT_SECRET is not configured");
+      console.error(
+        "[verifyJWT] JWKS verification failed:",
+        (jwksErr as Error)?.message,
+      );
       return null;
     }
-    const { payload } = await jwtVerify(
-      token,
-      new TextEncoder().encode(secret),
-      {
-        algorithms: ["HS256"],
-      },
-    );
-    return payload;
-  } catch (err) {
-    console.error(
-      "[verifyJWT] Signature verification failed:",
-      (err as Error)?.message,
-    );
-    return null;
+    try {
+      const { payload } = await jwtVerify(
+        token,
+        new TextEncoder().encode(secret),
+        {
+          algorithms: ["HS256"],
+        },
+      );
+      return payload;
+    } catch (hs256Err) {
+      console.error(
+        "[verifyJWT] Signature verification failed:",
+        (hs256Err as Error)?.message,
+        "| JWKS error:",
+        (jwksErr as Error)?.message,
+      );
+      return null;
+    }
   }
 }
 

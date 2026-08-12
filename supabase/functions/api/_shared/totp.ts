@@ -155,23 +155,58 @@ export async function verifyTotpCode(
 /**
  * Converts a Uint8Array to a hex string.
  */
-function bufferToHex(buffer: Uint8Array): string {
+export function bufferToHex(buffer: Uint8Array): string {
   return Array.from(buffer)
     .map((b) => b.toString(16).padStart(2, "0"))
     .join("");
 }
 
 /**
+ * Constant-time comparison of two hex strings to prevent timing attacks.
+ * Always compares all bytes regardless of where the first mismatch occurs.
+ */
+export function constantTimeEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let result = 0;
+  for (let i = 0; i < a.length; i++) {
+    result |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  }
+  return result === 0;
+}
+
+/**
+ * Returns the HMAC signing key for 2FA challenge tokens.
+ *
+ * FAILS CLOSED: if SUPABASE_JWT_SECRET is not configured, no token can be
+ * signed or verified. There is deliberately NO fallback constant — a
+ * hardcoded signing key would let anyone forge login challenges and bypass
+ * two-factor authentication entirely.
+ */
+function getChallengeSigningKey(): string {
+  const secret = Deno.env.get("SUPABASE_JWT_SECRET");
+  if (!secret) {
+    throw new Error(
+      "[2fa] SUPABASE_JWT_SECRET is not configured — cannot sign 2FA challenges",
+    );
+  }
+  return secret;
+}
+
+/**
  * Generates an HMAC-SHA256 signed challenge token for 2FA login verification.
- * Valid for 10 minutes by default.
+ * The token embeds the user id, a fresh random nonce, and an expiry timestamp:
+ *   `userId.timestamp.nonce.hex-signature`
+ *
+ * The nonce is persisted on the user's profile and consumed on first use,
+ * making the token single-use. Valid for 10 minutes by default.
  */
 export async function generate2FAChallengeToken(
   userId: string,
-  secretKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ||
-    "audiobookphile-2fa-secret",
+  nonce: string,
+  secretKey = getChallengeSigningKey(),
 ): Promise<string> {
   const timestamp = Date.now();
-  const payload = `${userId}.${timestamp}`;
+  const payload = `${userId}.${timestamp}.${nonce}`;
 
   const encoder = new TextEncoder();
   const key = await crypto.subtle.importKey(
@@ -193,42 +228,32 @@ export async function generate2FAChallengeToken(
 }
 
 /**
- * Constant-time comparison of two hex strings to prevent timing attacks.
- * Always compares all bytes regardless of where the first mismatch occurs.
- */
-function constantTimeEqual(a: string, b: string): boolean {
-  if (a.length !== b.length) return false;
-  let result = 0;
-  for (let i = 0; i < a.length; i++) {
-    result |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  }
-  return result === 0;
-}
-
-/**
  * Verifies an HMAC-SHA256 challenge token for 2FA login.
+ *
+ * Returns the token payload `{ userId, timestamp, nonce }` when valid, or
+ * null when the signature is invalid, the token is expired, or the token
+ * belongs to a different user.
  */
 export async function verify2FAChallengeToken(
   token: string,
   expectedUserId: string,
-  secretKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ||
-    "audiobookphile-2fa-secret",
+  secretKey = getChallengeSigningKey(),
   maxAgeMs = 10 * 60 * 1000, // 10 minutes
-): Promise<boolean> {
-  if (!token || !token.includes(".")) return false;
+): Promise<{ userId: string; timestamp: number; nonce: string } | null> {
+  if (!token || !token.includes(".")) return null;
 
   const parts = token.split(".");
-  if (parts.length !== 3) return false;
+  if (parts.length !== 4) return null; // userId.timestamp.nonce.signature
 
-  const [userId, timestampStr, providedHex] = parts;
-  if (userId !== expectedUserId) return false;
+  const [userId, timestampStr, nonce, providedHex] = parts;
+  if (userId !== expectedUserId) return null;
 
   const timestamp = parseInt(timestampStr, 10);
   if (isNaN(timestamp) || Date.now() - timestamp > maxAgeMs) {
-    return false;
+    return null;
   }
 
-  const payload = `${userId}.${timestamp}`;
+  const payload = `${userId}.${timestamp}.${nonce}`;
   const encoder = new TextEncoder();
   const key = await crypto.subtle.importKey(
     "raw",
@@ -245,7 +270,9 @@ export async function verify2FAChallengeToken(
   );
   const expectedHex = bufferToHex(new Uint8Array(signature));
 
-  return constantTimeEqual(providedHex, expectedHex);
+  if (!constantTimeEqual(providedHex, expectedHex)) return null;
+
+  return { userId, timestamp, nonce };
 }
 
 // ============================================================

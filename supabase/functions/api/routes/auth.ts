@@ -140,7 +140,25 @@ authRouter.post("/login", async (c) => {
       .eq("id", authData.user.id).maybeSingle();
 
     if (profile?.is_2fa_enabled === true) {
-      const tempToken = await generate2FAChallengeToken(authData.user.id);
+      // Issue a single-use 2FA challenge: a fresh random nonce is persisted
+      // on the profile and signed into the challenge token. verify-login /
+      // webauthn login-verify require the nonce to match and consume it.
+      const nonce = crypto.randomUUID();
+      await adminSupabase.from("profiles").update({
+        two_factor_challenge_nonce: nonce,
+        two_factor_failed_attempts: 0,
+        two_factor_locked_until: null,
+      }).eq("id", authData.user.id);
+
+      const { data: passkeys } = await adminSupabase
+        .from("webauthn_credentials")
+        .select("id")
+        .eq("user_id", authData.user.id);
+
+      const tempToken = await generate2FAChallengeToken(
+        authData.user.id,
+        nonce,
+      );
       return c.json({
         requires2FA: true,
         userId: authData.user.id,
@@ -149,7 +167,9 @@ authRouter.post("/login", async (c) => {
         methods: {
           totp: Boolean(profile?.totp_secret),
           pin: Boolean(profile?.pin_code_hash),
-          biometric: profile?.biometric_enrolled === true,
+          biometric: profile?.biometric_enrolled === true &&
+            Array.isArray(passkeys) &&
+            passkeys.length > 0,
         },
       }, 200);
     }
