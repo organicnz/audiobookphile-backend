@@ -164,17 +164,19 @@ Deno.test("TOTP - challenge token expires after max age", async () => {
   assertEquals(expired, null, "Negative max-age must reject the token");
 });
 
-Deno.test("TOTP - challenge signing fails closed without SUPABASE_JWT_SECRET", async () => {
-  const previous = Deno.env.get("SUPABASE_JWT_SECRET");
-  Deno.env.delete("SUPABASE_JWT_SECRET");
+Deno.test("TOTP - challenge signing fails closed without 2FA_CHALLENGE_SIGNING_KEY", async () => {
+  const previous = Deno.env.get("2FA_CHALLENGE_SIGNING_KEY");
+  Deno.env.delete("2FA_CHALLENGE_SIGNING_KEY");
   try {
     await assertRejects(
       () => generate2FAChallengeToken("some-user", "nonce"),
       Error,
-      "SUPABASE_JWT_SECRET is not configured",
+      "2FA_CHALLENGE_SIGNING_KEY is not configured",
     );
   } finally {
-    if (previous !== undefined) Deno.env.set("SUPABASE_JWT_SECRET", previous);
+    if (previous !== undefined) {
+      Deno.env.set("2FA_CHALLENGE_SIGNING_KEY", previous);
+    }
   }
 });
 

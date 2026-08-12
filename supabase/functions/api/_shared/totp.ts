@@ -183,10 +183,10 @@ export function constantTimeEqual(a: string, b: string): boolean {
  * two-factor authentication entirely.
  */
 function getChallengeSigningKey(): string {
-  const secret = Deno.env.get("SUPABASE_JWT_SECRET");
+  const secret = Deno.env.get("2FA_CHALLENGE_SIGNING_KEY");
   if (!secret) {
     throw new Error(
-      "[2fa] SUPABASE_JWT_SECRET is not configured — cannot sign 2FA challenges",
+      "[2fa] 2FA_CHALLENGE_SIGNING_KEY is not configured — cannot sign 2FA challenges",
     );
   }
   return secret;

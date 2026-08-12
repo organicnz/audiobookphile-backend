@@ -69,6 +69,27 @@ jobs:
           supabase migration repair --status reverted 20240001000000 20260712000000 20260715120000 20260716000000 20260716100000 20260718220545 20260718220600 20260718230947 20260718231537 20260718232408 20260718234500 20260719000000 20260719000910 20260719002336 20260719004512 20260719005405 20260720000000 20260720100000 20260721000000 20260722000000 20260722100000 20260722200000 20260722210000 20260722220000 20260723000000 20260724000000 || true
           supabase db push
 
+      - name: Ensure 2FA Challenge Signing Key Secret
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
+        run: |
+          # The 2FA challenge signing key is a project-level Edge Function
+          # secret. Create it once if missing (idempotent — never rotated
+          # here, otherwise in-flight login challenges would be rejected).
+          EXISTING=$(curl -s -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
+            "https://api.supabase.com/v1/projects/$SUPABASE_PROJECT_ID/secrets" \
+            | python3 -c "import sys,json;print(any(s['name']=='2FA_CHALLENGE_SIGNING_KEY' for s in json.load(sys.stdin)))")
+          if [ "$EXISTING" != "True" ]; then
+            curl -s -X POST -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
+              -H "Content-Type: application/json" \
+              "https://api.supabase.com/v1/projects/$SUPABASE_PROJECT_ID/secrets" \
+              -d "[{\"name\":\"2FA_CHALLENGE_SIGNING_KEY\",\"value\":\"$(openssl rand -hex 32)\"}]"
+            echo "2FA_CHALLENGE_SIGNING_KEY created"
+          else
+            echo "2FA_CHALLENGE_SIGNING_KEY already set"
+          fi
+
       - name: Deploy Unified Edge API Function
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}

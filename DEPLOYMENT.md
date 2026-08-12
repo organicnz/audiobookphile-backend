@@ -14,7 +14,9 @@
 >    and the full Deno test suite (including `webauthn_test.ts`).
 > 3. The `deploy` job (main only) links the project, applies pending
 >    migrations with `supabase db push`, then deploys the `api` Edge
->    Function with `supabase functions deploy api --no-verify-jwt`.
+>    Function with `supabase functions deploy api --no-verify-jwt`. It also
+>    ensures the `2FA_CHALLENGE_SIGNING_KEY` Edge Function secret exists
+>    (created once with a random value if missing — never rotated).
 > 4. Watch the run: `gh run watch --branch main` or the GitHub UI.
 >
 > Local dry-run equivalents (no deployment):
