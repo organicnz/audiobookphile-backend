@@ -58,6 +58,10 @@ const LoginVerifySchema = z.object({
   signature: z.string().min(1),
 });
 
+const PasskeyRemoveSchema = z.object({
+  credentialId: z.string().min(1),
+});
+
 const CHALLENGE_TTL_MS = 5 * 60 * 1000;
 
 function getRpConfig() {
@@ -492,5 +496,69 @@ webauthnRouter.post("/login/verify", async (c) => {
     }
     console.error("[webauthn] login/verify failed:", err);
     return c.json({ error: "Passkey sign-in failed" }, 500);
+  }
+});
+
+/**
+ * POST /passkeys/remove - delete a registered passkey (authenticated)
+ */
+webauthnRouter.post("/passkeys/remove", async (c) => {
+  const user = c.get("user");
+  if (!user) {
+    return c.json({ error: "Unauthorized" }, 401);
+  }
+
+  const supabaseUrl = c.get("supabaseUrl");
+  const serviceRoleKey = c.get("serviceRoleKey");
+  const adminSupabase = createClient(supabaseUrl, serviceRoleKey);
+
+  try {
+    const body = await c.req.json();
+    const { credentialId } = PasskeyRemoveSchema.parse(body);
+
+    const { data: deleted, error: deleteError } = await adminSupabase.from(
+      "webauthn_credentials",
+    ).delete().eq("user_id", user.id).eq("credential_id", credentialId)
+      .select("id");
+
+    if (deleteError) {
+      throw deleteError;
+    }
+    if (!deleted || deleted.length === 0) {
+      return c.json({ error: "Passkey not found" }, 404);
+    }
+
+    const { data: remaining } = await adminSupabase.from(
+      "webauthn_credentials",
+    ).select("id").eq("user_id", user.id).limit(1);
+
+    const { data: profile } = await adminSupabase.from("profiles").select(
+      "two_factor_methods",
+    ).eq("id", user.id).maybeSingle();
+    const methods: string[] = Array.isArray(profile?.two_factor_methods)
+      ? profile.two_factor_methods
+      : [];
+    const withoutBiometric = methods.filter((m) => m !== "biometric");
+
+    const update: Record<string, unknown> = {
+      two_factor_methods: withoutBiometric,
+    };
+    if (!remaining || remaining.length === 0) {
+      update.biometric_enrolled = false;
+      update.two_factor_methods = withoutBiometric;
+      update.is_2fa_enabled = withoutBiometric.length > 0;
+    }
+    await adminSupabase.from("profiles").update(update).eq("id", user.id);
+
+    return c.json({ success: true }, 200);
+  } catch (err: any) {
+    if (err instanceof z.ZodError) {
+      return c.json(
+        { error: err.errors[0]?.message || "Validation error" },
+        400,
+      );
+    }
+    console.error("[webauthn] passkey removal failed:", err);
+    return c.json({ error: "Failed to remove passkey" }, 500);
   }
 });
