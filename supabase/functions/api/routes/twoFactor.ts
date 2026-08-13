@@ -38,6 +38,7 @@ const EnrollBiometricSchema = z.object({
 const DisableSchema = z.object({
   code: z.string().optional(),
   password: z.string().optional(),
+  pinCode: z.string().optional(),
   method: z.enum(["totp", "pin", "biometric", "all"]).optional(),
 });
 
@@ -363,7 +364,7 @@ twoFactorRouter.post("/disable", async (c) => {
 
   try {
     const body = await c.req.json();
-    const { code, password } = DisableSchema.parse(body);
+    const { code, password, pinCode } = DisableSchema.parse(body);
 
     const { data: profile, error: fetchError } = await adminSupabase
       .from("profiles")
@@ -392,6 +393,18 @@ twoFactorRouter.post("/disable", async (c) => {
       authorized = await verifyTotpCode(profile.totp_secret, code);
     }
 
+    if (!authorized && pinCode && profile.pin_code_hash) {
+      const pinResult = await verifyPinCode(pinCode, profile.pin_code_hash);
+      authorized = pinResult === true ||
+        (typeof pinResult === "object" && pinResult.valid);
+      // Migrate legacy SHA-256 hash to PBKDF2 transparently
+      if (typeof pinResult === "object" && pinResult.rehash) {
+        await adminSupabase.from("profiles").update({
+          pin_code_hash: pinResult.rehash,
+        }).eq("id", user.id);
+      }
+    }
+
     if (!authorized && password && user.email) {
       const { error: authError } = await supabase.auth.signInWithPassword({
         email: user.email,
@@ -407,7 +420,7 @@ twoFactorRouter.post("/disable", async (c) => {
       return c.json(
         {
           error:
-            "Valid 6-digit authenticator code or account password is required to disable 2FA",
+            "A valid authenticator code, PIN code, or account password is required to disable 2FA",
         },
         400,
       );

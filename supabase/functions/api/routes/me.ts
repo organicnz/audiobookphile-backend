@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { Variables } from "../_shared/types.ts";
+import { buildUserPayload } from "../_shared/payloads.ts";
 
 export const meRouter = new Hono<{ Variables: Variables }>();
 
@@ -15,35 +16,19 @@ meRouter.get("/", async (c) => {
       throw error;
     }
 
-    const profileData = profile as any;
+    const authorization = c.req.header("authorization") || "";
+    const accessToken = authorization.replace(/^Bearer\s+/i, "");
 
-    const userProfile = {
-      user: {
+    return c.json(
+      buildUserPayload(profile as any, {
+        access_token: accessToken,
+        refresh_token: null,
+      }, {
         id: user.id,
-        username: profile?.username || user?.email?.split("@")[0] || "User",
         email: user.email,
-        type: profile?.user_type || "user",
-        token: "",
-        isActive: true,
-        isLocked: false,
-        hasUpdateAvailable: false,
-        createdAt: new Date(user.created_at || Date.now()).getTime(),
-        lastSeen: new Date(
-          user.last_sign_in_at || user.created_at || Date.now(),
-        ).getTime(),
-        extra: {},
-        mediaProgress: [],
-        seriesHideFromContinueListening: [],
-        bookmarks: [],
-        permissions: profileData?.permissions || {},
-      },
-      userDefaultLibraryId: profile?.default_library_id || null,
-      serverSettings: null,
-      ereaderDevices: [],
-      Source: "local",
-    };
-
-    return c.json(userProfile);
+        created_at: user.created_at,
+      }),
+    );
   } catch (err: any) {
     console.error("[me] profile fetch failed:", err);
     return c.json({ error: "Failed to fetch profile" }, 500);

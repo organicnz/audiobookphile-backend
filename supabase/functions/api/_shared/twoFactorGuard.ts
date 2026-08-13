@@ -46,11 +46,17 @@ export function evaluate2FALockout(profile: {
     };
   }
 
+  // The lock has expired: give the user a fresh attempt budget instead of
+  // leaving them at 0 (a single mistake would instantly re-arm the lock).
+  const effectiveAttempts = failedAttempts >= MAX_2FA_FAILED_ATTEMPTS
+    ? 0
+    : failedAttempts;
+
   return {
     locked: false,
     remainingSeconds: 0,
     failedAttempts,
-    attemptsRemaining: Math.max(0, MAX_2FA_FAILED_ATTEMPTS - failedAttempts),
+    attemptsRemaining: Math.max(0, MAX_2FA_FAILED_ATTEMPTS - effectiveAttempts),
   };
 }
 
@@ -79,8 +85,17 @@ export async function register2FAFailure(
     "two_factor_failed_attempts, two_factor_locked_until",
   ).eq("id", userId).maybeSingle();
 
-  const failedAttempts = (profile?.two_factor_failed_attempts as number || 0) +
-    1;
+  const lockedUntil = profile?.two_factor_locked_until
+    ? new Date(profile.two_factor_locked_until as string).getTime()
+    : 0;
+
+  // If a previous lock has already expired, treat this as a fresh budget so
+  // the user is never permanently one-mistake-away from a new 15-minute lock.
+  const baseAttempts = lockedUntil > 0 && lockedUntil <= Date.now()
+    ? 0
+    : (profile?.two_factor_failed_attempts as number || 0);
+
+  const failedAttempts = baseAttempts + 1;
   const shouldLock = failedAttempts >= MAX_2FA_FAILED_ATTEMPTS;
 
   const update: Record<string, unknown> = {

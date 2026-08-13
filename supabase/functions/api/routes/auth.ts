@@ -71,6 +71,8 @@ export const AuthorizeBodySchema = z.object({
 export const MagicLinkBodySchema = z.object({
   email: z.string().email("Invalid email address"),
   redirectTo: z.string().optional(),
+  client: z.enum(["ios", "web"]).optional(),
+  server: z.string().optional(),
 });
 
 /** Verify OTP body schema */
@@ -471,6 +473,7 @@ authRouter.post("/magic-link", async (c) => {
   try {
     const supabaseUrl = c.get("supabaseUrl");
     const serviceRoleKey = c.get("serviceRoleKey");
+    const supabaseEnvUrl = Deno.env.get("SUPABASE_URL") || "";
     const anonKey = Deno.env.get("SUPABASE_ANON_KEY") ||
       Deno.env.get("NEXT_PUBLIC_SUPABASE_ANON_KEY") ||
       serviceRoleKey;
@@ -480,14 +483,51 @@ authRouter.post("/magic-link", async (c) => {
     });
 
     const body = await c.req.json();
-    const { email, redirectTo } = MagicLinkBodySchema.parse(body);
+    const { email, redirectTo, client, server } = MagicLinkBodySchema.parse(
+      body,
+    );
 
     const siteUrl = getProxyOrigin(c);
+
+    // Only allow redirect targets under our own web origin or the iOS app's
+    // custom scheme. Client-supplied redirectTo must never point at a
+    // third-party host (open-redirect / phishing vector).
+    const allowedPrefixes = [siteUrl, "audiobookphile://"];
+    const redirectAllowed = !redirectTo ||
+      allowedPrefixes.some((prefix) => redirectTo.startsWith(prefix));
+    if (!redirectAllowed) {
+      return c.json({
+        error: "Invalid redirect target",
+        code: "INVALID_REDIRECT",
+      }, 400);
+    }
+
+    // The app echoes the API base URL back so the deep link can configure the
+    // session on the requesting device. Restrict it to our own origins.
+    const serverAllowed = !server ||
+      server.startsWith(siteUrl) ||
+      server.startsWith(supabaseEnvUrl);
+    if (!serverAllowed) {
+      return c.json({
+        error: "Invalid server target",
+        code: "INVALID_SERVER",
+      }, 400);
+    }
+
+    let target = redirectTo ||
+      `${siteUrl}/auth/callback?next=/library`;
+    if (client === "ios") {
+      target = `${target.split("?")[0]}?next=/library&client=ios`;
+      if (server) {
+        target += `&server=${encodeURIComponent(server)}`;
+      }
+    }
+
     const { error } = await anonSupabase.auth.signInWithOtp({
       email,
       options: {
         shouldCreateUser: false,
-        emailRedirectTo: redirectTo || `${siteUrl}/auth/callback?next=/library`,
+        emailRedirectTo: target,
       },
     });
 

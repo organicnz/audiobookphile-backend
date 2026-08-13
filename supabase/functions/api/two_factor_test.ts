@@ -202,7 +202,11 @@ Deno.test("2FA guard - evaluate2FALockout exposes attempt budget", () => {
     two_factor_locked_until: new Date(Date.now() - 60 * 1000).toISOString(),
   });
   assertEquals(lockExpired.locked, false, "Expired lock must be cleared");
-  assertEquals(lockExpired.attemptsRemaining, 0);
+  assertEquals(
+    lockExpired.attemptsRemaining,
+    MAX_2FA_FAILED_ATTEMPTS,
+    "Expired lock grants a fresh attempt budget",
+  );
 });
 
 Deno.test("2FA guard - lockoutError surfaces code and lockout seconds", () => {
