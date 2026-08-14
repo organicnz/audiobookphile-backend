@@ -333,11 +333,16 @@ max_frequency = "5s"
 # `twitter`, `x`, `slack`, `spotify`, `workos`, `zoom`.
 # Email (password) provider must stay enabled or GoTrue rejects every
 # password login ("Email logins are disabled") and every OTP email
-# (email_provider_disabled). The CLI requires a non-empty client_id even
-# though email is not an OAuth provider — this value is cosmetic.
+# (email_provider_disabled). The CLI requires non-empty client_id/secret
+# even though email is not an OAuth provider — these values are cosmetic.
 [auth.external.email]
 enabled = true
 client_id = "audiobookphile-email"
+secret = "audiobookphile-email-secret"
+redirect_uri = ""
+url = ""
+skip_nonce_check = false
+email_optional = false
 
 [auth.external.apple]
 enabled = false
