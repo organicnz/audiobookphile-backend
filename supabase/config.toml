@@ -331,6 +331,14 @@ max_frequency = "5s"
 # Use an external OAuth provider. The full list of providers are: `apple`, `azure`, `bitbucket`,
 # `discord`, `facebook`, `github`, `gitlab`, `google`, `keycloak`, `linkedin_oidc`, `notion`, `twitch`,
 # `twitter`, `x`, `slack`, `spotify`, `workos`, `zoom`.
+# Email (password) provider must stay enabled or GoTrue rejects every
+# password login ("Email logins are disabled") and every OTP email
+# (email_provider_disabled). The CLI requires a non-empty client_id even
+# though email is not an OAuth provider — this value is cosmetic.
+[auth.external.email]
+enabled = true
+client_id = "audiobookphile-email"
+
 [auth.external.apple]
 enabled = false
 client_id = ""

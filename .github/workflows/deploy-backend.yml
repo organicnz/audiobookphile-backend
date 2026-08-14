@@ -131,12 +131,12 @@ jobs:
           # enable_signup = false (invitation-only).
           CURRENT=$(curl -s -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
             "https://api.supabase.com/v1/projects/$SUPABASE_PROJECT_ID/config/auth" \
-            | python3 -c "import sys,json;print(json.load(sys.stdin).get('EXTERNAL_EMAIL_ENABLED', 'absent'))")
+            | python3 -c "import sys,json;print(json.load(sys.stdin).get('external_email_enabled', 'absent'))")
           if [ "$CURRENT" != "True" ]; then
             curl -s -X PATCH -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
               -H "Content-Type: application/json" \
               "https://api.supabase.com/v1/projects/$SUPABASE_PROJECT_ID/config/auth" \
-              -d '{"EXTERNAL_EMAIL_ENABLED": true}'
+              -d '{"external_email_enabled": true}'
             echo "EXTERNAL_EMAIL_ENABLED -> true (was $CURRENT)"
           else
             echo "EXTERNAL_EMAIL_ENABLED already true"
