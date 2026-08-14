@@ -515,7 +515,7 @@ authRouter.post("/magic-link", async (c) => {
     }
 
     let target = redirectTo ||
-      `${siteUrl}/auth/callback?next=/library`;
+      `${siteUrl}/auth/confirm?next=/library`;
     if (client === "ios") {
       target = `${target.split("?")[0]}?next=/library&client=ios`;
       if (server) {
@@ -658,7 +658,7 @@ authRouter.post("/invite", async (c) => {
     const siteUrl = getWebOrigin(c);
     const { data: inviteData, error: inviteError } = await adminSupabase.auth
       .admin.inviteUserByEmail(email, {
-        redirectTo: `${siteUrl}/auth/callback?next=/reset-password`,
+        redirectTo: `${siteUrl}/auth/confirm?next=/reset-password`,
       });
 
     if (inviteError || !inviteData.user) {
