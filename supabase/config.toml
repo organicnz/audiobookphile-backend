@@ -151,12 +151,21 @@ max_indexes = 5
 [auth]
 enabled = true
 # The base URL of your website. Used as an allow-list for redirects and for constructing URLs used
-# in emails.
-site_url = "http://127.0.0.1:3000"
+# in emails. The magic-link confirmation URL is built from this value, so it
+# MUST be the production web origin or every emailed sign-in link goes dead.
+# (Pushed to the hosted project by the deploy workflow via `supabase config push`.)
+site_url = "https://audiobookphile-web.vercel.app"
 # The public URL that Auth serves on. Defaults to the API external URL with `/auth/v1` appended.
 # external_url = ""
 # A list of *exact* URLs that auth providers are permitted to redirect to post authentication.
-additional_redirect_urls = ["https://127.0.0.1:3000"]
+# The web app (prod + local) and the iOS custom scheme must all be listed or
+# GoTrue falls back to `site_url` when building emailed confirmation links.
+additional_redirect_urls = [
+  "https://audiobookphile-web.vercel.app",
+  "http://127.0.0.1:3000",
+  "https://127.0.0.1:3000",
+  "audiobookphile://",
+]
 # How long tokens are valid for, in seconds. Defaults to 3600 (1 hour), maximum 604,800 (1 week).
 jwt_expiry = 3600
 # JWT issuer URL. If not set, defaults to auth.external_url.
@@ -243,6 +252,12 @@ otp_expiry = 3600
 # [auth.email.template.invite]
 # subject = "You have been invited"
 # content_path = "./supabase/templates/invite.html"
+
+# Custom magic-link sign-in email — brand the message and make the
+# ConfirmationURL the single primary call-to-action.
+[auth.email.template.magic_link]
+subject = "Your audiobookphile sign-in link"
+content_path = "./supabase/templates/magic_link.html"
 
 # Uncomment to customize notification email template
 # [auth.email.notification.password_changed]
