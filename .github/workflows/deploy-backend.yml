@@ -3,19 +3,13 @@ name: Deploy Supabase Backend (Migrations & Edge API)
 on:
   push:
     branches: [main]
-    paths:
-      - "supabase/**"
-      - ".github/workflows/deploy-backend.yml"
   pull_request:
     branches: [main]
-    paths:
-      - "supabase/**"
-      - ".github/workflows/deploy-backend.yml"
   workflow_dispatch:
 
 concurrency:
   group: deploy-backend-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   verify:
@@ -28,12 +22,21 @@ jobs:
       - name: Checkout Repository
         id: checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Deno
         id: deno
         uses: denoland/setup-deno@v2
         with:
           deno-version: v2.x
+
+      - name: TruffleHog Secret Scanner
+        id: trufflehog
+        uses: trufflesecurity/trufflehog@main
+        with:
+          path: ./
+          extra_args: --only-verified
 
       - name: Security Audit
         id: audit
@@ -76,6 +79,9 @@ jobs:
     needs: verify
     if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    concurrency:
+      group: deploy-backend-prod-${{ github.ref }}
+      cancel-in-progress: false
     steps:
       - name: Checkout Repository
         id: checkout
