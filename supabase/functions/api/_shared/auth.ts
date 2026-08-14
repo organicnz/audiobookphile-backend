@@ -282,6 +282,48 @@ export async function authMiddleware(
     throw authErrorHandlers.UNAUTHORIZED();
   }
 
+  // Cron/service-role bypass: legacy standalone functions authenticated
+  // scheduled jobs by literal comparison of the Authorization header against
+  // CRON_SECRET or SUPABASE_SERVICE_ROLE_KEY. Supabase service keys are
+  // HS256 JWTs that verifyJWT() cannot validate (the project has no
+  // SUPABASE_JWT_SECRET for the symmetric fallback), so preserve the legacy
+  // scheme for cron-driven endpoints like the automated database backup.
+  if (authorizationHeader) {
+    const cronSecret = Deno.env.get("CRON_SECRET");
+    const serviceRoleKeyEnv = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+    if (
+      (typeof cronSecret === "string" && cronSecret.length > 0 &&
+        authorizationHeader === `Bearer ${cronSecret}`) ||
+      (typeof serviceRoleKeyEnv === "string" && serviceRoleKeyEnv.length > 0 &&
+        authorizationHeader === `Bearer ${serviceRoleKeyEnv}`)
+    ) {
+      c.set("user", {
+        id: "cron",
+        username: "cron",
+        email: null,
+        type: "root",
+        permissions: {
+          download: true,
+          update: true,
+          delete: true,
+          upload: true,
+          accessAllLibraries: true,
+          accessAllTags: true,
+          accessExplicitContent: true,
+        },
+        librariesAccessible: [],
+        itemTagsAccessible: [],
+      });
+      c.set("userId", "cron");
+      c.set("userEmail", null);
+      c.set("sessionId", "cron");
+      c.set("token", token);
+      c.set("requiresServiceRole", false);
+      c.set("userDefaultLibraryId", null);
+      return next();
+    }
+  }
+
   // Get Supabase config from context
   const supabaseUrl = c.get("supabaseUrl");
   const serviceRoleKey = c.get("serviceRoleKey");

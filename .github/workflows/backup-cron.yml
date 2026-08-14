@@ -26,7 +26,7 @@ jobs:
             SERVICE_KEY="${{ secrets.SUPABASE_SERVICE_KEY }}"
           fi
 
-          response=$(curl -s -w "\n%{http_code}" -X POST "https://${{ secrets.SUPABASE_PROJECT_ID }}.supabase.co/functions/v1/backup-database" \
+          response=$(curl -s -w "\n%{http_code}" -X POST "https://${{ secrets.SUPABASE_PROJECT_ID }}.supabase.co/functions/v1/api/backup-database" \
             -H "Authorization: Bearer $SERVICE_KEY" \
             -H "Content-Type: application/json")
 
