@@ -10,7 +10,7 @@
 import { Hono } from "hono";
 import { createClient } from "npm:@supabase/supabase-js@2.44.0";
 import { Variables } from "../_shared/types.ts";
-import { getProxyOrigin } from "../../api/_shared/proxy.ts";
+import { getWebOrigin } from "../../api/_shared/proxy.ts";
 import {
   authErrorHandlers,
   decodeJWT,
@@ -290,7 +290,7 @@ authRouter.post("/forgot-password", async (c) => {
     const formData = ForgotPasswordBodySchema.parse(body);
     const { email } = formData;
 
-    const siteUrl = getProxyOrigin(c);
+    const siteUrl = getWebOrigin(c);
     const { error } = await anonSupabase.auth.resetPasswordForEmail(email, {
       redirectTo: `${siteUrl}/auth/callback?next=/reset-password`,
     });
@@ -487,7 +487,7 @@ authRouter.post("/magic-link", async (c) => {
       body,
     );
 
-    const siteUrl = getProxyOrigin(c);
+    const siteUrl = getWebOrigin(c);
 
     // Only allow redirect targets under our own web origin or the iOS app's
     // custom scheme. Client-supplied redirectTo must never point at a
@@ -655,7 +655,7 @@ authRouter.post("/invite", async (c) => {
       c.get("supabaseUrl"),
       c.get("serviceRoleKey"),
     );
-    const siteUrl = getProxyOrigin(c);
+    const siteUrl = getWebOrigin(c);
     const { data: inviteData, error: inviteError } = await adminSupabase.auth
       .admin.inviteUserByEmail(email, {
         redirectTo: `${siteUrl}/auth/callback?next=/reset-password`,
