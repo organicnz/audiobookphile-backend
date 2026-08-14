@@ -37,10 +37,26 @@ const app = new Hono<{ Variables: Variables }>();
 // Order matters: CORS → health → logging → error handling → auth → service role → routes
 
 // 1. CORS (must run first so preflight OPTIONS requests get proper headers)
+// Restricted to the web app, Vercel preview deployments and local dev.
+// Requests without an Origin header (native apps, cron, curl) are always
+// allowed — CORS is a browser enforcement mechanism only.
+const ALLOWED_ORIGINS = [
+  "https://audiobookphile.vercel.app",
+  "https://audiobookphile.vercel.app/",
+];
+const ALLOWED_ORIGIN_PATTERNS = [
+  /^https:\/\/audiobookphile-[a-z0-9-]+\.vercel\.app$/i, // preview deployments
+  /^http:\/\/localhost:\d+$/i,
+];
 app.use(
   "*",
   cors({
-    origin: "*",
+    origin: (origin) => {
+      if (!origin) return origin;
+      if (ALLOWED_ORIGINS.includes(origin)) return origin;
+      if (ALLOWED_ORIGIN_PATTERNS.some((p) => p.test(origin))) return origin;
+      return null;
+    },
     // x-refresh-token is required for the /authorize silent-refresh path used
     // by the iOS Audiobookshelf client to avoid daily re-authentication prompts.
     allowHeaders: [
