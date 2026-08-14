@@ -91,7 +91,7 @@ jobs:
         run: |
           . .github/scripts/step-tree.sh
           step_tree "Deploy to Supabase Production" migrations \
-            "checkout:Checkout Repository|cli:Setup Supabase CLI|migrations:Push Database Migrations|config:Apply Auth & Email Configuration|signing:Ensure 2FA Challenge Signing Key Secret|deploy:Deploy Unified Edge API Function" \
+            "checkout:Checkout Repository|cli:Setup Supabase CLI|migrations:Push Database Migrations|config:Apply Auth & Email Configuration|email:Ensure Email Provider Enabled|signing:Ensure 2FA Challenge Signing Key Secret|deploy:Deploy Unified Edge API Function" \
             "checkout=${{ steps.checkout.outcome }};cli=${{ steps.cli.outcome }}"
           # Migrations are pushed via the Management API (--linked) using
           # only the access token — no DB password secret required.
@@ -106,7 +106,7 @@ jobs:
         run: |
           . .github/scripts/step-tree.sh
           step_tree "Deploy to Supabase Production" config \
-            "checkout:Checkout Repository|cli:Setup Supabase CLI|migrations:Push Database Migrations|config:Apply Auth & Email Configuration|signing:Ensure 2FA Challenge Signing Key Secret|deploy:Deploy Unified Edge API Function" \
+            "checkout:Checkout Repository|cli:Setup Supabase CLI|migrations:Push Database Migrations|config:Apply Auth & Email Configuration|email:Ensure Email Provider Enabled|signing:Ensure 2FA Challenge Signing Key Secret|deploy:Deploy Unified Edge API Function" \
             "checkout=${{ steps.checkout.outcome }};cli=${{ steps.cli.outcome }};migrations=${{ steps.migrations.outcome }}"
           # Push [auth] settings from supabase/config.toml — site_url,
           # redirect allow-list and the magic-link email template. Without
@@ -114,6 +114,33 @@ jobs:
           # site_url and never reach the web app.
           supabase link --project-ref $SUPABASE_PROJECT_ID --yes
           supabase config push --project-ref $SUPABASE_PROJECT_ID --yes
+
+      - name: Ensure Email Provider Enabled
+        id: email
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
+        run: |
+          . .github/scripts/step-tree.sh
+          step_tree "Deploy to Supabase Production" email \
+            "checkout:Checkout Repository|cli:Setup Supabase CLI|migrations:Push Database Migrations|config:Apply Auth & Email Configuration|email:Ensure Email Provider Enabled|signing:Ensure 2FA Challenge Signing Key Secret|deploy:Deploy Unified Edge API Function" \
+            "checkout=${{ steps.checkout.outcome }};cli=${{ steps.cli.outcome }};migrations=${{ steps.migrations.outcome }};config=${{ steps.config.outcome }}"
+          # The hosted project had the email (password) provider disabled,
+          # so GoTrue rejects every password login with "Email logins are
+          # disabled". Idempotently enable it — sign-ups stay blocked via
+          # enable_signup = false (invitation-only).
+          CURRENT=$(curl -s -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
+            "https://api.supabase.com/v1/projects/$SUPABASE_PROJECT_ID/config/auth" \
+            | python3 -c "import sys,json;print(json.load(sys.stdin).get('EXTERNAL_EMAIL_ENABLED', 'absent'))")
+          if [ "$CURRENT" != "True" ]; then
+            curl -s -X PATCH -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
+              -H "Content-Type: application/json" \
+              "https://api.supabase.com/v1/projects/$SUPABASE_PROJECT_ID/config/auth" \
+              -d '{"EXTERNAL_EMAIL_ENABLED": true}'
+            echo "EXTERNAL_EMAIL_ENABLED -> true (was $CURRENT)"
+          else
+            echo "EXTERNAL_EMAIL_ENABLED already true"
+          fi
 
       - name: Ensure 2FA Challenge Signing Key Secret
         id: signing
@@ -123,8 +150,8 @@ jobs:
         run: |
           . .github/scripts/step-tree.sh
           step_tree "Deploy to Supabase Production" signing \
-            "checkout:Checkout Repository|cli:Setup Supabase CLI|migrations:Push Database Migrations|config:Apply Auth & Email Configuration|signing:Ensure 2FA Challenge Signing Key Secret|deploy:Deploy Unified Edge API Function" \
-            "checkout=${{ steps.checkout.outcome }};cli=${{ steps.cli.outcome }};migrations=${{ steps.migrations.outcome }};config=${{ steps.config.outcome }}"
+            "checkout:Checkout Repository|cli:Setup Supabase CLI|migrations:Push Database Migrations|config:Apply Auth & Email Configuration|email:Ensure Email Provider Enabled|signing:Ensure 2FA Challenge Signing Key Secret|deploy:Deploy Unified Edge API Function" \
+            "checkout=${{ steps.checkout.outcome }};cli=${{ steps.cli.outcome }};migrations=${{ steps.migrations.outcome }};config=${{ steps.config.outcome }};email=${{ steps.email.outcome }}"
           # The 2FA challenge signing key is a project-level Edge Function
           # secret. Create it once if missing (idempotent — never rotated
           # here, otherwise in-flight login challenges would be rejected).
@@ -149,6 +176,6 @@ jobs:
         run: |
           . .github/scripts/step-tree.sh
           step_tree "Deploy to Supabase Production" deploy \
-            "checkout:Checkout Repository|cli:Setup Supabase CLI|migrations:Push Database Migrations|config:Apply Auth & Email Configuration|signing:Ensure 2FA Challenge Signing Key Secret|deploy:Deploy Unified Edge API Function" \
-            "checkout=${{ steps.checkout.outcome }};cli=${{ steps.cli.outcome }};migrations=${{ steps.migrations.outcome }};config=${{ steps.config.outcome }};signing=${{ steps.signing.outcome }}"
+            "checkout:Checkout Repository|cli:Setup Supabase CLI|migrations:Push Database Migrations|config:Apply Auth & Email Configuration|email:Ensure Email Provider Enabled|signing:Ensure 2FA Challenge Signing Key Secret|deploy:Deploy Unified Edge API Function" \
+            "checkout=${{ steps.checkout.outcome }};cli=${{ steps.cli.outcome }};migrations=${{ steps.migrations.outcome }};config=${{ steps.config.outcome }};email=${{ steps.email.outcome }};signing=${{ steps.signing.outcome }}"
           supabase functions deploy api --project-ref $SUPABASE_PROJECT_ID --no-verify-jwt
