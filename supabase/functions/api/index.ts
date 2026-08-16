@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
+import { compress } from "hono/compress";
 import { createClient } from "npm:@supabase/supabase-js@2.44.0";
 import { Sentry } from "../_shared/sentry.ts";
 
@@ -69,7 +70,13 @@ app.use(
   }),
 );
 
-// 2. Alias deprecation log (P2.1): the canonical paths are the runtime-stripped
+// 2. Compression — responses are gzip'd when the client sends
+// Accept-Encoding: gzip. Shelf payloads are already slim (list mode drops the
+// per-file track metadata), and gzip shrinks the remaining JSON ~10-15x on the
+// wire. Must run after CORS so preflight responses stay uncompressed.
+app.use("*", compress());
+
+// 3. Alias deprecation log (P2.1): the canonical paths are the runtime-stripped
 // ones (Supabase Edge Runtime removes /functions/v1/api). Log once per
 // /api-prefixed alias path so migration off the legacy prefix is observable.
 // NOTE: must be registered before any exact /api route — Hono skips path

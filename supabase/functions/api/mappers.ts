@@ -152,12 +152,19 @@ export function mapLibraryForMobile(lib: LibraryWithFolders): MobileLibrary {
 export function mapBookForMobile(
   item: LibraryItemWithBooks,
   progressRecord?: MediaProgressRow | null,
+  options?: { includeFiles?: boolean },
 ): MobileBook {
   // ⚠️  SYNC WARNING: This mapper is duplicated in the web layer at
   //   audiobookphile-web/src/shared/utils/mobileMappers.ts → mapBookForMobile
   // Key difference from the web copy: this version includes duration estimation
   // from file sizes with a 96kbps fallback. If you change field mappings here,
   // apply the same change in the web copy (and vice versa).
+  //
+  // List mode (includeFiles: false) is used by shelf/feed endpoints: the
+  // per-file track metadata (audio_files, chapters) can be megabytes per book
+  // (hundreds of chapter MP3s), so shelves ship only the columns the UI needs.
+  // Detail endpoints (/api/items/:id) keep full file data for the player.
+  const includeFiles = options?.includeFiles ?? true;
   const bookRecord = item;
 
   // 1. Authors & Title
@@ -197,8 +204,11 @@ export function mapBookForMobile(
   const seriesInfo = bookSeries[0];
   const seriesName = seriesInfo?.series ? String(seriesInfo.series.name) : null;
 
-  // 4. Audio Files
-  const audioFilesList = (bookRecord.audio_files as AudioFile[]) || [];
+  // 4. Audio Files — expanded only in detail mode; shelf payloads carry the
+  // full per-file metadata (and duration estimation) only when includeFiles.
+  const audioFilesList = includeFiles
+    ? (bookRecord.audio_files as AudioFile[]) || []
+    : [];
 
   const totalBookDuration =
     Number(bookRecord.duration || Number(item.duration)) || 0;
@@ -287,8 +297,11 @@ export function mapBookForMobile(
     })
     .sort((a, b) => Number(a.index || 0) - Number(b.index || 0)) || [];
 
-  // 5. Chapters
-  let chaptersList = (bookRecord.chapters as Chapter[]) || [];
+  // 5. Chapters — expanded only in detail mode (derived from audio files when
+  // no explicit chapter list exists).
+  const chaptersList = includeFiles
+    ? (bookRecord.chapters as Chapter[]) || []
+    : [];
   let chapters: { id: number; title: string; start: number; end: number }[] =
     [];
   if (chaptersList.length > 0) {
@@ -396,7 +409,6 @@ export function mapBookForMobile(
       ),
       tags: (bookRecord.tags as string[]) || [],
       audioFiles: audioFiles,
-      tracks: audioFiles,
       numTracks: audioFiles.length,
       ebookFile: bookRecord.ebook_file
         ? (bookRecord.ebook_file as EbookFileModel)

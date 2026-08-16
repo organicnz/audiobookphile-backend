@@ -20,6 +20,20 @@ interface CacheEntry {
 const itemsCache = new Map<string, CacheEntry>();
 const CACHE_TTL = 1000 * 60; // 60 seconds
 
+// Shelf/list projections. The audio_files/library_files/chapters/embedding
+// columns can be megabytes per item (hundreds of chapter MP3s), so list
+// endpoints select only the columns the UI renders and leave per-file data
+// to the detail endpoint (/api/items/:id). Keeps a 100-book shelf ~20x
+// smaller and skips the pgvector embedding column entirely.
+const LIST_ITEM_SELECT =
+  "id, library_id, ino, path, rel_path, title, subtitle, " +
+  "author_names_first_last, narrators, genres, tags, published_year, " +
+  "published_date, publisher, description, isbn, asin, language, explicit, " +
+  "abridged, cover_path, duration, size, is_file, is_missing, is_invalid, " +
+  "mtime, ctime, birthtime, created_at, updated_at, media_type, " +
+  "book_authors(authors(*)), book_series(series(*))";
+const FULL_ITEM_SELECT = "*, book_authors(authors(*)), book_series(series(*))";
+
 type LibraryWithFolders = Database["public"]["Tables"]["libraries"]["Row"] & {
   library_folders: Database["public"]["Tables"]["library_folders"]["Row"][];
 };
@@ -208,10 +222,14 @@ librariesRouter.get("/:id/items", async (c) => {
     .trim();
   const authorId = queryParams.get("authorId");
   const seriesId = queryParams.get("seriesId");
+  // List mode (default): slim shelf payloads (no per-file track data). The
+  // detail endpoint /api/items/:id always returns the full book.
+  const includeFiles = queryParams.get("include")?.split(",").includes("files") === true;
+  const itemSelect = includeFiles ? FULL_ITEM_SELECT : LIST_ITEM_SELECT;
 
   try {
     const cacheKey =
-      `${libraryId}-${dbSortField}-${isDesc}-${limit}-${page}-${search}-${authorId}-${seriesId}`;
+      `${libraryId}-${dbSortField}-${isDesc}-${limit}-${page}-${search}-${authorId}-${seriesId}-${includeFiles ? "f" : "l"}`;
     let items: any[] = [];
     let count: number | null = 0;
     const now = Date.now();
@@ -227,7 +245,7 @@ librariesRouter.get("/:id/items", async (c) => {
         while (true) {
           let batchQuery = supabase
             .from("library_items")
-            .select("*, book_authors(authors(*)), book_series(series(*))", {
+            .select(itemSelect, {
               count: "exact",
             })
             .eq("library_id", libraryId);
@@ -247,7 +265,8 @@ librariesRouter.get("/:id/items", async (c) => {
           batchQuery = batchQuery.order(dbSortField, { ascending: !isDesc })
             .range(currentOffset, currentOffset + CHUNK_SIZE - 1);
 
-          const { data, error, count: totalCount } = await batchQuery;
+          const { data, error, count: totalCount } = (await batchQuery) as
+            unknown as { data: any[] | null; error: any; count: number | null };
 
           if (error) {
             return c.json(
@@ -275,7 +294,7 @@ librariesRouter.get("/:id/items", async (c) => {
       } else {
         let query = supabase
           .from("library_items")
-          .select("*, book_authors(authors(*)), book_series(series(*))", {
+          .select(itemSelect, {
             count: "exact",
           })
           .eq("library_id", libraryId);
@@ -297,7 +316,8 @@ librariesRouter.get("/:id/items", async (c) => {
           offset + limit - 1,
         );
 
-        const { data, error, count: totalCount } = await query;
+        const { data, error, count: totalCount } = (await query) as unknown as
+          { data: any[] | null; error: any; count: number | null };
 
         if (error) {
           return c.json(
@@ -360,6 +380,7 @@ librariesRouter.get("/:id/items", async (c) => {
       mapBookForMobile(
         i as unknown as LibraryItemWithBooks,
         progressMap.get(i.id),
+        { includeFiles },
       )
     );
 
@@ -473,7 +494,7 @@ librariesRouter.get("/:id/search", async (c) => {
     .filter((t) => t.length > 0);
 
   let itemsQuery = supabase.from("library_items").select(
-    "*, book_authors(authors(*)), book_series(series(*))",
+    LIST_ITEM_SELECT,
   ).eq("library_id", libraryId);
 
   for (const token of tokens) {
@@ -482,18 +503,19 @@ librariesRouter.get("/:id/search", async (c) => {
     );
   }
 
-  let { data: items, error: itemsError } = await itemsQuery.limit(limit * 2);
+  let { data: items, error: itemsError } = (await itemsQuery.limit(limit * 2)) as
+    unknown as { data: any[] | null; error: any };
 
   const cleanQueryText = sanitizeSearchToken(queryText);
   if ((!items || items.length === 0) && cleanQueryText) {
-    const fallbackRes = await supabase
+    const fallbackRes = (await supabase
       .from("library_items")
-      .select("*, book_authors(authors(*)), book_series(series(*))")
+      .select(LIST_ITEM_SELECT)
       .eq("library_id", libraryId)
       .or(
         `title.ilike.%${cleanQueryText}%,author_names_first_last.ilike.%${cleanQueryText}%,description.ilike.%${cleanQueryText}%,subtitle.ilike.%${cleanQueryText}%,publisher.ilike.%${cleanQueryText}%`,
       )
-      .limit(limit * 2);
+      .limit(limit * 2)) as unknown as { data: any[] | null };
     if (fallbackRes.data) items = fallbackRes.data;
   }
 
@@ -520,6 +542,7 @@ librariesRouter.get("/:id/search", async (c) => {
     const mapped = mapBookForMobile(
       item as unknown as LibraryItemWithBooks,
       progressMap.get(item.id),
+      { includeFiles: false },
     );
 
     let matchKey = "title";
@@ -1121,12 +1144,13 @@ librariesRouter.get("/:id/personalized", async (c) => {
 
   // --- Recently Added ---
   // Fetch in a separate query so it stays a simple ORDER BY created_at scan.
-  const { data: recentItems } = await supabase
+  // Shelf payloads are slim (no per-file track data); detail is on demand.
+  const { data: recentItems } = (await supabase
     .from("library_items")
-    .select("*, book_authors(authors(*)), book_series(series(*))")
+    .select(LIST_ITEM_SELECT)
     .eq("library_id", libraryId)
     .order("created_at", { ascending: false })
-    .limit(10);
+    .limit(10)) as unknown as { data: any[] | null };
 
   // Attach progress to recently-added items
   const recentItemIds = (recentItems || []).map((i) => i.id);
@@ -1150,6 +1174,7 @@ librariesRouter.get("/:id/personalized", async (c) => {
     mapBookForMobile(
       item as unknown as LibraryItemWithBooks,
       recentProgressMap.get(item.id) ?? null,
+      { includeFiles: false },
     )
   );
 
@@ -1162,7 +1187,7 @@ librariesRouter.get("/:id/personalized", async (c) => {
       supabase
         .from("media_progress")
         .select(
-          "*, library_items(*, book_authors(authors(*)), book_series(series(*)))",
+          `*, library_items(${LIST_ITEM_SELECT})`,
         )
         .eq("user_id", user.id)
         .in("library_item_id", libraryItemIds)
@@ -1174,7 +1199,7 @@ librariesRouter.get("/:id/personalized", async (c) => {
       supabase
         .from("media_progress")
         .select(
-          "*, library_items(*, book_authors(authors(*)), book_series(series(*)))",
+          `*, library_items(${LIST_ITEM_SELECT})`,
         )
         .eq("user_id", user.id)
         .in("library_item_id", libraryItemIds)
@@ -1193,7 +1218,11 @@ librariesRouter.get("/:id/personalized", async (c) => {
     ((continueResult.data || []) as unknown as ProgressWithItem[])
       .filter((p) => p.library_items)
       .map((p) =>
-        mapBookForMobile(p.library_items as unknown as LibraryItemWithBooks, p)
+        mapBookForMobile(
+          p.library_items as unknown as LibraryItemWithBooks,
+          p,
+          { includeFiles: false },
+        )
       )
       .filter(Boolean);
 
@@ -1201,7 +1230,11 @@ librariesRouter.get("/:id/personalized", async (c) => {
     ((listenAgainResult.data || []) as unknown as ProgressWithItem[])
       .filter((p) => p.library_items)
       .map((p) =>
-        mapBookForMobile(p.library_items as unknown as LibraryItemWithBooks, p)
+        mapBookForMobile(
+          p.library_items as unknown as LibraryItemWithBooks,
+          p,
+          { includeFiles: false },
+        )
       )
       .filter(Boolean);
 

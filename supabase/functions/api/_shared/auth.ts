@@ -218,43 +218,44 @@ export async function verifyJWT(token: string): Promise<any | null> {
 }
 
 /**
- * Validate JWT token by checking if user exists and is active
- * @param supabase - Supabase client
- * @param userId - User ID from JWT token
- * @returns Promise<boolean>
+ * Load the profile row needed for authorization in a single query.
+ * Validation (banned/locked), the profile for the request context, and the
+ * default library id are all derived from one select — previously this was
+ * three sequential round trips (validateUser + profile + default_library),
+ * tripling per-request database latency.
  */
-async function validateUser(supabase: any, userId: string): Promise<boolean> {
-  // Fetch the user from Supabase profiles table
-  const { data: profile, error: fetchError } = await supabase
+const PROFILE_SELECT =
+  "id, username, user_type, is_banned, is_locked, default_library_id, created_at, updated_at";
+
+async function loadProfileForAuth(adminSupabase: any, userId: string) {
+  const { data: profile, error: profileError } = await adminSupabase
     .from("profiles")
-    .select("*")
+    .select(PROFILE_SELECT)
     .eq("id", userId)
-    .single();
+    .maybeSingle();
 
-  if (fetchError) {
+  if (profileError || !profile) {
     // Profile not found — check if the auth user exists via admin API
-    // (auth schema tables like auth.identities are not accessible from public schema)
-    const { data: userData } = await supabase.auth.admin.getUserById(userId);
-
-    if (userData?.user) {
-      // User exists in auth but no profile yet — allow through
-      return true;
-    }
-
-    return false;
+    // (auth schema tables like auth.identities are not accessible from public
+    // schema), then auto-create the profile row.
+    const { data: userData } = await adminSupabase.auth.admin.getUserById(
+      userId,
+    );
+    if (!userData?.user) return null;
+    const defaultUsername = userData.user.email?.split("@")[0] || "User";
+    const { data: created, error: insertError } = await adminSupabase
+      .from("profiles")
+      .insert({
+        id: userId,
+        username: defaultUsername,
+        user_type: "user",
+      })
+      .select(PROFILE_SELECT)
+      .single();
+    if (insertError || !created) return null;
+    return created;
   }
-
-  // Check if user is deactivated/banned
-  if (profile.user_type === "banned" || profile.is_banned === true) {
-    return false;
-  }
-
-  // Check if profile is locked
-  if (profile.is_locked === true) {
-    return false;
-  }
-
-  return true;
+  return profile;
 }
 
 /**
@@ -345,7 +346,8 @@ export async function authMiddleware(
   );
 
   try {
-    // Step 1: Verify JWT signature against the project secret (HS256)
+    // Step 1: Verify JWT signature against the project JWKS (ES256) or
+    // legacy HS256 secret.
     const payload = await verifyJWT(token);
 
     if (!payload) {
@@ -355,56 +357,25 @@ export async function authMiddleware(
     // Step 2: Extract user ID from Supabase JWT (uses 'sub' claim per OIDC spec)
     const userId = payload.sub;
 
-    // Step 3: Verify user exists in profiles table
-    const isValid = await validateUser(adminSupabase, userId);
+    // Step 3: Load the profile (validation + context + default library) in a
+    // single query. Banned/locked accounts are rejected here.
+    const profile = await loadProfileForAuth(adminSupabase, userId);
 
-    if (!isValid) {
-      // Check for specific reasons
-      if (userId === null || userId === undefined) {
-        throw authErrorHandlers.INVALID_TOKEN();
-      }
-
-      // Check if user exists via admin API (auth schema tables are not
-      // accessible from the public schema)
+    if (!profile) {
       const { data: userData } = await adminSupabase.auth.admin.getUserById(
         userId,
       );
-
-      if (!userData?.user) {
-        throw authErrorHandlers.USER_NOT_FOUND();
-      }
-
+      if (!userData?.user) throw authErrorHandlers.USER_NOT_FOUND();
+      throw authErrorHandlers.USER_DEACTIVATED();
+    }
+    if (profile.user_type === "banned" || profile.is_banned === true) {
+      throw authErrorHandlers.USER_DEACTIVATED();
+    }
+    if (profile.is_locked === true) {
       throw authErrorHandlers.USER_DEACTIVATED();
     }
 
-    // Step 4: Fetch user profile with details
-    const userIdFromProfile = userId;
-    let { data: profile, error: profileError } = await adminSupabase
-      .from("profiles")
-      .select("*")
-      .eq("id", userIdFromProfile)
-      .maybeSingle();
-
-    if (profileError || !profile) {
-      // User exists in GoTrue but lacks a profile row — auto-create it
-      const defaultUsername = payload.email?.split("@")[0] || "User";
-      const { data: newProfile, error: insertError } = await adminSupabase
-        .from("profiles")
-        .insert({
-          id: userIdFromProfile,
-          username: defaultUsername,
-          user_type: "user",
-        })
-        .select("*")
-        .single();
-
-      if (insertError || !newProfile) {
-        throw authErrorHandlers.USER_NOT_FOUND();
-      }
-      profile = newProfile;
-    }
-
-    // Step 5: Set user in context
+    // Step 4: Set user in context
     const isPrivileged = requireAdminRole(profile);
     c.set("user", {
       id: userId,
@@ -435,14 +406,7 @@ export async function authMiddleware(
     // This should be set by individual routes that need admin access
     c.set("requiresServiceRole", false);
 
-    // Fetch user's default library
-    const { data: defaultLibrary } = await adminSupabase
-      .from("profiles")
-      .select("default_library_id")
-      .eq("id", userId)
-      .maybeSingle();
-
-    c.set("userDefaultLibraryId", defaultLibrary?.default_library_id || null);
+    c.set("userDefaultLibraryId", profile.default_library_id || null);
   } catch (err) {
     // Re-throw ApiErrors so the error-handling middleware serialises them
     if (err instanceof ApiError) throw err;
