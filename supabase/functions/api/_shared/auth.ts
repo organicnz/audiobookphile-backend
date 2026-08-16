@@ -224,8 +224,12 @@ export async function verifyJWT(token: string): Promise<any | null> {
  * three sequential round trips (validateUser + profile + default_library),
  * tripling per-request database latency.
  */
+// NOTE: is_banned / is_locked are NOT columns on the profiles table — a
+// banned account is represented by user_type = 'banned'. Selecting
+// non-existent columns makes PostgREST error out and every authenticated
+// request fails with USER_DEACTIVATED.
 const PROFILE_SELECT =
-  "id, username, user_type, is_banned, is_locked, default_library_id, created_at, updated_at";
+  "id, username, user_type, default_library_id, created_at, updated_at";
 
 async function loadProfileForAuth(adminSupabase: any, userId: string) {
   const { data: profile, error: profileError } = await adminSupabase
@@ -368,10 +372,7 @@ export async function authMiddleware(
       if (!userData?.user) throw authErrorHandlers.USER_NOT_FOUND();
       throw authErrorHandlers.USER_DEACTIVATED();
     }
-    if (profile.user_type === "banned" || profile.is_banned === true) {
-      throw authErrorHandlers.USER_DEACTIVATED();
-    }
-    if (profile.is_locked === true) {
+    if (profile.user_type === "banned") {
       throw authErrorHandlers.USER_DEACTIVATED();
     }
 
@@ -426,7 +427,7 @@ export async function checkUserStatus(
 ): Promise<boolean> {
   const { data: profile } = await adminSupabase
     .from("profiles")
-    .select("is_banned, is_locked, user_type")
+    .select("user_type")
     .eq("id", userId)
     .maybeSingle();
 
@@ -435,7 +436,7 @@ export async function checkUserStatus(
   }
 
   // User is banned
-  if (profile.is_banned === true || profile.user_type === "banned") {
+  if (profile.user_type === "banned") {
     return false;
   }
 
