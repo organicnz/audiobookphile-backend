@@ -93,6 +93,27 @@ jobs:
         with:
           version: latest
 
+      - name: Repair Migration History
+        id: repair
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
+        run: |
+          . .github/scripts/step-tree.sh
+          step_tree "Deploy to Supabase Production" repair \
+            "checkout:Checkout Repository|cli:Setup Supabase CLI|repair:Repair Migration History|migrations:Push Database Migrations|config:Apply Auth & Email Configuration|email:Ensure Email Provider Enabled|signing:Ensure 2FA Challenge Signing Key Secret|deploy:Deploy Unified Edge API Function" \
+            "checkout=${{ steps.checkout.outcome }};cli=${{ steps.cli.outcome }};repair=${{ steps.repair.outcome }}"
+          # One-time repair: commit 5db4329 deleted applied migration files
+          # from the repo, but the remote project still lists those versions
+          # in its migration history, so `db push --include-all` fails with
+          # "Remote migration versions not found in local migrations
+          # directory". Mark them reverted once so the remote history matches
+          # the (empty) local migrations dir. `|| true` is intentional: after
+          # the first success the versions are gone and the CLI errors with
+          # "not found in migration history" — the desired no-op.
+          supabase link --project-ref $SUPABASE_PROJECT_ID --yes
+          supabase migration repair --linked --status reverted 005 20260729000000 20260729010000 20260730000000 20260812000000 || true
+
       - name: Push Database Migrations
         id: migrations
         env:
@@ -101,8 +122,8 @@ jobs:
         run: |
           . .github/scripts/step-tree.sh
           step_tree "Deploy to Supabase Production" migrations \
-            "checkout:Checkout Repository|cli:Setup Supabase CLI|migrations:Push Database Migrations|config:Apply Auth & Email Configuration|email:Ensure Email Provider Enabled|signing:Ensure 2FA Challenge Signing Key Secret|deploy:Deploy Unified Edge API Function" \
-            "checkout=${{ steps.checkout.outcome }};cli=${{ steps.cli.outcome }}"
+            "checkout:Checkout Repository|cli:Setup Supabase CLI|repair:Repair Migration History|migrations:Push Database Migrations|config:Apply Auth & Email Configuration|email:Ensure Email Provider Enabled|signing:Ensure 2FA Challenge Signing Key Secret|deploy:Deploy Unified Edge API Function" \
+            "checkout=${{ steps.checkout.outcome }};cli=${{ steps.cli.outcome }};repair=${{ steps.repair.outcome }}"
           # Migrations are pushed via the Management API (--linked) using
           # only the access token — no DB password secret required.
           supabase link --project-ref $SUPABASE_PROJECT_ID --yes
@@ -116,8 +137,8 @@ jobs:
         run: |
           . .github/scripts/step-tree.sh
           step_tree "Deploy to Supabase Production" config \
-            "checkout:Checkout Repository|cli:Setup Supabase CLI|migrations:Push Database Migrations|config:Apply Auth & Email Configuration|email:Ensure Email Provider Enabled|signing:Ensure 2FA Challenge Signing Key Secret|deploy:Deploy Unified Edge API Function" \
-            "checkout=${{ steps.checkout.outcome }};cli=${{ steps.cli.outcome }};migrations=${{ steps.migrations.outcome }}"
+            "checkout:Checkout Repository|cli:Setup Supabase CLI|repair:Repair Migration History|migrations:Push Database Migrations|config:Apply Auth & Email Configuration|email:Ensure Email Provider Enabled|signing:Ensure 2FA Challenge Signing Key Secret|deploy:Deploy Unified Edge API Function" \
+            "checkout=${{ steps.checkout.outcome }};cli=${{ steps.cli.outcome }};repair=${{ steps.repair.outcome }};migrations=${{ steps.migrations.outcome }}"
           # Push [auth] settings from supabase/config.toml — site_url,
           # redirect allow-list and the magic-link email template. Without
           # this, emailed sign-in links fall back to the dashboard default
@@ -133,8 +154,8 @@ jobs:
         run: |
           . .github/scripts/step-tree.sh
           step_tree "Deploy to Supabase Production" email \
-            "checkout:Checkout Repository|cli:Setup Supabase CLI|migrations:Push Database Migrations|config:Apply Auth & Email Configuration|email:Ensure Email Provider Enabled|signing:Ensure 2FA Challenge Signing Key Secret|deploy:Deploy Unified Edge API Function" \
-            "checkout=${{ steps.checkout.outcome }};cli=${{ steps.cli.outcome }};migrations=${{ steps.migrations.outcome }};config=${{ steps.config.outcome }}"
+            "checkout:Checkout Repository|cli:Setup Supabase CLI|repair:Repair Migration History|migrations:Push Database Migrations|config:Apply Auth & Email Configuration|email:Ensure Email Provider Enabled|signing:Ensure 2FA Challenge Signing Key Secret|deploy:Deploy Unified Edge API Function" \
+            "checkout=${{ steps.checkout.outcome }};cli=${{ steps.cli.outcome }};repair=${{ steps.repair.outcome }};migrations=${{ steps.migrations.outcome }};config=${{ steps.config.outcome }}"
           # The hosted project had the email (password) provider disabled,
           # so GoTrue rejects every password login with "Email logins are
           # disabled". Idempotently enable it — sign-ups stay blocked via
@@ -160,8 +181,8 @@ jobs:
         run: |
           . .github/scripts/step-tree.sh
           step_tree "Deploy to Supabase Production" signing \
-            "checkout:Checkout Repository|cli:Setup Supabase CLI|migrations:Push Database Migrations|config:Apply Auth & Email Configuration|email:Ensure Email Provider Enabled|signing:Ensure 2FA Challenge Signing Key Secret|deploy:Deploy Unified Edge API Function" \
-            "checkout=${{ steps.checkout.outcome }};cli=${{ steps.cli.outcome }};migrations=${{ steps.migrations.outcome }};config=${{ steps.config.outcome }};email=${{ steps.email.outcome }}"
+            "checkout:Checkout Repository|cli:Setup Supabase CLI|repair:Repair Migration History|migrations:Push Database Migrations|config:Apply Auth & Email Configuration|email:Ensure Email Provider Enabled|signing:Ensure 2FA Challenge Signing Key Secret|deploy:Deploy Unified Edge API Function" \
+            "checkout=${{ steps.checkout.outcome }};cli=${{ steps.cli.outcome }};repair=${{ steps.repair.outcome }};migrations=${{ steps.migrations.outcome }};config=${{ steps.config.outcome }};email=${{ steps.email.outcome }}"
           # The 2FA challenge signing key is a project-level Edge Function
           # secret. Create it once if missing (idempotent — never rotated
           # here, otherwise in-flight login challenges would be rejected).
@@ -186,6 +207,6 @@ jobs:
         run: |
           . .github/scripts/step-tree.sh
           step_tree "Deploy to Supabase Production" deploy \
-            "checkout:Checkout Repository|cli:Setup Supabase CLI|migrations:Push Database Migrations|config:Apply Auth & Email Configuration|email:Ensure Email Provider Enabled|signing:Ensure 2FA Challenge Signing Key Secret|deploy:Deploy Unified Edge API Function" \
-            "checkout=${{ steps.checkout.outcome }};cli=${{ steps.cli.outcome }};migrations=${{ steps.migrations.outcome }};config=${{ steps.config.outcome }};email=${{ steps.email.outcome }};signing=${{ steps.signing.outcome }}"
+            "checkout:Checkout Repository|cli:Setup Supabase CLI|repair:Repair Migration History|migrations:Push Database Migrations|config:Apply Auth & Email Configuration|email:Ensure Email Provider Enabled|signing:Ensure 2FA Challenge Signing Key Secret|deploy:Deploy Unified Edge API Function" \
+            "checkout=${{ steps.checkout.outcome }};cli=${{ steps.cli.outcome }};repair=${{ steps.repair.outcome }};migrations=${{ steps.migrations.outcome }};config=${{ steps.config.outcome }};email=${{ steps.email.outcome }};signing=${{ steps.signing.outcome }}"
           supabase functions deploy api --project-ref $SUPABASE_PROJECT_ID --no-verify-jwt
