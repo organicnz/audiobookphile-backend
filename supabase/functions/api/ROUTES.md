@@ -27,7 +27,8 @@ routes except `publicAuthRoutes`.
 playback.ts (all session ops), progress.ts (me/_), bookmarks.ts (me/_),
 search.ts history, users.ts `/me/preferences`, twoFactor.ts
 (enroll/verify/disable — self), playlists.ts, collections.ts, items.ts GET
-`/batch` (own progress only).
+`/batch` (own progress only), downloads.ts POST `/upload/finalize` (any
+non-banned user; banned blocked by authMiddleware).
 
 ## Authenticated user — AI/cost features (user-facing by design)
 

@@ -84,7 +84,7 @@ B2_SECONDARY_APP_KEY=<NEW_APP_KEY>
 From the running app (logged in as admin/root), upload a small test MP3. The
 Network tab should show:
 
-1. `POST /functions/v1/upload-presign` → `200`
+1. `POST /functions/v1/api/upload-presign` → `200`
 2. `PUT s3.us-west-004.backblazeb2.com/...` → `200` (not 403)
 
 Or, headlessly:
@@ -95,7 +95,7 @@ curl -sS -X POST \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $ADMIN_JWT" \
   -d '{"filename":"rotation-test.mp3","contentType":"audio/mpeg"}' \
-  "https://iambzzclljayqdxkeepy.supabase.co/functions/v1/upload-presign"
+  "https://iambzzclljayqdxkeepy.supabase.co/functions/v1/api/upload-presign"
 # Expect: 200 with {"url":"https://s3...","provider_prefix":"b2-secondary://"}
 
 # Then PUT a small body to the returned URL:
