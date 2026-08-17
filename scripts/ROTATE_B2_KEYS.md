@@ -114,3 +114,17 @@ The primary B2 bucket (`B2_KEY_ID` / `B2_APP_KEY` / `B2_BUCKET_NAME`) uses the
 same flow with the primary-tier variable names. `ACTIVE_B2_TIER=secondary` is
 currently set, so the primary path is dormant in production — rotate it only
 when switching tiers or during a full audit.
+
+## Tertiary tier
+
+The tertiary bucket (`audiobookphile-b2-tertiary`, account `c41a6a28c47f`) is
+the current write tier: `ACTIVE_B2_TIER=tertiary`. It uses the same flow with
+the `B2_TERTIARY_*` variable names (`B2_TERTIARY_KEY_ID` / `B2_TERTIARY_APP_KEY`
+/ `B2_TERTIARY_BUCKET_NAME` / `B2_TERTIARY_ENDPOINT` / `B2_TERTIARY_REGION`).
+The scoped key is bucket-restricted to `audiobookphile-b2-tertiary` with NO
+name prefix (uploads are named `{itemId}/{filename}`, which would never match a
+prefix).
+
+The storage router probes tiers in order **tertiary → secondary → primary →
+Supabase** when resolving legacy paths, so files spread across all three
+accounts keep streaming after the write tier moves on.

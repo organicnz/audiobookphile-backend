@@ -10,6 +10,7 @@ import { getSignedUrl } from "npm:@aws-sdk/s3-request-presigner@^3.693.0";
 // invocation (e.g. signing N tracks in parallel) this avoids N allocations.
 let _b2PrimaryClient: S3Client | null = null;
 let _b2SecondaryClient: S3Client | null = null;
+let _b2TertiaryClient: S3Client | null = null;
 
 function getB2PrimaryClient(): S3Client {
   if (!_b2PrimaryClient) {
@@ -56,6 +57,33 @@ function getB2SecondaryClient(): S3Client {
   return _b2SecondaryClient;
 }
 
+function getB2TertiaryClient(): S3Client {
+  if (!_b2TertiaryClient) {
+    _b2TertiaryClient = new S3Client({
+      endpoint: Deno.env.get("B2_TERTIARY_ENDPOINT")!,
+      region: Deno.env.get("B2_TERTIARY_REGION") || "us-west-004",
+      credentials: {
+        accessKeyId: Deno.env.get("B2_TERTIARY_KEY_ID")!,
+        secretAccessKey: Deno.env.get("B2_TERTIARY_APP_KEY")!,
+      },
+      forcePathStyle: true,
+      // See getB2PrimaryClient: required to keep GetObject presigned URLs
+      // B2-compatible on AWS SDK v3.693.0+ / v3.1085.0+.
+      // @ts-ignore — options recognised at runtime, not in older type defs
+      requestChecksumCalculation: "WHEN_REQUIRED",
+      // @ts-ignore
+      responseChecksumValidation: "WHEN_REQUIRED",
+    });
+  }
+  return _b2TertiaryClient;
+}
+
+/** True when the tertiary B2 tier is fully configured (endpoint + bucket). */
+export function b2TertiaryConfigured(): boolean {
+  return !!Deno.env.get("B2_TERTIARY_ENDPOINT") &&
+    !!Deno.env.get("B2_TERTIARY_BUCKET_NAME");
+}
+
 /**
  * Result of a successful path resolution for a legacy bare path.
  * Contains the signed URL and the canonical storage path (with scheme prefix)
@@ -80,6 +108,15 @@ export class StorageRouter {
         throw new Error(`Supabase presign failed: ${error?.message}`);
       }
       return data.signedUrl;
+    }
+
+    if (path.startsWith("b2-tertiary://")) {
+      const actualPath = path.replace("b2-tertiary://", "");
+      const command = new GetObjectCommand({
+        Bucket: Deno.env.get("B2_TERTIARY_BUCKET_NAME")!,
+        Key: actualPath,
+      });
+      return await getSignedUrl(getB2TertiaryClient(), command, { expiresIn });
     }
 
     if (path.startsWith("b2-secondary://")) {
@@ -112,8 +149,8 @@ export class StorageRouter {
    * by probing all three storage backends under the canonical key pattern:
    *   {itemId}/{filename}
    *
-   * Probe order: b2-secondary → b2-primary → supabase
-   * (most new uploads go to b2-secondary, so check that first)
+   * Probe order: b2-tertiary → b2-secondary → b2-primary → supabase
+   * (most new uploads go to b2-tertiary, so check that first)
    *
    * Returns the signed URL and canonical path of whichever backend has the file,
    * or throws if none of them do.
@@ -127,7 +164,29 @@ export class StorageRouter {
     const filename = legacyPath.split("/").pop()!;
     const key = `${itemId}/${filename}`;
 
-    // 1. Try b2-secondary
+    // 1. Try b2-tertiary (only when configured; unset envs must not throw)
+    if (b2TertiaryConfigured()) {
+      try {
+        await getB2TertiaryClient().send(
+          new HeadObjectCommand({
+            Bucket: Deno.env.get("B2_TERTIARY_BUCKET_NAME")!,
+            Key: key,
+          }),
+        );
+        const command = new GetObjectCommand({
+          Bucket: Deno.env.get("B2_TERTIARY_BUCKET_NAME")!,
+          Key: key,
+        });
+        const signedUrl = await getSignedUrl(getB2TertiaryClient(), command, {
+          expiresIn,
+        });
+        return { signedUrl, canonicalPath: `b2-tertiary://${key}` };
+      } catch {
+        // not in b2-tertiary
+      }
+    }
+
+    // 2. Try b2-secondary
     try {
       await getB2SecondaryClient().send(
         new HeadObjectCommand({
@@ -147,7 +206,7 @@ export class StorageRouter {
       // not in b2-secondary
     }
 
-    // 2. Try b2-primary
+    // 3. Try b2-primary
     try {
       await getB2PrimaryClient().send(
         new HeadObjectCommand({
@@ -167,7 +226,7 @@ export class StorageRouter {
       // not in b2-primary
     }
 
-    // 3. Try Supabase Storage
+    // 4. Try Supabase Storage
     const folder = itemId;
     const { data: listed } = await this.supabase.storage
       .from("audio-files")
@@ -202,6 +261,21 @@ export class StorageRouter {
         { search: filename },
       );
       return !!(data && data.length > 0 && data[0].name === filename);
+    }
+
+    if (path.startsWith("b2-tertiary://")) {
+      const actualPath = path.replace("b2-tertiary://", "");
+      try {
+        await getB2TertiaryClient().send(
+          new HeadObjectCommand({
+            Bucket: Deno.env.get("B2_TERTIARY_BUCKET_NAME")!,
+            Key: actualPath,
+          }),
+        );
+        return true;
+      } catch {
+        return false;
+      }
     }
 
     if (path.startsWith("b2-secondary://")) {

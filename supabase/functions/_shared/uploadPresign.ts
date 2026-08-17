@@ -3,6 +3,7 @@ import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
 let _b2PrimaryClient: S3Client | null = null;
 let _b2SecondaryClient: S3Client | null = null;
+let _b2TertiaryClient: S3Client | null = null;
 
 function getB2PrimaryClient(): S3Client {
   if (!_b2PrimaryClient) {
@@ -42,6 +43,25 @@ function getB2SecondaryClient(): S3Client {
   return _b2SecondaryClient;
 }
 
+function getB2TertiaryClient(): S3Client {
+  if (!_b2TertiaryClient) {
+    _b2TertiaryClient = new S3Client({
+      endpoint: Deno.env.get("B2_TERTIARY_ENDPOINT")!,
+      region: Deno.env.get("B2_TERTIARY_REGION") || "us-west-004",
+      credentials: {
+        accessKeyId: Deno.env.get("B2_TERTIARY_KEY_ID")!,
+        secretAccessKey: Deno.env.get("B2_TERTIARY_APP_KEY")!,
+      },
+      forcePathStyle: true,
+      // @ts-ignore
+      requestChecksumCalculation: "WHEN_REQUIRED",
+      // @ts-ignore
+      responseChecksumValidation: "WHEN_REQUIRED",
+    });
+  }
+  return _b2TertiaryClient;
+}
+
 export async function presignUpload(
   supabase: any,
   filename: string,
@@ -51,11 +71,27 @@ export async function presignUpload(
     throw new Error("Filename is required");
   }
 
-  const activeTier = Deno.env.get("ACTIVE_B2_TIER") === "secondary"
+  const tier = Deno.env.get("ACTIVE_B2_TIER");
+  const activeTier = tier === "tertiary"
+    ? "tertiary"
+    : tier === "secondary"
     ? "secondary"
     : "primary";
 
   if (
+    activeTier === "tertiary" && Deno.env.get("B2_TERTIARY_ENDPOINT") &&
+    Deno.env.get("B2_TERTIARY_BUCKET_NAME")
+  ) {
+    const command = new PutObjectCommand({
+      Bucket: Deno.env.get("B2_TERTIARY_BUCKET_NAME")!,
+      Key: filename,
+      ContentType: contentType || "application/octet-stream",
+    });
+    const url = await getSignedUrl(getB2TertiaryClient(), command, {
+      expiresIn: 3600,
+    });
+    return { url, provider_prefix: "b2-tertiary://" };
+  } else if (
     activeTier === "secondary" && Deno.env.get("B2_SECONDARY_ENDPOINT") &&
     Deno.env.get("B2_SECONDARY_BUCKET_NAME")
   ) {
