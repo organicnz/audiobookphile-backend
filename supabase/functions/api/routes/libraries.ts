@@ -224,12 +224,15 @@ librariesRouter.get("/:id/items", async (c) => {
   const seriesId = queryParams.get("seriesId");
   // List mode (default): slim shelf payloads (no per-file track data). The
   // detail endpoint /api/items/:id always returns the full book.
-  const includeFiles = queryParams.get("include")?.split(",").includes("files") === true;
+  const includeFiles =
+    queryParams.get("include")?.split(",").includes("files") === true;
   const itemSelect = includeFiles ? FULL_ITEM_SELECT : LIST_ITEM_SELECT;
 
   try {
     const cacheKey =
-      `${libraryId}-${dbSortField}-${isDesc}-${limit}-${page}-${search}-${authorId}-${seriesId}-${includeFiles ? "f" : "l"}`;
+      `${libraryId}-${dbSortField}-${isDesc}-${limit}-${page}-${search}-${authorId}-${seriesId}-${
+        includeFiles ? "f" : "l"
+      }`;
     let items: any[] = [];
     let count: number | null = 0;
     const now = Date.now();
@@ -265,8 +268,12 @@ librariesRouter.get("/:id/items", async (c) => {
           batchQuery = batchQuery.order(dbSortField, { ascending: !isDesc })
             .range(currentOffset, currentOffset + CHUNK_SIZE - 1);
 
-          const { data, error, count: totalCount } = (await batchQuery) as
-            unknown as { data: any[] | null; error: any; count: number | null };
+          const { data, error, count: totalCount } =
+            (await batchQuery) as unknown as {
+              data: any[] | null;
+              error: any;
+              count: number | null;
+            };
 
           if (error) {
             return c.json(
@@ -316,8 +323,11 @@ librariesRouter.get("/:id/items", async (c) => {
           offset + limit - 1,
         );
 
-        const { data, error, count: totalCount } = (await query) as unknown as
-          { data: any[] | null; error: any; count: number | null };
+        const { data, error, count: totalCount } = (await query) as unknown as {
+          data: any[] | null;
+          error: any;
+          count: number | null;
+        };
 
         if (error) {
           return c.json(
@@ -503,8 +513,11 @@ librariesRouter.get("/:id/search", async (c) => {
     );
   }
 
-  let { data: items, error: itemsError } = (await itemsQuery.limit(limit * 2)) as
-    unknown as { data: any[] | null; error: any };
+  let { data: items, error: itemsError } =
+    (await itemsQuery.limit(limit * 2)) as unknown as {
+      data: any[] | null;
+      error: any;
+    };
 
   const cleanQueryText = sanitizeSearchToken(queryText);
   if ((!items || items.length === 0) && cleanQueryText) {

@@ -1,6 +1,18 @@
+import { z } from "zod";
 import { Hono } from "hono";
 import { Variables } from "../_shared/types.ts";
 import { LibraryItemWithBooks, mapBookForMobile } from "../../api/mappers.ts";
+
+// ===== Zod schemas for search endpoints =====
+const SmartSearchBodySchema = z.object({
+  query: z.string().max(256),
+  libraryId: z.string().optional(),
+});
+
+const GenerateEmbeddingBodySchema = z.object({
+  text: z.string().max(4096).optional(), // 16KB max for embeddings
+  input: z.string().max(4096).optional(),
+});
 
 export const searchRouter = new Hono<{ Variables: Variables }>();
 
@@ -74,9 +86,22 @@ searchRouter.delete("/history", async (c) => {
 
 async function handleSmartSearch(c: any) {
   const supabase = c.get("supabase");
-  const body = await c.req.json().catch(() => ({}));
-  const queryText = body.query || "";
-  const libraryId = body.libraryId || "";
+
+  let body;
+  try {
+    body = await c.req.json();
+  } catch (_e) {
+    return c.json({ error: "Invalid JSON" }, 400);
+  }
+
+  // Validate with Zod schema
+  const parsed = SmartSearchBodySchema.safeParse(body);
+  if (!parsed.success) {
+    return c.json({ error: parsed.error.flatten().fieldErrors }, 400);
+  }
+
+  const queryText = parsed.data.query || "";
+  const libraryId = parsed.data.libraryId || "";
 
   if (!queryText) {
     return c.json({ error: "Query is required" }, 400);
@@ -147,8 +172,20 @@ searchRouter.post("/semantic", handleSmartSearch);
 searchRouter.post("/search-semantic", handleSmartSearch);
 
 async function handleGenerateEmbedding(c: any) {
-  const body = await c.req.json().catch(() => ({}));
-  const text = body.text || body.input || "";
+  let body;
+  try {
+    body = await c.req.json();
+  } catch (_e) {
+    return c.json({ error: "Invalid JSON" }, 400);
+  }
+
+  // Validate with Zod schema
+  const parsed = GenerateEmbeddingBodySchema.safeParse(body);
+  if (!parsed.success) {
+    return c.json({ error: parsed.error.flatten().fieldErrors }, 400);
+  }
+
+  const text = parsed.data.text || parsed.data.input || "";
   if (!text) {
     return c.json({ error: "Text or input is required" }, 400);
   }

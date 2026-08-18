@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { Hono } from "hono";
 import type { MiddlewareHandler } from "hono";
 import { Variables } from "../_shared/types.ts";
@@ -5,6 +6,19 @@ import { requireAdminRole } from "../_shared/auth.ts";
 import { enrichMetadataWithZAI } from "../../_shared/zai.ts";
 
 export const metadataRouter = new Hono<{ Variables: Variables }>();
+
+// ===== Zod schemas for metadata endpoints =====
+const MatchBookSchema = z.object({
+  title: z.string().min(1, "Title is required").max(256),
+  author: z.string().optional(), // optional alias - we'll use it in fallback search
+});
+
+const ScrapeMetadataBodySchemaWithOptionalTitle = z.object({
+  title: z.string().max(256).or(z.literal("")),
+  bookTitle: z.string().optional(),
+  author: z.string().optional(),
+  authorName: z.string().optional(),
+});
 
 // Global metadata maintenance (narrators/tags/genres CRUD, external match &
 // scrape) touches server-wide content — strictly admin/root only. Guards are
@@ -63,10 +77,31 @@ metadataRouter.delete("/genres/:id", async (c) => {
 
 // --- MATCH BOOK METADATA ---
 metadataRouter.post("/match-book", async (c) => {
-  const { title, author } = await c.req.json();
-  if (!title) {
-    return c.json({ error: "Title is required" }, 400);
+  let body;
+  try {
+    body = await c.req.json();
+  } catch (_e) {
+    // If no JSON body at all, fall back to query params with strict validation
+    const queryParams = Object.fromEntries(new URL(c.req.url).searchParams);
+    if (!queryParams.title || !queryParams.title.trim()) {
+      return c.json({ error: "Title is required" }, 400);
+    }
+    const parsed = MatchBookSchema.safeParse(queryParams);
+    if (parsed.success) {
+      body = parsed.data;
+    } else {
+      return c.json({ error: parsed.error.flatten().fieldErrors }, 400);
+    }
   }
+
+  // Validate with Zod schema
+  const parsed = MatchBookSchema.safeParse(body);
+  if (!parsed.success) {
+    return c.json({ error: parsed.error.flatten().fieldErrors }, 400);
+  }
+
+  const title = parsed.data.title;
+  const author = parsed.data.author || "";
 
   try {
     const results: any[] = [];
@@ -215,12 +250,44 @@ metadataRouter.post("/match-book", async (c) => {
 });
 
 async function handleScrapeMetadata(c: any) {
-  const body = await c.req.json().catch(() => ({}));
-  const title = body.title || body.bookTitle || "";
-  const author = body.author || body.authorName || "";
+  let body;
+  try {
+    body = await c.req.json();
+  } catch (_e) {
+    // If no JSON body at all, fall back to query params with strict validation
+    const queryParams = Object.fromEntries(new URL(c.req.url).searchParams);
+    if (!queryParams.title && !queryParams.bookTitle) {
+      return c.json({ error: "Title is required" }, 400);
+    }
+    const parsed = ScrapeMetadataBodySchemaWithOptionalTitle.safeParse(
+      queryParams,
+    );
+    if (parsed.success) {
+      body = parsed.data;
+    } else {
+      return c.json({ error: parsed.error.flatten().fieldErrors }, 400);
+    }
+  }
+
+  // Validate with Zod schema (title is required for ZAI enrichment)
+  const parsed = ScrapeMetadataBodySchemaWithOptionalTitle.safeParse(body);
+  if (!parsed.success) {
+    return c.json({ error: parsed.error.flatten().fieldErrors }, 400);
+  }
+
+  let title = parsed.data.title || parsed.data.bookTitle || "";
+  if (title === "") {
+    // Empty string is technically allowed by schema but we want to prevent empty requests
+    // Only allow empty body for legacy compatibility - still requires actual enrichment data
+    return c.json({ error: "Title is required" }, 400);
+  }
+
+  const author = parsed.data.author || parsed.data.authorName || "";
+
   if (!title) {
     return c.json({ error: "Title is required" }, 400);
   }
+
   const zaiApiKey = Deno.env.get("ZAI_API_KEY") ??
     Deno.env.get("ZHIPU_API_KEY") ?? "";
   try {

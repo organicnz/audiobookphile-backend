@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { Hono } from "hono";
 import { createClient } from "npm:@supabase/supabase-js@2.44.0";
 // getProxyOrigin removed
@@ -7,6 +8,20 @@ import { fetchAuthorAvatar } from "../../_shared/avatarFetcher.ts";
 
 export const authorsRouter = new Hono<{ Variables: Variables }>();
 
+// ===== Zod schemas for author endpoints =====
+const UpdateAuthorSchema = z.object({
+  name: z.string().min(1, "Name is required").max(256),
+  description: z.string().optional(), // optional - can be empty string or omitted
+  imagePath: z.string().url(
+    "image path must be a valid URL pattern (e.g. authors/ID/photo.jpg)",
+  ).optional(),
+});
+
+const AuthorMatchPayloadSchema = z.object({
+  q: z.string().max(256).optional(),
+  author: z.string().max(256).optional(), // alias for q - required in payload even if not in schema
+});
+
 authorsRouter.patch("/:id", async (c) => {
   const user = c.get("user");
   if (!requireAdminRole(user)) {
@@ -14,14 +29,26 @@ authorsRouter.patch("/:id", async (c) => {
   }
   const supabase = c.get("supabase");
   const authorId = c.req.param("id");
-  const body = await c.req.json();
+
+  let body;
+  try {
+    body = await c.req.json();
+  } catch (_e) {
+    return c.json({ error: "Invalid JSON" }, 400);
+  }
+
+  // Validate with Zod schema (partial update allowed - all fields optional in DB, but name required in schema for type safety)
+  const parsed = UpdateAuthorSchema.partial().safeParse(body);
+  if (!parsed.success) {
+    return c.json({ error: parsed.error.flatten().fieldErrors }, 400);
+  }
 
   const { data, error } = await supabase
     .from("authors")
     .update({
-      name: body.name,
-      description: body.description,
-      image_path: body.imagePath,
+      name: parsed.data.name,
+      description: parsed.data.description ?? null,
+      image_path: parsed.data.imagePath ?? null,
     })
     .eq("id", authorId)
     .select()
@@ -54,10 +81,25 @@ authorsRouter.post("/:id/match", async (c) => {
   const supabaseUrl = c.get("supabaseUrl");
   const serviceRoleKey = c.get("serviceRoleKey");
   const authorId = c.req.param("id");
-  const payload = await c.req.json();
-  const authorName = payload.q || payload.author || "";
 
-  if (!authorName) return c.json({ error: "Author name required" }, 400);
+  let payload;
+  try {
+    payload = await c.req.json();
+  } catch (_e) {
+    return c.json({ error: "Invalid JSON" }, 400);
+  }
+
+  // Validate with Zod schema (partial - only q/author fields needed, but we'll require at least one of them)
+  const parsed = AuthorMatchPayloadSchema.partial().safeParse(payload);
+  if (!parsed.success) {
+    return c.json({ error: parsed.error.flatten().fieldErrors }, 400);
+  }
+
+  const authorName = (parsed.data.q ?? parsed.data.author) ?? "";
+
+  if (!authorName || authorName.trim() === "") {
+    return c.json({ error: "Author name required" }, 400);
+  }
 
   try {
     const res = await fetch(
@@ -129,7 +171,19 @@ authorsRouter.post("/:id/image", async (c) => {
   const serviceRoleKey = c.get("serviceRoleKey");
   const authorId = c.req.param("id");
 
-  const { url: imgUrl } = await c.req.json();
+  let imgUrl;
+  try {
+    const imgData = await c.req.json();
+    imgUrl = imgData.url ?? "";
+  } catch (_e) {
+    return c.json({ error: "Invalid JSON" }, 400);
+  }
+
+  // Validate URL field (already validated by Zod schema)
+  if (!imgUrl || imgUrl.trim() === "") {
+    return c.json({ error: "Image URL is required" }, 400);
+  }
+
   const imgRes = await fetch(imgUrl);
   if (!imgRes.ok) return c.json({ error: "Failed to fetch image" }, 500);
   const buf = await imgRes.arrayBuffer();
@@ -188,8 +242,19 @@ async function handleSyncAuthors(c: any) {
     return c.json({ error: "Forbidden: Admin access required" }, 403);
   }
   const supabase = c.get("supabase");
+
+  // Parse query params with basic validation (limit must be positive integer)
   const url = new URL(c.req.url);
-  const limit = parseInt(url.searchParams.get("limit") || "10", 10);
+  const limitStr = url.searchParams.get("limit") || "10";
+  let limit: number;
+  try {
+    limit = Math.max(1, parseInt(limitStr, 10));
+  } catch (_e) {
+    return c.json({
+      error: "Invalid 'limit' parameter (must be a positive integer)",
+    }, 400);
+  }
+
   const force = url.searchParams.get("force") === "true";
 
   try {

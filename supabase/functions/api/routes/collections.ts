@@ -1,12 +1,53 @@
+import { z } from "zod";
 import { Hono } from "hono";
 
 import { Variables } from "../_shared/types.ts";
 export const collectionsRouter = new Hono<{ Variables: Variables }>();
 
+// ===== Zod schemas for collection endpoints =====
+const CollectionCreateSchema = z.object({
+  libraryId: z.string().min(1),
+  name: z.string().max(256).optional(),
+  description: z.string().max(4096).optional(),
+  items: z.array(z.number()).optional(), // array of item IDs to add (auto-ordered)
+});
+
+const CollectionUpdateSchema = z.object({
+  name: z.string().max(256).optional(),
+  description: z.string().max(4096).optional(),
+});
+
+const CollectionItemsPayloadSchema = z.array(z.number()); // array of library item IDs
+
 collectionsRouter.post("/", async (c) => {
   const supabase = c.get("supabase");
-  const { libraryId, name, description, items } = await c.req.json();
+
+  let body;
+  try {
+    body = await c.req.json();
+  } catch (_e) {
+    return c.json({ error: "Invalid JSON" }, 400);
+  }
+
+  // Validate with Zod schema
+  const parsed = CollectionCreateSchema.safeParse(body);
+  if (!parsed.success) {
+    return c.json({ error: parsed.error.flatten().fieldErrors }, 400);
+  }
+
+  const { libraryId, name, description, items } = parsed.data;
   const newId = crypto.randomUUID();
+
+  // Validate item IDs (if provided)
+  if (items && items.length > 0) {
+    for (const itemId of items) {
+      try {
+        z.string().uuid().safeParse(itemId.toString());
+      } catch (_e) {
+        return c.json({ error: `Invalid library item ID: ${itemId}` }, 400);
+      }
+    }
+  }
 
   const { data, error } = await supabase
     .from("collections")
@@ -22,8 +63,9 @@ collectionsRouter.post("/", async (c) => {
 
   if (items && items.length > 0) {
     const collectionItems = items.map((item: any, index: number) => ({
+      id: crypto.randomUUID(),
       collection_id: data.id,
-      library_item_id: item.libraryItemId,
+      library_item_id: item,
       order: index,
     }));
     await supabase.from("collection_items").insert(collectionItems);
@@ -34,7 +76,21 @@ collectionsRouter.post("/", async (c) => {
 collectionsRouter.patch("/:id", async (c) => {
   const supabase = c.get("supabase");
   const collectionId = c.req.param("id");
-  const { name, description } = await c.req.json();
+
+  let body;
+  try {
+    body = await c.req.json();
+  } catch (_e) {
+    return c.json({ error: "Invalid JSON" }, 400);
+  }
+
+  // Validate with Zod schema (partial update allowed - optional fields)
+  const parsed = CollectionUpdateSchema.partial().safeParse(body);
+  if (!parsed.success) {
+    return c.json({ error: parsed.error.flatten().fieldErrors }, 400);
+  }
+
+  const { name, description } = parsed.data;
 
   const { data, error } = await supabase
     .from("collections")
@@ -64,7 +120,28 @@ collectionsRouter.delete("/:id", async (c) => {
 collectionsRouter.post("/:id/items", async (c) => {
   const supabase = c.get("supabase");
   const collectionId = c.req.param("id");
-  const { libraryItemId } = await c.req.json();
+
+  let body;
+  try {
+    body = await c.req.json();
+  } catch (_e) {
+    return c.json({ error: "Invalid JSON" }, 400);
+  }
+
+  // Validate with Zod schema
+  const parsed = CollectionItemsPayloadSchema.safeParse(body);
+  if (!parsed.success) {
+    return c.json({ error: "items array is required" }, 400);
+  }
+
+  // Validate each item ID as UUID
+  for (const itemId of parsed.data) {
+    try {
+      z.string().uuid().safeParse(itemId.toString());
+    } catch (_e) {
+      return c.json({ error: `Invalid library item ID: ${itemId}` }, 400);
+    }
+  }
 
   const { count } = await supabase
     .from("collection_items")
@@ -77,7 +154,7 @@ collectionsRouter.post("/:id/items", async (c) => {
   await supabase.from("collection_items").insert({
     id: newId,
     collection_id: collectionId,
-    library_item_id: libraryItemId,
+    library_item_id: parsed.data[0].toString(),
     order: count ?? 0,
   });
 
@@ -92,6 +169,13 @@ collectionsRouter.delete("/:id/items/:itemId", async (c) => {
   const supabase = c.get("supabase");
   const collectionId = c.req.param("id");
   const libraryItemId = c.req.param("itemId");
+
+  // Validate itemId as UUID before deleting
+  try {
+    z.string().uuid().safeParse(libraryItemId);
+  } catch (_e) {
+    return c.json({ error: `Invalid library item ID: ${libraryItemId}` }, 400);
+  }
 
   await supabase.from("collection_items").delete().eq(
     "collection_id",

@@ -44,7 +44,7 @@ function normalizeString(str: string): string {
     // 3. Remove parenthesized content
     .replace(/\([^)]*\)/g, " ")
     // 4. Replace dots, underscores, and dashes with spaces
-    .replace(/[\._-]/g, " ")
+    .replace(/[._-]/g, " ")
     // 5. Remove common audiobook suffixes
     .replace(
       /\b(audiobook|unabridged|abridged|collection|series|vol|volume|book|complete|part|chapter|of|v\d+)\b/gi,

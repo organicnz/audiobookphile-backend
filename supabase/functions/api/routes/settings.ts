@@ -1,7 +1,18 @@
+import { z } from "zod";
 import { Hono } from "hono";
 import type { MiddlewareHandler } from "hono";
 import { Variables } from "../_shared/types.ts";
 import { requireAdminRole } from "../_shared/auth.ts";
+
+// ===== Zod schemas for settings endpoints =====
+
+const GenreUpdateSchema = z.object({
+  newGenreName: z.string().min(1).max(256), // Genre name to rename/merge into
+});
+
+const TagUpdateSchema = z.object({
+  newTagName: z.string().min(1).max(256), // Tag name to rename/merge into
+});
 
 export const settingsRouter = new Hono<{ Variables: Variables }>();
 
@@ -145,7 +156,23 @@ settingsRouter.delete("/genres/:genre", async (c) => {
 settingsRouter.put("/genres/:genre", async (c) => {
   const supabase = c.get("supabase");
   const genre = c.req.param("genre");
-  const { newGenreName } = await c.req.json();
+
+  // Validate payload with Zod schema
+  let body;
+  try {
+    body = await c.req.json();
+  } catch (_e) {
+    return c.json({ error: "Invalid JSON" }, 400);
+  }
+
+  const parsed = GenreUpdateSchema.safeParse(body);
+  if (!parsed.success) {
+    return c.json(
+      { success: false, error: parsed.error.flatten().fieldErrors },
+      400,
+    );
+  }
+  const newGenreName = parsed.data.newGenreName;
 
   const { data: books } = await supabase.from("library_items").select(
     "id, genres",
@@ -200,7 +227,23 @@ settingsRouter.delete("/tags/:tag", async (c) => {
 settingsRouter.put("/tags/:tag", async (c) => {
   const supabase = c.get("supabase");
   const tag = c.req.param("tag");
-  const { newTagName } = await c.req.json();
+
+  // Validate payload with Zod schema
+  let body;
+  try {
+    body = await c.req.json();
+  } catch (_e) {
+    return c.json({ error: "Invalid JSON" }, 400);
+  }
+
+  const parsed = TagUpdateSchema.safeParse(body);
+  if (!parsed.success) {
+    return c.json(
+      { success: false, error: parsed.error.flatten().fieldErrors },
+      400,
+    );
+  }
+  const newTagName = parsed.data.newTagName;
 
   const { data: books } = await supabase.from("library_items").select(
     "id, tags",

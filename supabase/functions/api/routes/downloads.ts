@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { Hono } from "hono";
 import { StorageRouter } from "../../_shared/storage-router.ts";
 import { Variables } from "../_shared/types.ts";
@@ -9,6 +10,30 @@ import {
   matchExistingBookWithZAI,
   sortFilesWithZAI,
 } from "../../_shared/zai.ts";
+
+// ===== Zod schemas for /upload/finalize =====
+const UploadFinalizeSchema = z.object({
+  bookId: z.string().uuid().optional(),
+  title: z.string().max(512).optional(),
+  author: z.string().max(256).optional(),
+  series: z.string().max(256).optional(),
+  library: z.string().min(1, "Library ID is required"), // must be a valid UUID (library_id)
+  mediaType: z.enum(["book", "audiobook", "podcast"]).default("book")
+    .optional(),
+  files: z.array(z.object({
+    storagePath: z.string().url("storage path is required"),
+    size: z.number().min(0, "Size must be non-negative"),
+    name: z.string().max(512).optional(),
+    type: z.string().max(512).optional(),
+  })).length(1, "At least one file is required").optional(),
+});
+
+const PresignSchema = z.object({
+  filename: z.string().min(1, "Filename is required"),
+  contentType: z.string().url(
+    "Content-Type must be a valid URL pattern (e.g. audio/mpeg)",
+  ).optional(),
+});
 
 function runDetached(promise: Promise<unknown>): void {
   const edgeRuntime = (globalThis as unknown as {
@@ -270,11 +295,22 @@ async function handleUploadPresign(c: any) {
     return c.json({ error: "Forbidden: Admin access required" }, 403);
   }
   const supabase = c.get("supabase");
-  const body = await c.req.json().catch(() => ({}));
-  const { filename, contentType } = body;
-  if (!filename) {
-    return c.json({ error: "Filename is required" }, 400);
+
+  let body;
+  try {
+    body = await c.req.json();
+  } catch (_e) {
+    return c.json({ error: "Invalid JSON" }, 400);
   }
+
+  // Validate with Zod schema
+  const parsed = PresignSchema.safeParse(body);
+  if (!parsed.success) {
+    return c.json({ error: parsed.error.flatten().fieldErrors }, 400);
+  }
+
+  const { filename, contentType } = parsed.data;
+
   try {
     const res = await presignUpload(supabase, filename, contentType);
     return c.json(res);
@@ -300,21 +336,38 @@ downloadsRouter.post("/upload/finalize", async (c) => {
   const supabase = c.get("supabase");
   const storageRouter = new StorageRouter(supabase);
 
-  const body = (await c.req.json().catch(() => ({}))) as any;
+  let body;
+  try {
+    body = await c.req.json();
+  } catch (_e) {
+    return c.json({ error: "Invalid JSON" }, 400);
+  }
+
+  // Validate with Zod schema (raw title/author before parsing)
+  const parsed = UploadFinalizeSchema.safeParse(body);
+  if (!parsed.success) {
+    return c.json({ error: parsed.error.flatten().fieldErrors }, 400);
+  }
+
   let {
     bookId,
-    title: rawTitle,
+    title: rawTitle = "",
     author: rawAuthor = "",
     series = "",
     library: libraryId,
     mediaType = "book",
     files,
-  } = body;
+  } = parsed.data;
 
   let { cleanTitle: title, cleanAuthor: author } = parseTitleAndAuthor(
     rawTitle,
     rawAuthor,
   );
+
+  // Ensure parsed metadata isn't empty (we can't fully validate internal parsing logic)
+  if (!title || !author) {
+    return c.json({ error: "Missing book title or author" }, 400);
+  }
 
   const zaiApiKey = Deno.env.get("ZAI_API_KEY") ??
     Deno.env.get("ZHIPU_API_KEY") ?? "";
@@ -385,6 +438,24 @@ downloadsRouter.post("/upload/finalize", async (c) => {
       { error: "Files missing in storage", missingFiles },
       400,
     );
+  }
+
+  // Basic file structure validation (required fields must be present and non-empty)
+  for (const f of files) {
+    if (
+      !f.storagePath || !f.size || typeof f.size !== "number" || f.size <= 0
+    ) {
+      return c.json(
+        {
+          error:
+            `File ${f.name} is invalid: missing or invalid storage path/size`,
+        },
+        400,
+      );
+    }
+    if (!f.name && !f.storagePath && !f.type) {
+      // At least name, path, or type should be set (for matching in storage)
+    }
   }
 
   const totalSize = files.reduce((sum: number, f: any) => sum + f.size, 0);

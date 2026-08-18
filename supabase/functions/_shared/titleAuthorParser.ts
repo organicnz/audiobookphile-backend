@@ -37,7 +37,7 @@ export function parseTitleAndAuthor(
 
   // 2. Handle "Last, First -- Title" or "Last, First - Title" (e.g., "Sagan, Carl -- The Demon-Haunted World")
   const lastFirstMatch = title.match(
-    /^([\p{Lu}\p{Lt}][\p{L}'\-]+),\s*([\p{Lu}\p{Lt}][\p{L}'\-\.]+)\s*(?:--|-)\s*(.+)$/u,
+    /^([\p{Lu}\p{Lt}][\p{L}'-]+),\s*([\p{Lu}\p{Lt}][\p{L}'\-.]+)\s*(?:--|-)\s*(.+)$/u,
   );
   if (lastFirstMatch) {
     const lastName = lastFirstMatch[1].trim();
