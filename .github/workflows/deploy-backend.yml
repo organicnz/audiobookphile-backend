@@ -277,4 +277,6 @@ jobs:
           step_tree "Post-Deploy Verification (Smoke & Schemathesis)" smoke \
             "checkout:Checkout Repository|deno:Setup Deno|hurl:Setup Hurl|python:Setup Python|schemathesis:Install Schemathesis|hurl_gate:Hurl Gate (/health)|schema:Schemathesis (GET only)|smoke:Deno Smoke Test" \
             "checkout=${{ steps.checkout.outcome }};deno=${{ steps.deno.outcome }};hurl=${{ steps.hurl.outcome }};python=${{ steps.python.outcome }};schemathesis=${{ steps.schemathesis.outcome }};hurl_gate=${{ steps.hurl_gate.outcome }};schema=${{ steps.schema.outcome }}"
-          API_BASE_URL="https://${SUPABASE_PROJECT_ID}.supabase.co/functions/v1/api" deno test --allow-env --allow-net supabase/functions/api/smoke/e2e_smoke_test.ts
+          cd supabase/functions/api
+          deno install
+          API_BASE_URL="https://${SUPABASE_PROJECT_ID}.supabase.co/functions/v1/api" deno test --allow-env --allow-net smoke/e2e_smoke_test.ts
