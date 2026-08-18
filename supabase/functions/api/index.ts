@@ -5,7 +5,9 @@ import { compress } from "hono/compress";
 import { createClient } from "npm:@supabase/supabase-js@2.44.0";
 import { Sentry } from "../_shared/sentry.ts";
 
-// Native Hono Routers
+// ============================================================================
+// OpenAPI Routers
+// ============================================================================
 import { settingsRouter } from "./routes/settings.ts";
 import { debugRouter } from "./routes/debug.ts";
 import { metadataRouter } from "./routes/metadata.ts";
