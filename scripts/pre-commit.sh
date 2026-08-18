@@ -168,7 +168,7 @@ fi
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 echo "🔍 [13/13] Deno Edge Typecheck & Unit Tests..."
-deno check supabase/functions/api/index.ts && deno test -A supabase/functions/api/
+deno check --config supabase/functions/deno.json supabase/functions/api/index.ts && deno test -A --config supabase/functions/deno.json supabase/functions/api/
 if [ $? -ne 0 ]; then
     echo "❌ Typecheck or unit tests failed."
     exit 1

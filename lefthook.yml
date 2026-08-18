@@ -16,16 +16,16 @@ pre-push:
     security-audit:
       run: ./scripts/security-audit.sh
     typecheck-and-test:
-      run: deno check supabase/functions/api/index.ts && deno test -A supabase/functions/api/
+      run: deno check --config supabase/functions/deno.json supabase/functions/api/index.ts && deno test -A --config supabase/functions/deno.json supabase/functions/api/
 
 post-merge:
   commands:
     deno-check:
       glob: "supabase/functions/deno.json"
-      run: deno check supabase/functions/api/index.ts
+      run: deno check --config supabase/functions/deno.json supabase/functions/api/index.ts
 
 post-checkout:
   commands:
     deno-check:
       glob: "supabase/functions/deno.json"
-      run: deno check supabase/functions/api/index.ts
+      run: deno check --config supabase/functions/deno.json supabase/functions/api/index.ts
