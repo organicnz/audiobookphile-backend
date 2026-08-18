@@ -227,20 +227,20 @@ jobs:
         id: hurl
         uses: gacts/install-hurl@v1
 
-      - name: Setup Node/Schemathesis
-        id: node
-        uses: actions/setup-node@v4
+      - name: Setup Python
+        id: python
+        uses: actions/setup-python@v5
         with:
-          node-version: 20
+          python-version: '3.x'
 
       - name: Install Schemathesis
         id: schemathesis
         run: |
           . .github/scripts/step-tree.sh
           step_tree "Post-Deploy Verification (Smoke & Schemathesis)" schemathesis \
-            "checkout:Checkout Repository|deno:Setup Deno|hurl:Setup Hurl|node:Setup Node/Schemathesis|schemathesis:Install Schemathesis|hurl_gate:Hurl Gate (/health)|schema:Schemathesis (GET only)|smoke:Deno Smoke Test" \
-            "checkout=${{ steps.checkout.outcome }};deno=${{ steps.deno.outcome }};hurl=${{ steps.hurl.outcome }};node=${{ steps.node.outcome }}"
-          npm install -g schemathesis
+            "checkout:Checkout Repository|deno:Setup Deno|hurl:Setup Hurl|python:Setup Python|schemathesis:Install Schemathesis|hurl_gate:Hurl Gate (/health)|schema:Schemathesis (GET only)|smoke:Deno Smoke Test" \
+            "checkout=${{ steps.checkout.outcome }};deno=${{ steps.deno.outcome }};hurl=${{ steps.hurl.outcome }};python=${{ steps.python.outcome }}"
+          pip install schemathesis
 
       - name: Hurl Gate (/health)
         id: hurl_gate
@@ -249,8 +249,8 @@ jobs:
         run: |
           . .github/scripts/step-tree.sh
           step_tree "Post-Deploy Verification (Smoke & Schemathesis)" hurl_gate \
-            "checkout:Checkout Repository|deno:Setup Deno|hurl:Setup Hurl|node:Setup Node/Schemathesis|schemathesis:Install Schemathesis|hurl_gate:Hurl Gate (/health)|schema:Schemathesis (GET only)|smoke:Deno Smoke Test" \
-            "checkout=${{ steps.checkout.outcome }};deno=${{ steps.deno.outcome }};hurl=${{ steps.hurl.outcome }};node=${{ steps.node.outcome }};schemathesis=${{ steps.schemathesis.outcome }}"
+            "checkout:Checkout Repository|deno:Setup Deno|hurl:Setup Hurl|python:Setup Python|schemathesis:Install Schemathesis|hurl_gate:Hurl Gate (/health)|schema:Schemathesis (GET only)|smoke:Deno Smoke Test" \
+            "checkout=${{ steps.checkout.outcome }};deno=${{ steps.deno.outcome }};hurl=${{ steps.hurl.outcome }};python=${{ steps.python.outcome }};schemathesis=${{ steps.schemathesis.outcome }}"
           hurl --test supabase/functions/api/smoke/health.hurl --variable base_url="https://${SUPABASE_PROJECT_ID}.supabase.co/functions/v1/api"
 
       - name: Schemathesis (GET only)
@@ -260,8 +260,8 @@ jobs:
         run: |
           . .github/scripts/step-tree.sh
           step_tree "Post-Deploy Verification (Smoke & Schemathesis)" schema \
-            "checkout:Checkout Repository|deno:Setup Deno|hurl:Setup Hurl|node:Setup Node/Schemathesis|schemathesis:Install Schemathesis|hurl_gate:Hurl Gate (/health)|schema:Schemathesis (GET only)|smoke:Deno Smoke Test" \
-            "checkout=${{ steps.checkout.outcome }};deno=${{ steps.deno.outcome }};hurl=${{ steps.hurl.outcome }};node=${{ steps.node.outcome }};schemathesis=${{ steps.schemathesis.outcome }};hurl_gate=${{ steps.hurl_gate.outcome }}"
+            "checkout:Checkout Repository|deno:Setup Deno|hurl:Setup Hurl|python:Setup Python|schemathesis:Install Schemathesis|hurl_gate:Hurl Gate (/health)|schema:Schemathesis (GET only)|smoke:Deno Smoke Test" \
+            "checkout=${{ steps.checkout.outcome }};deno=${{ steps.deno.outcome }};hurl=${{ steps.hurl.outcome }};python=${{ steps.python.outcome }};schemathesis=${{ steps.schemathesis.outcome }};hurl_gate=${{ steps.hurl_gate.outcome }}"
           schemathesis run --method GET supabase/functions/api/openapi.json --base-url "https://${SUPABASE_PROJECT_ID}.supabase.co/functions/v1/api"
 
       - name: Deno Smoke Test
@@ -275,6 +275,6 @@ jobs:
         run: |
           . .github/scripts/step-tree.sh
           step_tree "Post-Deploy Verification (Smoke & Schemathesis)" smoke \
-            "checkout:Checkout Repository|deno:Setup Deno|hurl:Setup Hurl|node:Setup Node/Schemathesis|schemathesis:Install Schemathesis|hurl_gate:Hurl Gate (/health)|schema:Schemathesis (GET only)|smoke:Deno Smoke Test" \
-            "checkout=${{ steps.checkout.outcome }};deno=${{ steps.deno.outcome }};hurl=${{ steps.hurl.outcome }};node=${{ steps.node.outcome }};schemathesis=${{ steps.schemathesis.outcome }};hurl_gate=${{ steps.hurl_gate.outcome }};schema=${{ steps.schema.outcome }}"
+            "checkout:Checkout Repository|deno:Setup Deno|hurl:Setup Hurl|python:Setup Python|schemathesis:Install Schemathesis|hurl_gate:Hurl Gate (/health)|schema:Schemathesis (GET only)|smoke:Deno Smoke Test" \
+            "checkout=${{ steps.checkout.outcome }};deno=${{ steps.deno.outcome }};hurl=${{ steps.hurl.outcome }};python=${{ steps.python.outcome }};schemathesis=${{ steps.schemathesis.outcome }};hurl_gate=${{ steps.hurl_gate.outcome }};schema=${{ steps.schema.outcome }}"
           API_BASE_URL="https://${SUPABASE_PROJECT_ID}.supabase.co/functions/v1/api" deno test --allow-env --allow-net supabase/functions/api/smoke/e2e_smoke_test.ts
