@@ -210,3 +210,74 @@ jobs:
             "checkout:Checkout Repository|cli:Setup Supabase CLI|repair:Repair Migration History|migrations:Push Database Migrations|config:Apply Auth & Email Configuration|email:Ensure Email Provider Enabled|signing:Ensure 2FA Challenge Signing Key Secret|deploy:Deploy Unified Edge API Function" \
             "checkout=${{ steps.checkout.outcome }};cli=${{ steps.cli.outcome }};repair=${{ steps.repair.outcome }};migrations=${{ steps.migrations.outcome }};config=${{ steps.config.outcome }};email=${{ steps.email.outcome }};signing=${{ steps.signing.outcome }}"
           supabase functions deploy api --project-ref $SUPABASE_PROJECT_ID --no-verify-jwt
+
+  post-deploy-verify:
+    name: Post-Deploy Verification (Smoke & Schemathesis)
+    needs: deploy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        id: checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Deno
+        id: deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Setup Hurl
+        id: hurl
+        uses: gacts/install-hurl@v1
+
+      - name: Setup Node/Schemathesis
+        id: node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install Schemathesis
+        id: schemathesis
+        run: |
+          . .github/scripts/step-tree.sh
+          step_tree "Post-Deploy Verification (Smoke & Schemathesis)" schemathesis \
+            "checkout:Checkout Repository|deno:Setup Deno|hurl:Setup Hurl|node:Setup Node/Schemathesis|schemathesis:Install Schemathesis|hurl_gate:Hurl Gate (/health)|schema:Schemathesis (GET only)|smoke:Deno Smoke Test" \
+            "checkout=${{ steps.checkout.outcome }};deno=${{ steps.deno.outcome }};hurl=${{ steps.hurl.outcome }};node=${{ steps.node.outcome }}"
+          npm install -g schemathesis
+
+      - name: Hurl Gate (/health)
+        id: hurl_gate
+        env:
+          SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
+        run: |
+          . .github/scripts/step-tree.sh
+          step_tree "Post-Deploy Verification (Smoke & Schemathesis)" hurl_gate \
+            "checkout:Checkout Repository|deno:Setup Deno|hurl:Setup Hurl|node:Setup Node/Schemathesis|schemathesis:Install Schemathesis|hurl_gate:Hurl Gate (/health)|schema:Schemathesis (GET only)|smoke:Deno Smoke Test" \
+            "checkout=${{ steps.checkout.outcome }};deno=${{ steps.deno.outcome }};hurl=${{ steps.hurl.outcome }};node=${{ steps.node.outcome }};schemathesis=${{ steps.schemathesis.outcome }}"
+          hurl --test supabase/functions/api/smoke/health.hurl --variable base_url="https://${SUPABASE_PROJECT_ID}.supabase.co/functions/v1/api"
+
+      - name: Schemathesis (GET only)
+        id: schema
+        env:
+          SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
+        run: |
+          . .github/scripts/step-tree.sh
+          step_tree "Post-Deploy Verification (Smoke & Schemathesis)" schema \
+            "checkout:Checkout Repository|deno:Setup Deno|hurl:Setup Hurl|node:Setup Node/Schemathesis|schemathesis:Install Schemathesis|hurl_gate:Hurl Gate (/health)|schema:Schemathesis (GET only)|smoke:Deno Smoke Test" \
+            "checkout=${{ steps.checkout.outcome }};deno=${{ steps.deno.outcome }};hurl=${{ steps.hurl.outcome }};node=${{ steps.node.outcome }};schemathesis=${{ steps.schemathesis.outcome }};hurl_gate=${{ steps.hurl_gate.outcome }}"
+          schemathesis run --method GET supabase/functions/api/openapi.json --base-url "https://${SUPABASE_PROJECT_ID}.supabase.co/functions/v1/api"
+
+      - name: Deno Smoke Test
+        id: smoke
+        env:
+          SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
+          SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+          TEST_EMAIL: ${{ secrets.TEST_EMAIL }}
+          TEST_PASSWORD: ${{ secrets.TEST_PASSWORD }}
+        run: |
+          . .github/scripts/step-tree.sh
+          step_tree "Post-Deploy Verification (Smoke & Schemathesis)" smoke \
+            "checkout:Checkout Repository|deno:Setup Deno|hurl:Setup Hurl|node:Setup Node/Schemathesis|schemathesis:Install Schemathesis|hurl_gate:Hurl Gate (/health)|schema:Schemathesis (GET only)|smoke:Deno Smoke Test" \
+            "checkout=${{ steps.checkout.outcome }};deno=${{ steps.deno.outcome }};hurl=${{ steps.hurl.outcome }};node=${{ steps.node.outcome }};schemathesis=${{ steps.schemathesis.outcome }};hurl_gate=${{ steps.hurl_gate.outcome }};schema=${{ steps.schema.outcome }}"
+          API_BASE_URL="https://${SUPABASE_PROJECT_ID}.supabase.co/functions/v1/api" deno test --allow-env --allow-net supabase/functions/api/smoke/e2e_smoke_test.ts
