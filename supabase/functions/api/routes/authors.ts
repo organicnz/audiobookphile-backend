@@ -1,16 +1,13 @@
-import { z } from "zod";
-import { Hono } from "hono";
+import { createOpenApiRouter, z } from "../_shared/openapi.ts";
 import { createClient } from "npm:@supabase/supabase-js@2.44.0";
-// getProxyOrigin removed
-import { Variables } from "../_shared/types.ts";
 import { requireAdminRole } from "../_shared/auth.ts";
 import { fetchAuthorAvatar } from "../../_shared/avatarFetcher.ts";
 
-export const authorsRouter = new Hono<{ Variables: Variables }>();
+export const authorsRouter = createOpenApiRouter();
 
 // ===== Zod schemas for author endpoints =====
 const UpdateAuthorSchema = z.object({
-  name: z.string().min(1, "Name is required").max(256),
+  name: z.string().min(1, "Name is required").max(256).optional(),
   description: z.string().optional(), // optional - can be empty string or omitted
   imagePath: z.string().url(
     "image path must be a valid URL pattern (e.g. authors/ID/photo.jpg)",
@@ -22,13 +19,219 @@ const AuthorMatchPayloadSchema = z.object({
   author: z.string().max(256).optional(), // alias for q - required in payload even if not in schema
 });
 
-authorsRouter.patch("/:id", async (c) => {
+const AuthorImagePayloadSchema = z.object({
+  url: z.string().url(),
+});
+
+const ServerErrorSchema = z.object({ error: z.string() });
+const ForbiddenSchema = z.object({ error: z.string() });
+const NotFoundSchema = z.object({ error: z.string() });
+const SuccessSchema = z.object({ success: z.boolean() });
+const AuthorResultSchema = z.object({
+  updated: z.boolean(),
+  author: z.record(z.string(), z.any()),
+});
+const ImagePathResultSchema = z.object({
+  imagePath: z.string(),
+});
+const SyncAuthorsResultSchema = z.object({
+  success: z.boolean(),
+  updatedCount: z.number().optional(),
+  totalChecked: z.number().optional(),
+  error: z.string().optional(),
+});
+
+const updateAuthorRoute = {
+  method: "patch" as const,
+  path: "/:id",
+  tags: ["authors"],
+  request: {
+    params: z.object({ id: z.string() }),
+    body: {
+      content: { "application/json": { schema: UpdateAuthorSchema } },
+    },
+  },
+  responses: {
+    200: {
+      description: "Author updated",
+      content: { "application/json": { schema: AuthorResultSchema } },
+    },
+    400: {
+      description: "Invalid payload",
+      content: {
+        "application/json": { schema: z.record(z.string(), z.any()) },
+      },
+    },
+    403: {
+      description: "Admin role required",
+      content: { "application/json": { schema: ForbiddenSchema } },
+    },
+    500: {
+      description: "Database error",
+      content: { "application/json": { schema: ServerErrorSchema } },
+    },
+  },
+};
+
+const deleteAuthorRoute = {
+  method: "delete" as const,
+  path: "/:id",
+  tags: ["authors"],
+  request: {
+    params: z.object({ id: z.string() }),
+  },
+  responses: {
+    200: {
+      description: "Author deleted",
+      content: { "application/json": { schema: SuccessSchema } },
+    },
+    403: {
+      description: "Admin role required",
+      content: { "application/json": { schema: ForbiddenSchema } },
+    },
+    500: {
+      description: "Database error",
+      content: { "application/json": { schema: ServerErrorSchema } },
+    },
+  },
+};
+
+const matchAuthorRoute = {
+  method: "post" as const,
+  path: "/:id/match",
+  tags: ["authors"],
+  request: {
+    params: z.object({ id: z.string() }),
+  },
+  responses: {
+    200: {
+      description: "Author matched and updated",
+      content: { "application/json": { schema: AuthorResultSchema } },
+    },
+    400: {
+      description: "Invalid payload",
+      content: {
+        "application/json": { schema: z.record(z.string(), z.any()) },
+      },
+    },
+    403: {
+      description: "Admin role required",
+      content: { "application/json": { schema: ForbiddenSchema } },
+    },
+    404: {
+      description: "Author not found",
+      content: { "application/json": { schema: NotFoundSchema } },
+    },
+    500: {
+      description: "Server error",
+      content: { "application/json": { schema: ServerErrorSchema } },
+    },
+  },
+};
+
+const setAuthorImageRoute = {
+  method: "post" as const,
+  path: "/:id/image",
+  tags: ["authors"],
+  request: {
+    params: z.object({ id: z.string() }),
+  },
+  responses: {
+    200: {
+      description: "Author image updated",
+      content: { "application/json": { schema: ImagePathResultSchema } },
+    },
+    400: {
+      description: "Invalid payload",
+      content: {
+        "application/json": { schema: z.record(z.string(), z.any()) },
+      },
+    },
+    403: {
+      description: "Admin role required",
+      content: { "application/json": { schema: ForbiddenSchema } },
+    },
+    500: {
+      description: "Server error",
+      content: { "application/json": { schema: ServerErrorSchema } },
+    },
+  },
+};
+
+const deleteAuthorImageRoute = {
+  method: "delete" as const,
+  path: "/:id/image",
+  tags: ["authors"],
+  request: {
+    params: z.object({ id: z.string() }),
+  },
+  responses: {
+    200: {
+      description: "Author image deleted",
+      content: { "application/json": { schema: SuccessSchema } },
+    },
+    403: {
+      description: "Admin role required",
+      content: { "application/json": { schema: ForbiddenSchema } },
+    },
+    500: {
+      description: "Server error",
+      content: { "application/json": { schema: ServerErrorSchema } },
+    },
+  },
+};
+
+const getAuthorImageRoute = {
+  method: "get" as const,
+  path: "/:id/image",
+  tags: ["authors"],
+  request: {
+    params: z.object({ id: z.string() }),
+  },
+  responses: {
+    302: {
+      description: "Redirect to image",
+    },
+    500: {
+      description: "Server error",
+      content: { "application/json": { schema: ServerErrorSchema } },
+    },
+  },
+};
+
+const syncAuthorsRoute = (path: string) => ({
+  method: "post" as const,
+  path,
+  tags: ["authors"],
+  responses: {
+    200: {
+      description: "Authors synced",
+      content: { "application/json": { schema: SyncAuthorsResultSchema } },
+    },
+    400: {
+      description: "Invalid parameters",
+      content: {
+        "application/json": { schema: z.record(z.string(), z.any()) },
+      },
+    },
+    403: {
+      description: "Admin role required",
+      content: { "application/json": { schema: ForbiddenSchema } },
+    },
+    500: {
+      description: "Server error",
+      content: { "application/json": { schema: SyncAuthorsResultSchema } },
+    },
+  },
+});
+
+authorsRouter.openapi(updateAuthorRoute, async (c) => {
   const user = c.get("user");
   if (!requireAdminRole(user)) {
     return c.json({ error: "Forbidden: Admin access required" }, 403);
   }
   const supabase = c.get("supabase");
-  const authorId = c.req.param("id");
+  const { id: authorId } = c.req.valid("param");
 
   let body;
   try {
@@ -37,8 +240,7 @@ authorsRouter.patch("/:id", async (c) => {
     return c.json({ error: "Invalid JSON" }, 400);
   }
 
-  // Validate with Zod schema (partial update allowed - all fields optional in DB, but name required in schema for type safety)
-  const parsed = UpdateAuthorSchema.partial().safeParse(body);
+  const parsed = UpdateAuthorSchema.safeParse(body);
   if (!parsed.success) {
     return c.json({ error: parsed.error.flatten().fieldErrors }, 400);
   }
@@ -54,24 +256,30 @@ authorsRouter.patch("/:id", async (c) => {
     .select()
     .single();
 
-  if (error) throw error;
-  return c.json({ updated: true, author: data });
+  if (error) {
+    console.error("[authors] Update error:", error);
+    return c.json({ error: "Failed to update author" }, 500);
+  }
+  return c.json({ updated: true, author: data }, 200);
 });
 
-authorsRouter.delete("/:id", async (c) => {
+authorsRouter.openapi(deleteAuthorRoute, async (c) => {
   const user = c.get("user");
   if (!requireAdminRole(user)) {
     return c.json({ error: "Forbidden: Admin access required" }, 403);
   }
   const supabase = c.get("supabase");
-  const authorId = c.req.param("id");
+  const { id: authorId } = c.req.valid("param");
 
   const { error } = await supabase.from("authors").delete().eq("id", authorId);
-  if (error) throw error;
-  return c.json({ success: true });
+  if (error) {
+    console.error("[authors] Delete error:", error);
+    return c.json({ error: "Failed to delete author" }, 500);
+  }
+  return c.json({ success: true }, 200);
 });
 
-authorsRouter.post("/:id/match", async (c) => {
+authorsRouter.openapi(matchAuthorRoute, async (c) => {
   const user = c.get("user");
   if (!requireAdminRole(user)) {
     return c.json({ error: "Forbidden: Admin access required" }, 403);
@@ -80,7 +288,7 @@ authorsRouter.post("/:id/match", async (c) => {
 
   const supabaseUrl = c.get("supabaseUrl");
   const serviceRoleKey = c.get("serviceRoleKey");
-  const authorId = c.req.param("id");
+  const { id: authorId } = c.req.valid("param");
 
   let payload;
   try {
@@ -89,8 +297,7 @@ authorsRouter.post("/:id/match", async (c) => {
     return c.json({ error: "Invalid JSON" }, 400);
   }
 
-  // Validate with Zod schema (partial - only q/author fields needed, but we'll require at least one of them)
-  const parsed = AuthorMatchPayloadSchema.partial().safeParse(payload);
+  const parsed = AuthorMatchPayloadSchema.safeParse(payload);
   if (!parsed.success) {
     return c.json({ error: parsed.error.flatten().fieldErrors }, 400);
   }
@@ -152,15 +359,18 @@ authorsRouter.post("/:id/match", async (c) => {
     const { data: updated, error } = await supabase.from("authors").update(
       updates,
     ).eq("id", authorId).select().single();
-    if (error) throw error;
-    return c.json({ updated: true, author: updated });
+    if (error) {
+      console.error("[authors] Update error:", error);
+      return c.json({ error: "Failed to update author" }, 500);
+    }
+    return c.json({ updated: true, author: updated }, 200);
   } catch (e: unknown) {
     const err = e as Error;
     return c.json({ error: err.message }, 500);
   }
 });
 
-authorsRouter.post("/:id/image", async (c) => {
+authorsRouter.openapi(setAuthorImageRoute, async (c) => {
   const user = c.get("user");
   if (!requireAdminRole(user)) {
     return c.json({ error: "Forbidden: Admin access required" }, 403);
@@ -169,20 +379,21 @@ authorsRouter.post("/:id/image", async (c) => {
 
   const supabaseUrl = c.get("supabaseUrl");
   const serviceRoleKey = c.get("serviceRoleKey");
-  const authorId = c.req.param("id");
+  const { id: authorId } = c.req.valid("param");
 
-  let imgUrl;
+  let imgData;
   try {
-    const imgData = await c.req.json();
-    imgUrl = imgData.url ?? "";
+    imgData = await c.req.json();
   } catch (_e) {
     return c.json({ error: "Invalid JSON" }, 400);
   }
 
-  // Validate URL field (already validated by Zod schema)
-  if (!imgUrl || imgUrl.trim() === "") {
-    return c.json({ error: "Image URL is required" }, 400);
+  const parsed = AuthorImagePayloadSchema.safeParse(imgData);
+  if (!parsed.success) {
+    return c.json({ error: parsed.error.flatten().fieldErrors }, 400);
   }
+
+  const imgUrl = parsed.data.url;
 
   const imgRes = await fetch(imgUrl);
   if (!imgRes.ok) return c.json({ error: "Failed to fetch image" }, 500);
@@ -199,28 +410,27 @@ authorsRouter.post("/:id/image", async (c) => {
     "id",
     authorId,
   );
-  return c.json({ imagePath: storagePath });
+  return c.json({ imagePath: storagePath }, 200);
 });
 
-authorsRouter.delete("/:id/image", async (c) => {
+authorsRouter.openapi(deleteAuthorImageRoute, async (c) => {
   const user = c.get("user");
   if (!requireAdminRole(user)) {
     return c.json({ error: "Forbidden: Admin access required" }, 403);
   }
   const supabase = c.get("supabase");
-
-  const authorId = c.req.param("id");
+  const { id: authorId } = c.req.valid("param");
 
   await supabase.from("authors").update({ image_path: null }).eq(
     "id",
     authorId,
   );
-  return c.json({ success: true });
+  return c.json({ success: true }, 200);
 });
 
-authorsRouter.get("/:id/image", async (c) => {
+authorsRouter.openapi(getAuthorImageRoute, async (c) => {
   const supabase = c.get("supabase");
-  const authorId = c.req.param("id");
+  const { id: authorId } = c.req.valid("param");
 
   const { data: author } = await supabase.from("authors").select("image_path")
     .eq("id", authorId).single();
@@ -243,19 +453,18 @@ async function handleSyncAuthors(c: any) {
   }
   const supabase = c.get("supabase");
 
-  // Parse query params with basic validation (limit must be positive integer)
-  const url = new URL(c.req.url);
-  const limitStr = url.searchParams.get("limit") || "10";
+  const limitStr = c.req.query("limit") || "10";
   let limit: number;
   try {
     limit = Math.max(1, parseInt(limitStr, 10));
+    if (isNaN(limit)) throw new Error();
   } catch (_e) {
     return c.json({
       error: "Invalid 'limit' parameter (must be a positive integer)",
     }, 400);
   }
 
-  const force = url.searchParams.get("force") === "true";
+  const force = c.req.query("force") === "true";
 
   try {
     let query = supabase.from("authors").select("id, name, image_path").limit(
@@ -283,7 +492,7 @@ async function handleSyncAuthors(c: any) {
       success: true,
       updatedCount,
       totalChecked: (authors || []).length,
-    });
+    }, 200);
   } catch (e: any) {
     return c.json(
       { success: false, error: e.message || "Author sync failed" },
@@ -292,5 +501,5 @@ async function handleSyncAuthors(c: any) {
   }
 }
 
-authorsRouter.post("/sync-authors", handleSyncAuthors);
-authorsRouter.post("/sync", handleSyncAuthors);
+authorsRouter.openapi(syncAuthorsRoute("/sync-authors"), handleSyncAuthors);
+authorsRouter.openapi(syncAuthorsRoute("/sync"), handleSyncAuthors);

@@ -1,11 +1,8 @@
-import { z } from "zod";
-import { Hono } from "hono";
-import type { MiddlewareHandler } from "hono";
-import { Variables } from "../_shared/types.ts";
+import { createOpenApiRouter, z } from "../_shared/openapi.ts";
 import { requireAdminRole } from "../_shared/auth.ts";
 import { enrichMetadataWithZAI } from "../../_shared/zai.ts";
 
-export const metadataRouter = new Hono<{ Variables: Variables }>();
+export const metadataRouter = createOpenApiRouter();
 
 // ===== Zod schemas for metadata endpoints =====
 const MatchBookSchema = z.object({
@@ -20,63 +17,218 @@ const ScrapeMetadataBodySchemaWithOptionalTitle = z.object({
   authorName: z.string().optional(),
 });
 
-// Global metadata maintenance (narrators/tags/genres CRUD, external match &
-// scrape) touches server-wide content — strictly admin/root only. Guards are
-// bound to the router's own patterns (NOT "*") so they never intercept other
-// routers mounted under /api.
-const adminGuard: MiddlewareHandler<{ Variables: Variables }> = async (
-  c,
-  next,
-) => {
+const ServerErrorSchema = z.object({ error: z.string() });
+const ForbiddenSchema = z.object({ error: z.string() });
+const NotImplementedSchema = z.object({ error: z.string() });
+const MatchBookResultSchema = z.object({
+  results: z.array(z.record(z.string(), z.any())),
+});
+const ScrapeMetadataResultSchema = z.object({
+  success: z.boolean().optional(),
+  metadata: z.record(z.string(), z.any()).optional(),
+  error: z.string().optional(),
+});
+
+// --- ROUTE DEFINITIONS ---
+
+const deleteNarratorRoute = {
+  method: "delete" as const,
+  path: "/narrators/:id",
+  tags: ["metadata"],
+  request: {
+    params: z.object({ id: z.string() }),
+  },
+  responses: {
+    403: {
+      description: "Admin role required",
+      content: { "application/json": { schema: ForbiddenSchema } },
+    },
+    501: {
+      description: "Not implemented",
+      content: { "application/json": { schema: NotImplementedSchema } },
+    },
+  },
+};
+
+const patchNarratorRoute = {
+  method: "patch" as const,
+  path: "/narrators/:id",
+  tags: ["metadata"],
+  request: {
+    params: z.object({ id: z.string() }),
+  },
+  responses: {
+    403: {
+      description: "Admin role required",
+      content: { "application/json": { schema: ForbiddenSchema } },
+    },
+    501: {
+      description: "Not implemented",
+      content: { "application/json": { schema: NotImplementedSchema } },
+    },
+  },
+};
+
+const deleteTagRoute = {
+  method: "delete" as const,
+  path: "/tags/:id",
+  tags: ["metadata"],
+  request: {
+    params: z.object({ id: z.string() }),
+  },
+  responses: {
+    403: {
+      description: "Admin role required",
+      content: { "application/json": { schema: ForbiddenSchema } },
+    },
+    501: {
+      description: "Not implemented",
+      content: { "application/json": { schema: NotImplementedSchema } },
+    },
+  },
+};
+
+const deleteGenreRoute = {
+  method: "delete" as const,
+  path: "/genres/:id",
+  tags: ["metadata"],
+  request: {
+    params: z.object({ id: z.string() }),
+  },
+  responses: {
+    403: {
+      description: "Admin role required",
+      content: { "application/json": { schema: ForbiddenSchema } },
+    },
+    501: {
+      description: "Not implemented",
+      content: { "application/json": { schema: NotImplementedSchema } },
+    },
+  },
+};
+
+const matchBookRoute = {
+  method: "post" as const,
+  path: "/match-book",
+  tags: ["metadata"],
+  responses: {
+    200: {
+      description: "Book match results",
+      content: { "application/json": { schema: MatchBookResultSchema } },
+    },
+    400: {
+      description: "Invalid payload",
+      content: {
+        "application/json": { schema: z.record(z.string(), z.any()) },
+      },
+    },
+    403: {
+      description: "Admin role required",
+      content: { "application/json": { schema: ForbiddenSchema } },
+    },
+    500: {
+      description: "Server error",
+      content: { "application/json": { schema: ServerErrorSchema } },
+    },
+  },
+};
+
+const scrapeMetadataRoute1 = {
+  method: "post" as const,
+  path: "/scrape-metadata",
+  tags: ["metadata"],
+  responses: {
+    200: {
+      description: "Scrape successful",
+      content: { "application/json": { schema: ScrapeMetadataResultSchema } },
+    },
+    400: {
+      description: "Invalid payload",
+      content: {
+        "application/json": { schema: z.record(z.string(), z.any()) },
+      },
+    },
+    403: {
+      description: "Admin role required",
+      content: { "application/json": { schema: ForbiddenSchema } },
+    },
+    500: {
+      description: "Server error",
+      content: { "application/json": { schema: ServerErrorSchema } },
+    },
+  },
+};
+
+const scrapeMetadataRoute2 = {
+  method: "post" as const,
+  path: "/metadata/scrape",
+  tags: ["metadata"],
+  responses: {
+    200: {
+      description: "Scrape successful",
+      content: { "application/json": { schema: ScrapeMetadataResultSchema } },
+    },
+    400: {
+      description: "Invalid payload",
+      content: {
+        "application/json": { schema: z.record(z.string(), z.any()) },
+      },
+    },
+    403: {
+      description: "Admin role required",
+      content: { "application/json": { schema: ForbiddenSchema } },
+    },
+    500: {
+      description: "Server error",
+      content: { "application/json": { schema: ServerErrorSchema } },
+    },
+  },
+};
+
+// --- HANDLERS ---
+
+metadataRouter.openapi(patchNarratorRoute, async (c) => {
   if (!requireAdminRole(c.get("user"))) {
     return c.json({ error: "Forbidden: Admin access required" }, 403);
   }
-  await next();
-};
-
-for (
-  const pattern of [
-    "/narrators/:id",
-    "/tags/:id",
-    "/genres/:id",
-    "/match-book",
-    "/scrape-metadata",
-    "/metadata/scrape",
-  ]
-) {
-  metadataRouter.use(pattern, adminGuard);
-}
-
-// --- NARRATORS ---
-metadataRouter.patch("/narrators/:id", async (c) => {
   return c.json(
     { error: "Not implemented (narrators table does not exist)" },
     501,
   );
 });
 
-metadataRouter.delete("/narrators/:id", async (c) => {
+metadataRouter.openapi(deleteNarratorRoute, async (c) => {
+  if (!requireAdminRole(c.get("user"))) {
+    return c.json({ error: "Forbidden: Admin access required" }, 403);
+  }
   return c.json(
     { error: "Not implemented (narrators table does not exist)" },
     501,
   );
 });
 
-// --- TAGS ---
-metadataRouter.delete("/tags/:id", async (c) => {
+metadataRouter.openapi(deleteTagRoute, async (c) => {
+  if (!requireAdminRole(c.get("user"))) {
+    return c.json({ error: "Forbidden: Admin access required" }, 403);
+  }
   return c.json({ error: "Not implemented (tags table does not exist)" }, 501);
 });
 
-// --- GENRES ---
-metadataRouter.delete("/genres/:id", async (c) => {
+metadataRouter.openapi(deleteGenreRoute, async (c) => {
+  if (!requireAdminRole(c.get("user"))) {
+    return c.json({ error: "Forbidden: Admin access required" }, 403);
+  }
   return c.json(
     { error: "Not implemented (genres table does not exist)" },
     501,
   );
 });
 
-// --- MATCH BOOK METADATA ---
-metadataRouter.post("/match-book", async (c) => {
+metadataRouter.openapi(matchBookRoute, async (c) => {
+  if (!requireAdminRole(c.get("user"))) {
+    return c.json({ error: "Forbidden: Admin access required" }, 403);
+  }
+
   let body;
   try {
     body = await c.req.json();
@@ -242,7 +394,7 @@ metadataRouter.post("/match-book", async (c) => {
       }
     }
 
-    return c.json({ results });
+    return c.json({ results }, 200);
   } catch (err: any) {
     console.error("[metadata] match-book failed:", err);
     return c.json({ error: "Failed to fetch metadata" }, 500);
@@ -250,6 +402,10 @@ metadataRouter.post("/match-book", async (c) => {
 });
 
 async function handleScrapeMetadata(c: any) {
+  if (!requireAdminRole(c.get("user"))) {
+    return c.json({ error: "Forbidden: Admin access required" }, 403);
+  }
+
   let body;
   try {
     body = await c.req.json();
@@ -292,11 +448,14 @@ async function handleScrapeMetadata(c: any) {
     Deno.env.get("ZHIPU_API_KEY") ?? "";
   try {
     const enriched = await enrichMetadataWithZAI(title, author, zaiApiKey);
-    return c.json({ success: true, metadata: enriched || { title, author } });
+    return c.json(
+      { success: true, metadata: enriched || { title, author } },
+      200,
+    );
   } catch (e: any) {
     return c.json({ error: e.message || "Failed to scrape metadata" }, 500);
   }
 }
 
-metadataRouter.post("/scrape-metadata", handleScrapeMetadata);
-metadataRouter.post("/metadata/scrape", handleScrapeMetadata);
+metadataRouter.openapi(scrapeMetadataRoute1, handleScrapeMetadata);
+metadataRouter.openapi(scrapeMetadataRoute2, handleScrapeMetadata);

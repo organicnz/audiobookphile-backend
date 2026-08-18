@@ -1,12 +1,10 @@
-import { Hono } from "hono";
-import { z } from "zod";
+import { createOpenApiRouter, z } from "../_shared/openapi.ts";
 import { PlaybackService } from "../../api/playbackService.ts";
-import { Variables } from "../_shared/types.ts";
 
-export const playbackRouter = new Hono<{ Variables: Variables }>();
+export const playbackRouter = createOpenApiRouter();
 
 const PlaySessionSchema = z.object({
-  deviceInfo: z.record(z.unknown()).optional(),
+  deviceInfo: z.record(z.string(), z.any()).optional(),
   forceDirectPlay: z.boolean().optional(),
   forceTranscode: z.boolean().optional(),
   supportedMimeTypes: z.array(z.string()).optional(),
@@ -28,10 +26,208 @@ const BulkSyncSchema = z.array(
 
 const CloseSessionSchema = SyncPayloadSchema.partial();
 
-playbackRouter.post("/items/:id/play", async (c) => {
+const ErrorSchema = z.object({
+  success: z.boolean(),
+  error: z.record(z.string(), z.any()).or(z.string()),
+});
+
+const SessionResultSchema = z.record(z.string(), z.any());
+
+const SyncResultSchema = z.object({
+  success: z.boolean(),
+  error: z.string().optional(),
+});
+
+const playItemRoute = {
+  method: "post" as const,
+  path: "/items/:id/play",
+  tags: ["playback"],
+  request: {
+    params: z.object({ id: z.string() }),
+    body: {
+      content: { "application/json": { schema: PlaySessionSchema } },
+    },
+  },
+  responses: {
+    200: {
+      description: "Session started",
+      content: { "application/json": { schema: SessionResultSchema } },
+    },
+    400: {
+      description: "Invalid request",
+      content: { "application/json": { schema: ErrorSchema } },
+    },
+    404: {
+      description: "Item not found",
+      content: { "application/json": { schema: ErrorSchema } },
+    },
+  },
+};
+
+const playItemEpisodeRoute = {
+  method: "post" as const,
+  path: "/items/:id/play/:episodeId",
+  tags: ["playback"],
+  request: {
+    params: z.object({ id: z.string(), episodeId: z.string() }),
+    body: {
+      content: { "application/json": { schema: PlaySessionSchema } },
+    },
+  },
+  responses: {
+    200: {
+      description: "Session started",
+      content: { "application/json": { schema: SessionResultSchema } },
+    },
+    400: {
+      description: "Invalid request",
+      content: { "application/json": { schema: ErrorSchema } },
+    },
+    404: {
+      description: "Item/episode not found",
+      content: { "application/json": { schema: ErrorSchema } },
+    },
+  },
+};
+
+const syncSessionRoute = {
+  method: "post" as const,
+  path: "/session/:id/sync",
+  tags: ["playback"],
+  request: {
+    params: z.object({ id: z.string() }),
+    body: {
+      content: { "application/json": { schema: SyncPayloadSchema } },
+    },
+  },
+  responses: {
+    200: {
+      description: "Session synced",
+      content: { "application/json": { schema: SyncResultSchema } },
+    },
+    400: {
+      description: "Invalid request",
+      content: { "application/json": { schema: ErrorSchema } },
+    },
+  },
+};
+
+const bulkSyncRoute = {
+  method: "post" as const,
+  path: "/session/bulk-sync",
+  tags: ["playback"],
+  request: {
+    body: {
+      content: { "application/json": { schema: BulkSyncSchema } },
+    },
+  },
+  responses: {
+    200: {
+      description: "Sessions synced",
+      content: { "application/json": { schema: SyncResultSchema } },
+    },
+    400: {
+      description: "Invalid request",
+      content: { "application/json": { schema: ErrorSchema } },
+    },
+  },
+};
+
+const closeSessionRoute = {
+  method: "post" as const,
+  path: "/session/:id/close",
+  tags: ["playback"],
+  request: {
+    params: z.object({ id: z.string() }),
+    body: {
+      content: { "application/json": { schema: CloseSessionSchema } },
+    },
+  },
+  responses: {
+    200: {
+      description: "Session closed",
+      content: { "application/json": { schema: SyncResultSchema } },
+    },
+    400: {
+      description: "Invalid request",
+      content: { "application/json": { schema: ErrorSchema } },
+    },
+  },
+};
+
+const legacySessionPlayRoute = {
+  method: "post" as const,
+  path: "/session-play",
+  tags: ["playback"],
+  request: {
+    body: {
+      content: {
+        "application/json": { schema: z.record(z.string(), z.any()) },
+      },
+    },
+  },
+  responses: {
+    200: {
+      description: "Session started",
+      content: { "application/json": { schema: SessionResultSchema } },
+    },
+    400: {
+      description: "Invalid request",
+      content: { "application/json": { schema: ErrorSchema } },
+    },
+  },
+};
+
+const legacyPlaybackStartRoute = {
+  method: "post" as const,
+  path: "/playback-start",
+  tags: ["playback"],
+  request: {
+    body: {
+      content: {
+        "application/json": { schema: z.record(z.string(), z.any()) },
+      },
+    },
+  },
+  responses: {
+    200: {
+      description: "Session started",
+      content: { "application/json": { schema: SessionResultSchema } },
+    },
+    400: {
+      description: "Invalid request",
+      content: { "application/json": { schema: ErrorSchema } },
+    },
+  },
+};
+
+const legacySessionCloseRoute = {
+  method: "post" as const,
+  path: "/session-close",
+  tags: ["playback"],
+  request: {
+    body: {
+      content: {
+        "application/json": { schema: z.record(z.string(), z.any()) },
+      },
+    },
+  },
+  responses: {
+    200: {
+      description: "Session closed",
+      content: { "application/json": { schema: SyncResultSchema } },
+    },
+    400: {
+      description: "Invalid request",
+      content: { "application/json": { schema: ErrorSchema } },
+    },
+  },
+};
+
+playbackRouter.openapi(playItemRoute, async (c) => {
   const supabase = c.get("supabase");
   const user = c.get("user")!;
-  const itemId = c.req.param("id");
+  const { id: itemId } = c.req.valid("param");
 
   let body;
   try {
@@ -61,7 +257,7 @@ playbackRouter.post("/items/:id/play", async (c) => {
       forceDirectPlay,
       forceTranscode,
     );
-    return c.json(session);
+    return c.json(session, 200);
   } catch (err: unknown) {
     const e = err as Error;
     const msg = (e.message || "").toLowerCase();
@@ -75,11 +271,10 @@ playbackRouter.post("/items/:id/play", async (c) => {
   }
 });
 
-playbackRouter.post("/items/:id/play/:episodeId", async (c) => {
+playbackRouter.openapi(playItemEpisodeRoute, async (c) => {
   const supabase = c.get("supabase");
   const user = c.get("user")!;
-  const itemId = c.req.param("id");
-  const episodeId = c.req.param("episodeId");
+  const { id: itemId, episodeId } = c.req.valid("param");
 
   let body;
   try {
@@ -109,7 +304,7 @@ playbackRouter.post("/items/:id/play/:episodeId", async (c) => {
       forceDirectPlay,
       forceTranscode,
     );
-    return c.json(session);
+    return c.json(session, 200);
   } catch (err: unknown) {
     const e = err as Error;
     const msg = (e.message || "").toLowerCase();
@@ -123,10 +318,10 @@ playbackRouter.post("/items/:id/play/:episodeId", async (c) => {
   }
 });
 
-playbackRouter.post("/session/:id/sync", async (c) => {
+playbackRouter.openapi(syncSessionRoute, async (c) => {
   const supabase = c.get("supabase");
   const user = c.get("user")!;
-  const sessionId = c.req.param("id");
+  const { id: sessionId } = c.req.valid("param");
   let body;
   try {
     const rawBody = await c.req.json();
@@ -152,13 +347,16 @@ playbackRouter.post("/session/:id/sync", async (c) => {
   );
 
   if (!result.success) {
-    return c.json(result, 400);
+    return c.json(
+      { success: false, error: result.error || "Unknown error" },
+      400,
+    );
   }
 
-  return c.json(result);
+  return c.json(result, 200);
 });
 
-playbackRouter.post("/session/bulk-sync", async (c) => {
+playbackRouter.openapi(bulkSyncRoute, async (c) => {
   const supabase = c.get("supabase");
   const user = c.get("user")!;
   let body;
@@ -179,16 +377,19 @@ playbackRouter.post("/session/bulk-sync", async (c) => {
   );
 
   if (!result.success) {
-    return c.json(result, 400);
+    return c.json(
+      { success: false, error: result.error || "Unknown error" },
+      400,
+    );
   }
 
-  return c.json(result);
+  return c.json(result, 200);
 });
 
-playbackRouter.post("/session/:id/close", async (c) => {
+playbackRouter.openapi(closeSessionRoute, async (c) => {
   const supabase = c.get("supabase");
   const user = c.get("user")!;
-  const sessionId = c.req.param("id");
+  const { id: sessionId } = c.req.valid("param");
   let body;
   try {
     const rawBody = await c.req.json().catch(() => ({}));
@@ -212,14 +413,17 @@ playbackRouter.post("/session/:id/close", async (c) => {
   );
 
   if (!result.success) {
-    return c.json(result, 400);
+    return c.json(
+      { success: false, error: result.error || "Unknown error" },
+      400,
+    );
   }
 
-  return c.json(result);
+  return c.json(result, 200);
 });
 
 // Aliases for legacy standalone functions
-playbackRouter.post("/session-play", async (c) => {
+playbackRouter.openapi(legacySessionPlayRoute, async (c) => {
   const supabase = c.get("supabase");
   const user = c.get("user")!;
   let body;
@@ -249,14 +453,14 @@ playbackRouter.post("/session-play", async (c) => {
       forceDirectPlay,
       forceTranscode,
     );
-    return c.json(session);
+    return c.json(session, 200);
   } catch (err: unknown) {
     const e = err as Error;
     return c.json({ success: false, error: { message: e.message } }, 400);
   }
 });
 
-playbackRouter.post("/playback-start", async (c) => {
+playbackRouter.openapi(legacyPlaybackStartRoute, async (c) => {
   const supabase = c.get("supabase");
   const user = c.get("user")!;
   let body;
@@ -280,14 +484,14 @@ playbackRouter.post("/playback-start", async (c) => {
       body.forceDirectPlay ?? false,
       body.forceTranscode ?? false,
     );
-    return c.json(session);
+    return c.json(session, 200);
   } catch (err: unknown) {
     const e = err as Error;
     return c.json({ success: false, error: { message: e.message } }, 400);
   }
 });
 
-playbackRouter.post("/session-close", async (c) => {
+playbackRouter.openapi(legacySessionCloseRoute, async (c) => {
   const supabase = c.get("supabase");
   const user = c.get("user")!;
   let body;
@@ -311,7 +515,10 @@ playbackRouter.post("/session-close", async (c) => {
     body.episodeId,
   );
   if (!result.success) {
-    return c.json(result, 400);
+    return c.json(
+      { success: false, error: result.error || "Unknown error" },
+      400,
+    );
   }
-  return c.json(result);
+  return c.json(result, 200);
 });
