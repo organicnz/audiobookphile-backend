@@ -1,7 +1,5 @@
-import { z } from "zod";
-import { Hono } from "hono";
+import { createOpenApiRouter, z } from "../_shared/openapi.ts";
 import { StorageRouter } from "../../_shared/storage-router.ts";
-import { Variables } from "../_shared/types.ts";
 import { requireAdminRole } from "../_shared/auth.ts";
 import { presignUpload } from "../../_shared/uploadPresign.ts";
 import { parseTitleAndAuthor } from "../../_shared/titleAuthorParser.ts";
@@ -35,6 +33,133 @@ const PresignSchema = z.object({
   ).optional(),
 });
 
+const ErrorSchema = z.object({ error: z.string() });
+
+const downloadItemRoute = {
+  method: "get" as const,
+  path: "/{id}/download",
+  tags: ["downloads"],
+  request: {
+    params: z.object({ id: z.string() }),
+  },
+  responses: {
+    200: {
+      description: "Manifest for download",
+      content: {
+        "application/json": { schema: z.record(z.string(), z.any()) },
+      },
+    },
+    404: {
+      description: "Item not found",
+      content: { "application/json": { schema: ErrorSchema } },
+    },
+  },
+};
+
+const downloadFileRoute = {
+  method: "get" as const,
+  path: "/{id}/file/{fileId}/download",
+  tags: ["downloads"],
+  request: {
+    params: z.object({ id: z.string(), fileId: z.string() }),
+  },
+  responses: {
+    200: {
+      description: "Signed URL for file",
+      content: {
+        "application/json": { schema: z.record(z.string(), z.any()) },
+      },
+    },
+    404: {
+      description: "File not found",
+      content: { "application/json": { schema: ErrorSchema } },
+    },
+    500: {
+      description: "Server error",
+      content: { "application/json": { schema: ErrorSchema } },
+    },
+  },
+};
+
+const uploadPresignLegacyRoute = {
+  method: "post" as const,
+  path: "/upload-presign",
+  tags: ["downloads"],
+  responses: {
+    200: {
+      description: "Presigned URL",
+      content: {
+        "application/json": { schema: z.record(z.string(), z.any()) },
+      },
+    },
+    400: {
+      description: "Validation error",
+      content: { "application/json": { schema: ErrorSchema } },
+    },
+    403: {
+      description: "Forbidden",
+      content: { "application/json": { schema: ErrorSchema } },
+    },
+    500: {
+      description: "Server error",
+      content: { "application/json": { schema: ErrorSchema } },
+    },
+  },
+};
+
+const uploadPresignRoute = {
+  method: "post" as const,
+  path: "/upload/presign",
+  tags: ["downloads"],
+  responses: {
+    200: {
+      description: "Presigned URL",
+      content: {
+        "application/json": { schema: z.record(z.string(), z.any()) },
+      },
+    },
+    400: {
+      description: "Validation error",
+      content: { "application/json": { schema: ErrorSchema } },
+    },
+    403: {
+      description: "Forbidden",
+      content: { "application/json": { schema: ErrorSchema } },
+    },
+    500: {
+      description: "Server error",
+      content: { "application/json": { schema: ErrorSchema } },
+    },
+  },
+};
+
+const uploadFinalizeRoute = {
+  method: "post" as const,
+  path: "/upload/finalize",
+  tags: ["downloads"],
+  request: {
+    body: { content: { "application/json": { schema: UploadFinalizeSchema } } },
+  },
+  responses: {
+    200: {
+      description: "Finalize upload",
+      content: {
+        "application/json": { schema: z.record(z.string(), z.any()) },
+      },
+    },
+    400: {
+      description: "Validation error",
+      content: {
+        "application/json": { schema: z.record(z.string(), z.any()) },
+      },
+    },
+    401: {
+      description: "Unauthorized",
+      content: { "application/json": { schema: ErrorSchema } },
+    },
+  },
+};
+
 function runDetached(promise: Promise<unknown>): void {
   const edgeRuntime = (globalThis as unknown as {
     EdgeRuntime?: { waitUntil?: (p: Promise<unknown>) => void };
@@ -48,11 +173,11 @@ function runDetached(promise: Promise<unknown>): void {
   }
 }
 
-export const downloadsRouter = new Hono<{ Variables: Variables }>();
+export const downloadsRouter = createOpenApiRouter();
 
-downloadsRouter.get("/:id/download", async (c) => {
+downloadsRouter.openapi(downloadItemRoute, async (c) => {
   const supabase = c.get("supabase");
-  const libraryItemId = c.req.param("id");
+  const { id: libraryItemId } = c.req.valid("param");
 
   // Fetch the item and its audio files
   const { data: item, error: itemError } = await supabase
@@ -245,13 +370,12 @@ downloadsRouter.get("/:id/download", async (c) => {
     tracks: tracks,
   };
 
-  return c.json(manifest);
+  return c.json(manifest as Record<string, any>, 200);
 });
 
-downloadsRouter.get("/:id/file/:fileId/download", async (c) => {
+downloadsRouter.openapi(downloadFileRoute, async (c) => {
   const supabase = c.get("supabase");
-  const libraryItemId = c.req.param("id");
-  const fileId = c.req.param("fileId");
+  const { id: libraryItemId, fileId } = c.req.valid("param");
 
   const { data: item, error: itemError } = await supabase.from("library_items")
     .select("audio_files").eq("id", libraryItemId).maybeSingle();
@@ -284,7 +408,7 @@ downloadsRouter.get("/:id/file/:fileId/download", async (c) => {
       storagePath,
       DOWNLOAD_EXPIRY_SECONDS,
     );
-    return c.json({ url: signedUrl });
+    return c.json({ url: signedUrl } as Record<string, any>, 200);
   } catch (e: unknown) {
     return c.json({ error: (e as Error).message }, 500);
   }
@@ -296,6 +420,7 @@ async function handleUploadPresign(c: any) {
   }
   const supabase = c.get("supabase");
 
+  // Instead of manual parse, we could use c.req.valid("json") but to keep it simple and handle route reuse:
   let body;
   try {
     body = await c.req.json();
@@ -306,26 +431,32 @@ async function handleUploadPresign(c: any) {
   // Validate with Zod schema
   const parsed = PresignSchema.safeParse(body);
   if (!parsed.success) {
-    return c.json({ error: parsed.error.flatten().fieldErrors }, 400);
+    return c.json(
+      {
+        error: "Validation error",
+        details: parsed.error.flatten().fieldErrors,
+      } as Record<string, any>,
+      400,
+    );
   }
 
   const { filename, contentType } = parsed.data;
 
   try {
     const res = await presignUpload(supabase, filename, contentType);
-    return c.json(res);
+    return c.json(res as Record<string, any>, 200);
   } catch (e: any) {
     return c.json({ error: e.message || "Presign failed" }, 500);
   }
 }
 
-downloadsRouter.post("/upload-presign", handleUploadPresign);
-downloadsRouter.post("/upload/presign", handleUploadPresign);
+downloadsRouter.openapi(uploadPresignLegacyRoute, handleUploadPresign);
+downloadsRouter.openapi(uploadPresignRoute, handleUploadPresign);
 
 // -----------------------------------------------------------------------------
 // upload-finalize: Consolidated API route (port from legacy edge function)
 // -----------------------------------------------------------------------------
-downloadsRouter.post("/upload/finalize", async (c) => {
+downloadsRouter.openapi(uploadFinalizeRoute, async (c) => {
   // Auth: any authenticated non-banned user (user, admin, root) — banned
   // users are rejected earlier by authMiddleware.
   const user = c.get("user");
@@ -336,17 +467,24 @@ downloadsRouter.post("/upload/finalize", async (c) => {
   const supabase = c.get("supabase");
   const storageRouter = new StorageRouter(supabase);
 
+  // We could use const parsed = c.req.valid("json") since we removed manual parsing. But since the code uses safeParse:
   let body;
   try {
     body = await c.req.json();
   } catch (_e) {
-    return c.json({ error: "Invalid JSON" }, 400);
+    return c.json({ error: "Invalid JSON" } as Record<string, any>, 400);
   }
 
   // Validate with Zod schema (raw title/author before parsing)
   const parsed = UploadFinalizeSchema.safeParse(body);
   if (!parsed.success) {
-    return c.json({ error: parsed.error.flatten().fieldErrors }, 400);
+    return c.json(
+      {
+        error: "Validation error",
+        details: parsed.error.flatten().fieldErrors,
+      } as Record<string, any>,
+      400,
+    );
   }
 
   let {
@@ -924,5 +1062,8 @@ downloadsRouter.post("/upload/finalize", async (c) => {
     );
   }
 
-  return c.json({ success: true, libraryItemId, bookId });
+  return c.json(
+    { success: true, libraryItemId, bookId } as Record<string, any>,
+    200,
+  );
 });

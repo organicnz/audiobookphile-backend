@@ -9,10 +9,8 @@
  * Endpoints mounted at BOTH /api/auth/2fa/webauthn/* and /api/2fa/webauthn/*.
  */
 
-import { Hono } from "hono";
-import { z } from "zod";
+import { createOpenApiRouter, z } from "../_shared/openapi.ts";
 import { createClient } from "npm:@supabase/supabase-js@2.44.0";
-import { Variables } from "../_shared/types.ts";
 import {
   base64UrlDecode,
   base64UrlEncode,
@@ -30,7 +28,7 @@ import {
 } from "../_shared/twoFactorGuard.ts";
 import { mintSessionFor2FAUser } from "../_shared/sessions.ts";
 
-export const webauthnRouter = new Hono<{ Variables: Variables }>();
+export const webauthnRouter = createOpenApiRouter();
 
 const RegisterOptionsSchema = z.object({
   deviceName: z.string().max(64).optional(),
@@ -62,6 +60,177 @@ const LoginVerifySchema = z.object({
 const PasskeyRemoveSchema = z.object({
   credentialId: z.string().min(1),
 });
+
+const ErrorSchema = z.object({ error: z.string() });
+const UnauthorizedSchema = z.object({ error: z.string() });
+const TooManyRequestsSchema = z.object({
+  error: z.string(),
+  seconds: z.number().optional(),
+  code: z.string().optional(),
+});
+
+const registerOptionsRoute = {
+  method: "post" as const,
+  path: "/register/options",
+  tags: ["webauthn"],
+  request: {
+    body: {
+      content: { "application/json": { schema: RegisterOptionsSchema } },
+    },
+  },
+  responses: {
+    200: {
+      description: "Registration options",
+      content: {
+        "application/json": { schema: z.record(z.string(), z.any()) },
+      },
+    },
+    400: {
+      description: "Validation error",
+      content: { "application/json": { schema: ErrorSchema } },
+    },
+    401: {
+      description: "Unauthorized",
+      content: { "application/json": { schema: UnauthorizedSchema } },
+    },
+    500: {
+      description: "Server error",
+      content: { "application/json": { schema: ErrorSchema } },
+    },
+  },
+};
+
+const registerVerifyRoute = {
+  method: "post" as const,
+  path: "/register/verify",
+  tags: ["webauthn"],
+  request: {
+    body: { content: { "application/json": { schema: RegisterVerifySchema } } },
+  },
+  responses: {
+    200: {
+      description: "Verify attestation and store credential",
+      content: {
+        "application/json": { schema: z.record(z.string(), z.any()) },
+      },
+    },
+    400: {
+      description: "Validation error or registration expired",
+      content: { "application/json": { schema: ErrorSchema } },
+    },
+    401: {
+      description: "Unauthorized",
+      content: { "application/json": { schema: UnauthorizedSchema } },
+    },
+    409: {
+      description: "Passkey already registered",
+      content: { "application/json": { schema: ErrorSchema } },
+    },
+  },
+};
+
+const loginOptionsRoute = {
+  method: "post" as const,
+  path: "/login/options",
+  tags: ["webauthn"],
+  request: {
+    body: { content: { "application/json": { schema: LoginOptionsSchema } } },
+  },
+  responses: {
+    200: {
+      description: "Passkey challenge for 2FA login",
+      content: {
+        "application/json": { schema: z.record(z.string(), z.any()) },
+      },
+    },
+    400: {
+      description: "Validation error or 2FA not enabled",
+      content: { "application/json": { schema: ErrorSchema } },
+    },
+    401: {
+      description: "Challenge expired or invalid",
+      content: { "application/json": { schema: UnauthorizedSchema } },
+    },
+    404: {
+      description: "No passkeys registered",
+      content: { "application/json": { schema: ErrorSchema } },
+    },
+    429: {
+      description: "Rate limit lockout",
+      content: { "application/json": { schema: TooManyRequestsSchema } },
+    },
+    500: {
+      description: "Server error",
+      content: { "application/json": { schema: ErrorSchema } },
+    },
+  },
+};
+
+const loginVerifyRoute = {
+  method: "post" as const,
+  path: "/login/verify",
+  tags: ["webauthn"],
+  request: {
+    body: { content: { "application/json": { schema: LoginVerifySchema } } },
+  },
+  responses: {
+    200: {
+      description: "Session Payload",
+      content: {
+        "application/json": { schema: z.record(z.string(), z.any()) },
+      },
+    },
+    400: {
+      description: "Validation error or expired",
+      content: { "application/json": { schema: ErrorSchema } },
+    },
+    401: {
+      description: "Challenge expired or verification failed",
+      content: { "application/json": { schema: UnauthorizedSchema } },
+    },
+    429: {
+      description: "Rate limit lockout",
+      content: { "application/json": { schema: TooManyRequestsSchema } },
+    },
+    500: {
+      description: "Server error",
+      content: { "application/json": { schema: ErrorSchema } },
+    },
+  },
+};
+
+const passkeysRemoveRoute = {
+  method: "post" as const,
+  path: "/passkeys/remove",
+  tags: ["webauthn"],
+  request: {
+    body: { content: { "application/json": { schema: PasskeyRemoveSchema } } },
+  },
+  responses: {
+    200: {
+      description: "Passkey removed",
+      content: {
+        "application/json": { schema: z.record(z.string(), z.any()) },
+      },
+    },
+    400: {
+      description: "Validation error",
+      content: { "application/json": { schema: ErrorSchema } },
+    },
+    401: {
+      description: "Unauthorized",
+      content: { "application/json": { schema: UnauthorizedSchema } },
+    },
+    404: {
+      description: "Passkey not found",
+      content: { "application/json": { schema: ErrorSchema } },
+    },
+    500: {
+      description: "Server error",
+      content: { "application/json": { schema: ErrorSchema } },
+    },
+  },
+};
 
 const CHALLENGE_TTL_MS = 5 * 60 * 1000;
 
@@ -119,7 +288,7 @@ async function consumeChallenge(
 /**
  * POST /register/options - start passkey enrollment (requires session)
  */
-webauthnRouter.post("/register/options", async (c) => {
+webauthnRouter.openapi(registerOptionsRoute, async (c) => {
   const user = c.get("user");
   if (!user) {
     return c.json({ error: "Unauthorized" }, 401);
@@ -175,7 +344,7 @@ webauthnRouter.post("/register/options", async (c) => {
 /**
  * POST /register/verify - verify attestation and store the credential
  */
-webauthnRouter.post("/register/verify", async (c) => {
+webauthnRouter.openapi(registerVerifyRoute, async (c) => {
   const user = c.get("user");
   if (!user) {
     return c.json({ error: "Unauthorized" }, 401);
@@ -283,7 +452,7 @@ webauthnRouter.post("/register/verify", async (c) => {
 /**
  * POST /login/options - passkey challenge during 2FA sign-in (public)
  */
-webauthnRouter.post("/login/options", async (c) => {
+webauthnRouter.openapi(loginOptionsRoute, async (c) => {
   const supabaseUrl = c.get("supabaseUrl");
   const serviceRoleKey = c.get("serviceRoleKey");
   const adminSupabase = createClient(supabaseUrl, serviceRoleKey);
@@ -362,7 +531,7 @@ webauthnRouter.post("/login/options", async (c) => {
 /**
  * POST /login/verify - verify passkey assertion and mint session (public)
  */
-webauthnRouter.post("/login/verify", async (c) => {
+webauthnRouter.openapi(loginVerifyRoute, async (c) => {
   const supabaseUrl = c.get("supabaseUrl");
   const serviceRoleKey = c.get("serviceRoleKey");
   const adminSupabase = createClient(supabaseUrl, serviceRoleKey);
@@ -506,7 +675,7 @@ webauthnRouter.post("/login/verify", async (c) => {
 /**
  * POST /passkeys/remove - delete a registered passkey (authenticated)
  */
-webauthnRouter.post("/passkeys/remove", async (c) => {
+webauthnRouter.openapi(passkeysRemoveRoute, async (c) => {
   const user = c.get("user");
   if (!user) {
     return c.json({ error: "Unauthorized" }, 401);
