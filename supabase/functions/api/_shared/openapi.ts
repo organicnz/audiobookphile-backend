@@ -22,6 +22,15 @@ import { Variables } from "./types.ts";
 
 export { z };
 
+/**
+ * Escape hatch for multi-status handlers: the schema-typed context infers a
+ * per-route response union that `c.json()` unions cannot satisfy for handlers
+ * returning several different statuses. A loosely-typed context makes
+ * `c.json` return plain `Response` — still fully validated at runtime by the
+ * zod-openapi hook, just without per-status compile-time checking.
+ */
+export type LooseContext = Context<any, any, any>;
+
 /** Context type for schema-first handlers (see routes/*.ts). */
 export type ApiContext = Context<{ Variables: Variables }>;
 

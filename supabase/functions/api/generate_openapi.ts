@@ -29,7 +29,9 @@ const document = app.getOpenAPIDocument({
 });
 
 Deno.writeTextFileSync(outputPath, JSON.stringify(document, null, 2));
-Deno.stdout.writeTextSync(
-  `Wrote ${outputPath} (${Object.keys(document.paths).length} paths)\n`,
+Deno.stdout.writeSync(
+  new TextEncoder().encode(
+    `Wrote ${outputPath} (${Object.keys(document.paths).length} paths)\n`,
+  ),
 );
 Deno.exit(0);

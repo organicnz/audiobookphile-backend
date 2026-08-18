@@ -1,16 +1,14 @@
-import { Hono } from "hono";
 import {
   LibraryItemWithBooks,
   mapBookForMobile,
   mapLibraryForMobile,
 } from "../../api/mappers.ts";
 import { Database } from "../../../../src/types/supabase.ts";
-import { z } from "zod";
-import { Variables } from "../_shared/types.ts";
 import { requireAdminRole } from "../_shared/auth.ts";
 import { smartSortLibraryItems } from "../../_shared/zai.ts";
+import { createOpenApiRouter, SuccessSchema, z } from "../_shared/openapi.ts";
 
-export const librariesRouter = new Hono<{ Variables: Variables }>();
+export const librariesRouter = createOpenApiRouter();
 
 interface CacheEntry {
   items: any[];
@@ -38,7 +36,541 @@ type LibraryWithFolders = Database["public"]["Tables"]["libraries"]["Row"] & {
   library_folders: Database["public"]["Tables"]["library_folders"]["Row"][];
 };
 
-librariesRouter.get("/", async (c) => {
+// =========================
+// OpenAPI Schemas & Route Definitions
+// =========================
+
+// Library/book payloads are deep, evolving shapes produced by the shared
+// mappers — passthrough keeps the spec honest without pinning every field.
+const EntitySchema = z.object({ id: z.string() }).passthrough();
+const LibrarySchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  folders: z.array(
+    z.object({
+      id: z.string(),
+      fullPath: z.string().nullish(),
+      libraryId: z.string().nullish(),
+      addedAt: z.number().nullish(),
+    }),
+  ).nullish(),
+  displayOrder: z.number().nullish(),
+  icon: z.string().nullish(),
+  mediaType: z.string().nullish(),
+  provider: z.string().nullish(),
+  settings: z.object({
+    coverAspectRatio: z.number().nullish(),
+    disableWatcher: z.boolean().nullish(),
+    skipMatchingMediaWithAsin: z.boolean().nullish(),
+    skipMatchingMediaWithIsbn: z.boolean().nullish(),
+    autoScanCronExpression: z.string().nullish(),
+  }).nullish(),
+  createdAt: z.number().nullish(),
+  updatedAt: z.number().nullish(),
+  lastUpdate: z.number().nullish(),
+});
+const ServerErrorSchema = z.object({
+  error: z.string(),
+  message: z.string().optional(),
+  stack: z.string().optional(),
+  details: z.array(z.any()).optional(),
+  hint: z.string().optional(),
+});
+const ForbiddenSchema = z.object({ error: z.string() });
+const PaginatedResponse = z.object({
+  results: z.array(EntitySchema),
+  total: z.number(),
+  limit: z.number(),
+  page: z.number(),
+  sortBy: z.string(),
+  sortDesc: z.boolean(),
+});
+
+/** Library create body — partial so the admin gate (403) fires before body validation (400). */
+const LibraryCreateBodySchema = z.object({
+  name: z.string().optional(),
+  mediaType: z.string().optional(),
+  provider: z.string().optional(),
+  folders: z.array(z.object({ fullPath: z.string() })).optional(),
+});
+
+const libraryListRoute = {
+  method: "get" as const,
+  path: "/",
+  tags: ["libraries"],
+  responses: {
+    200: {
+      description: "Libraries visible to the authenticated user",
+      content: {
+        "application/json": {
+          schema: z.object({ libraries: z.array(LibrarySchema) }),
+        },
+      },
+    },
+  },
+};
+
+const libraryCreateRoute = {
+  method: "post" as const,
+  path: "/",
+  tags: ["libraries"],
+  request: {
+    body: {
+      content: {
+        "application/json": { schema: LibraryCreateBodySchema },
+      },
+    },
+  },
+  responses: {
+    200: {
+      description: "Created library",
+      content: {
+        "application/json": { schema: LibrarySchema },
+      },
+    },
+    400: {
+      description: "Invalid payload",
+      content: {
+        "application/json": { schema: ServerErrorSchema },
+      },
+    },
+    403: {
+      description: "Admin role required",
+      content: {
+        "application/json": { schema: ForbiddenSchema },
+      },
+    },
+  },
+};
+
+const libraryUpdateRoute = {
+  method: "patch" as const,
+  path: "/:id",
+  tags: ["libraries"],
+  request: {
+    params: z.object({ id: z.string() }),
+    body: {
+      content: {
+        "application/json": {
+          schema: z.object({
+            name: z.string().optional(),
+            displayOrder: z.number().optional(),
+            folders: z.array(z.record(z.unknown())).optional(),
+          }),
+        },
+      },
+    },
+  },
+  responses: {
+    200: {
+      description: "Updated library",
+      content: {
+        "application/json": { schema: LibrarySchema },
+      },
+    },
+    400: {
+      description: "Invalid payload",
+      content: {
+        "application/json": { schema: ServerErrorSchema },
+      },
+    },
+    403: {
+      description: "Admin role required",
+      content: {
+        "application/json": { schema: ForbiddenSchema },
+      },
+    },
+  },
+};
+
+const libraryDeleteRoute = {
+  method: "delete" as const,
+  path: "/:id",
+  tags: ["libraries"],
+  request: {
+    params: z.object({ id: z.string() }),
+  },
+  responses: {
+    200: {
+      description: "Library deleted",
+      content: {
+        "application/json": { schema: SuccessSchema },
+      },
+    },
+    403: {
+      description: "Admin role required",
+      content: {
+        "application/json": { schema: ForbiddenSchema },
+      },
+    },
+  },
+};
+
+const libraryItemsRoute = {
+  method: "get" as const,
+  path: "/:id/items",
+  tags: ["libraries"],
+  request: {
+    params: z.object({ id: z.string() }),
+  },
+  responses: {
+    200: {
+      description: "Paginated shelf of library items",
+      content: {
+        "application/json": { schema: PaginatedResponse },
+      },
+    },
+    500: {
+      description: "Query failure",
+      content: {
+        "application/json": { schema: ServerErrorSchema },
+      },
+    },
+  },
+};
+
+const smartSortRoute = {
+  method: "post" as const,
+  path: "/:id/smart-sort",
+  tags: ["libraries"],
+  request: {
+    params: z.object({ id: z.string() }),
+    body: {
+      content: {
+        "application/json": {
+          schema: z.object({ criteria: z.string().optional() }).partial(),
+        },
+      },
+    },
+  },
+  responses: {
+    200: {
+      description: "AI-sorted library item ids",
+      content: {
+        "application/json": {
+          schema: z.object({
+            sortedIds: z.array(z.string()),
+            provider: z.string().optional(),
+          }),
+        },
+      },
+    },
+    403: {
+      description: "Admin role required",
+      content: {
+        "application/json": { schema: ForbiddenSchema },
+      },
+    },
+  },
+};
+
+const librarySearchRoute = {
+  method: "get" as const,
+  path: "/:id/search",
+  tags: ["libraries"],
+  request: {
+    params: z.object({ id: z.string() }),
+  },
+  responses: {
+    200: {
+      description: "Search results across items, authors, series and facets",
+      content: {
+        "application/json": {
+          schema: z.object({
+            results: z.array(z.unknown()),
+            book: z.array(z.unknown()),
+            podcast: z.array(z.unknown()),
+            authors: z.array(z.unknown()),
+            series: z.array(z.unknown()),
+            tags: z.array(z.unknown()),
+            genres: z.array(z.unknown()),
+            narrators: z.array(z.unknown()),
+            episodes: z.array(z.unknown()),
+          }),
+        },
+      },
+    },
+  },
+};
+
+const filterDataRoute = {
+  method: "get" as const,
+  path: "/:id/filterdata",
+  tags: ["libraries"],
+  request: {
+    params: z.object({ id: z.string() }),
+  },
+  responses: {
+    200: {
+      description: "Empty facet skeleton",
+      content: {
+        "application/json": {
+          schema: z.object({
+            authors: z.array(z.unknown()),
+            genres: z.array(z.unknown()),
+            tags: z.array(z.unknown()),
+            series: z.array(z.unknown()),
+            narrators: z.array(z.unknown()),
+            languages: z.array(z.unknown()),
+          }),
+        },
+      },
+    },
+  },
+};
+
+const matchAllRoute = {
+  method: "get" as const,
+  path: "/:id/matchall",
+  tags: ["libraries"],
+  request: {
+    params: z.object({ id: z.string() }),
+  },
+  responses: {
+    202: {
+      description: "Metadata match kicked off in the background",
+      content: {
+        "application/json": { schema: SuccessSchema },
+      },
+    },
+  },
+};
+
+const scanRoute = {
+  method: "post" as const,
+  path: "/:id/scan",
+  tags: ["libraries"],
+  request: {
+    params: z.object({ id: z.string() }),
+  },
+  responses: {
+    200: {
+      description: "Scan status",
+      content: {
+        "application/json": {
+          schema: z.object({ result: z.string() }),
+        },
+      },
+    },
+    403: {
+      description: "Admin role required",
+      content: {
+        "application/json": { schema: ForbiddenSchema },
+      },
+    },
+  },
+};
+
+const seriesRoute = {
+  method: "get" as const,
+  path: "/:id/series",
+  tags: ["libraries"],
+  request: {
+    params: z.object({ id: z.string() }),
+  },
+  responses: {
+    200: {
+      description: "Paginated series",
+      content: {
+        "application/json": { schema: PaginatedResponse },
+      },
+    },
+    500: {
+      description: "Query failure",
+      content: {
+        "application/json": { schema: ServerErrorSchema },
+      },
+    },
+  },
+};
+
+const authorsRoute = {
+  method: "get" as const,
+  path: "/:id/authors",
+  tags: ["libraries"],
+  request: {
+    params: z.object({ id: z.string() }),
+  },
+  responses: {
+    200: {
+      description: "Paginated authors",
+      content: {
+        "application/json": {
+          schema: z.object({
+            authors: z.array(EntitySchema),
+            total: z.number(),
+            limit: z.number(),
+            page: z.number(),
+            sortBy: z.string(),
+            sortDesc: z.boolean(),
+          }),
+        },
+      },
+    },
+    500: {
+      description: "Query failure",
+      content: {
+        "application/json": { schema: ServerErrorSchema },
+      },
+    },
+  },
+};
+
+const collectionsRoute = {
+  method: "get" as const,
+  path: "/:id/collections",
+  tags: ["libraries"],
+  request: {
+    params: z.object({ id: z.string() }),
+  },
+  responses: {
+    200: {
+      description: "Paginated collections",
+      content: {
+        "application/json": { schema: PaginatedResponse },
+      },
+    },
+    500: {
+      description: "Query failure",
+      content: {
+        "application/json": { schema: ServerErrorSchema },
+      },
+    },
+  },
+};
+
+const playlistsRoute = {
+  method: "get" as const,
+  path: "/:id/playlists",
+  tags: ["libraries"],
+  request: {
+    params: z.object({ id: z.string() }),
+  },
+  responses: {
+    200: {
+      description: "Paginated playlists",
+      content: {
+        "application/json": { schema: PaginatedResponse },
+      },
+    },
+    500: {
+      description: "Query failure",
+      content: {
+        "application/json": { schema: ServerErrorSchema },
+      },
+    },
+  },
+};
+
+const personalizedRoute = {
+  method: "get" as const,
+  path: "/:id/personalized",
+  tags: ["libraries"],
+  request: {
+    params: z.object({ id: z.string() }),
+  },
+  responses: {
+    200: {
+      description: "Shelves for this library",
+      content: {
+        "application/json": {
+          schema: z.array(
+            z.object({
+              id: z.string(),
+              label: z.string(),
+              labelStringKey: z.string(),
+              type: z.string(),
+              entities: z.array(z.unknown()),
+              total: z.number(),
+            }),
+          ),
+        },
+      },
+    },
+  },
+};
+
+const statsRoute = {
+  method: "get" as const,
+  path: "/:id/stats",
+  tags: ["libraries"],
+  request: {
+    params: z.object({ id: z.string() }),
+  },
+  responses: {
+    200: {
+      description: "Library statistics",
+      content: {
+        "application/json": { schema: z.record(z.any()) },
+      },
+    },
+    500: {
+      description: "Query failure",
+      content: {
+        "application/json": { schema: ServerErrorSchema },
+      },
+    },
+  },
+};
+
+const narratorsRoute = {
+  method: "get" as const,
+  path: "/:id/narrators",
+  tags: ["libraries"],
+  request: {
+    params: z.object({ id: z.string() }),
+  },
+  responses: {
+    200: {
+      description: "Narrators in this library",
+      content: {
+        "application/json": {
+          schema: z.object({ narrators: z.array(z.unknown()) }),
+        },
+      },
+    },
+  },
+};
+
+const deduplicateRoute = {
+  method: "post" as const,
+  path: "/:id/deduplicate",
+  tags: ["libraries"],
+  request: {
+    params: z.object({ id: z.string() }),
+  },
+  responses: {
+    200: {
+      description: "Deduplication result",
+      content: {
+        "application/json": {
+          schema: z.object({
+            success: z.boolean(),
+            removedCount: z.number(),
+          }),
+        },
+      },
+    },
+    403: {
+      description: "Admin role required",
+      content: {
+        "application/json": { schema: ForbiddenSchema },
+      },
+    },
+    500: {
+      description: "Deduplication failure",
+      content: {
+        "application/json": { schema: ServerErrorSchema },
+      },
+    },
+  },
+};
+
+// =========================
+// Route Handlers
+// =========================
+
+librariesRouter.openapi(libraryListRoute, async (c) => {
   const supabase = c.get("supabase");
   const { data: libraries, error } = await supabase.from("libraries").select(
     "*, library_folders(*)",
@@ -54,7 +586,7 @@ librariesRouter.get("/", async (c) => {
   return c.json({ libraries: formatted });
 });
 
-librariesRouter.post("/", async (c) => {
+librariesRouter.openapi(libraryCreateRoute, async (c) => {
   const user = c.get("user");
   if (!requireAdminRole(user)) {
     return c.json({ error: "Forbidden: Admin access required" }, 403);
@@ -108,16 +640,17 @@ librariesRouter.post("/", async (c) => {
   ).eq("id", data.id).single();
   return c.json(
     mapLibraryForMobile((fullLibrary || {}) as unknown as LibraryWithFolders),
+    200,
   );
 });
 
-librariesRouter.patch("/:id", async (c) => {
+librariesRouter.openapi(libraryUpdateRoute, async (c) => {
   const user = c.get("user");
   if (!requireAdminRole(user)) {
     return c.json({ error: "Forbidden: Admin access required" }, 403);
   }
   const supabase = c.get("supabase");
-  const libraryId = c.req.param("id");
+  const { id: libraryId } = c.req.valid("param");
   const rawBody = await c.req.json();
 
   const LibraryUpdatePayload = z.object({
@@ -167,28 +700,29 @@ librariesRouter.patch("/:id", async (c) => {
   ).eq("id", libraryId).single();
   return c.json(
     mapLibraryForMobile((fullLibrary || {}) as unknown as LibraryWithFolders),
+    200,
   );
 });
 
-librariesRouter.delete("/:id", async (c) => {
+librariesRouter.openapi(libraryDeleteRoute, async (c) => {
   const user = c.get("user");
   if (!requireAdminRole(user)) {
     return c.json({ error: "Forbidden: Admin access required" }, 403);
   }
   const supabase = c.get("supabase");
-  const libraryId = c.req.param("id");
+  const { id: libraryId } = c.req.valid("param");
   const { error } = await supabase.from("libraries").delete().eq(
     "id",
     libraryId,
   );
   if (error) throw error;
-  return c.json({ success: true });
+  return c.json({ success: true }, 200);
 });
 
-librariesRouter.get("/:id/items", async (c) => {
+librariesRouter.openapi(libraryItemsRoute, async (c) => {
   const user = c.get("user")!;
   const supabase = c.get("supabase");
-  const libraryId = c.req.param("id");
+  const { id: libraryId } = c.req.valid("param");
 
   const queryParams = new URL(c.req.raw.url).searchParams;
   const rawLimit = queryParams.get("limit");
@@ -430,7 +964,7 @@ librariesRouter.get("/:id/items", async (c) => {
       "Cache-Control",
       "private, max-age=30, stale-while-revalidate=300",
     );
-    return c.json(response);
+    return c.json(response, 200);
   } catch (e: unknown) {
     const err = e as Error;
     return c.json(
@@ -444,13 +978,13 @@ librariesRouter.get("/:id/items", async (c) => {
   }
 });
 
-librariesRouter.post("/:id/smart-sort", async (c) => {
+librariesRouter.openapi(smartSortRoute, async (c) => {
   const user = c.get("user");
   if (!requireAdminRole(user)) {
     return c.json({ error: "Forbidden: Admin access required" }, 403);
   }
   const supabase = c.get("supabase");
-  const libraryId = c.req.param("id");
+  const { id: libraryId } = c.req.valid("param");
   const body = await c.req.json().catch(() => ({}));
   const criteria = body.criteria || "chronological reading order";
 
@@ -459,23 +993,26 @@ librariesRouter.post("/:id/smart-sort", async (c) => {
   ).eq("library_id", libraryId);
 
   if (error || !items || items.length === 0) {
-    return c.json({ sortedIds: [] });
+    return c.json({ sortedIds: [] }, 200);
   }
 
   const zaiApiKey = Deno.env.get("ZAI_API_KEY") ??
     Deno.env.get("ZHIPU_API_KEY") ?? "";
 
   const sortedIds = await smartSortLibraryItems(items, criteria, zaiApiKey);
-  return c.json({ sortedIds, provider: zaiApiKey ? "z.ai-glm-4" : "local" });
+  return c.json(
+    { sortedIds, provider: zaiApiKey ? "z.ai-glm-4" : "local" },
+    200,
+  );
 });
 
 function sanitizeSearchToken(input: string): string {
   return input.replace(/[,():%.*]/g, "").trim();
 }
 
-librariesRouter.get("/:id/search", async (c) => {
+librariesRouter.openapi(librarySearchRoute, async (c) => {
   const supabase = c.get("supabase");
-  const libraryId = c.req.param("id");
+  const { id: libraryId } = c.req.valid("param");
   const qParam = new URL(c.req.raw.url).searchParams.get("q") || "";
   const queryText = qParam.trim();
   const limit = parseInt(
@@ -727,7 +1264,7 @@ librariesRouter.get("/:id/search", async (c) => {
   });
 });
 
-librariesRouter.get("/:id/filterdata", (c) => {
+librariesRouter.openapi(filterDataRoute, (c) => {
   const emptyFilterData = {
     authors: [],
     genres: [],
@@ -739,9 +1276,9 @@ librariesRouter.get("/:id/filterdata", (c) => {
   return c.json(emptyFilterData);
 });
 
-librariesRouter.get("/:id/matchall", async (c) => {
+librariesRouter.openapi(matchAllRoute, async (c) => {
   const supabase = c.get("supabase");
-  const libraryId = c.req.param("id");
+  const { id: libraryId } = c.req.valid("param");
 
   const processAllChunks = async (startOffset: number) => {
     let offset = startOffset;
@@ -841,18 +1378,18 @@ librariesRouter.get("/:id/matchall", async (c) => {
   );
 });
 
-librariesRouter.post("/:id/scan", (c) => {
+librariesRouter.openapi(scanRoute, (c) => {
   const user = c.get("user");
   if (!requireAdminRole(user)) {
     return c.json({ error: "Forbidden: Admin access required" }, 403);
   }
-  return c.json({ result: "UPTODATE" });
+  return c.json({ result: "UPTODATE" }, 200);
 });
 
 // ── Series ────────────────────────────────────────────────────────────────────
-librariesRouter.get("/:id/series", async (c) => {
+librariesRouter.openapi(seriesRoute, async (c) => {
   const supabase = c.get("supabase");
-  const libraryId = c.req.param("id");
+  const { id: libraryId } = c.req.valid("param");
   const qp = new URL(c.req.raw.url).searchParams;
   const limit = parseInt(qp.get("limit") || "24", 10);
   const page = parseInt(qp.get("page") || "0", 10);
@@ -936,13 +1473,13 @@ librariesRouter.get("/:id/series", async (c) => {
     page,
     sortBy: sort,
     sortDesc: desc,
-  });
+  }, 200);
 });
 
 // ── Authors ───────────────────────────────────────────────────────────────────
-librariesRouter.get("/:id/authors", async (c) => {
+librariesRouter.openapi(authorsRoute, async (c) => {
   const supabase = c.get("supabase");
-  const libraryId = c.req.param("id");
+  const { id: libraryId } = c.req.valid("param");
   const qp = new URL(c.req.raw.url).searchParams;
   const limit = parseInt(qp.get("limit") || "24", 10);
   const page = parseInt(qp.get("page") || "0", 10);
@@ -986,13 +1523,13 @@ librariesRouter.get("/:id/authors", async (c) => {
     page,
     sortBy: sort,
     sortDesc: desc,
-  });
+  }, 200);
 });
 
 // ── Collections ───────────────────────────────────────────────────────────────
-librariesRouter.get("/:id/collections", async (c) => {
+librariesRouter.openapi(collectionsRoute, async (c) => {
   const supabase = c.get("supabase");
-  const libraryId = c.req.param("id");
+  const { id: libraryId } = c.req.valid("param");
   const qp = new URL(c.req.raw.url).searchParams;
   const limit = parseInt(qp.get("limit") || "24", 10);
   const page = parseInt(qp.get("page") || "0", 10);
@@ -1061,13 +1598,13 @@ librariesRouter.get("/:id/collections", async (c) => {
     page,
     sortBy: sort,
     sortDesc: desc,
-  });
+  }, 200);
 });
 
 // ── Playlists ─────────────────────────────────────────────────────────────────
-librariesRouter.get("/:id/playlists", async (c) => {
+librariesRouter.openapi(playlistsRoute, async (c) => {
   const supabase = c.get("supabase");
-  const libraryId = c.req.param("id");
+  const { id: libraryId } = c.req.valid("param");
   const qp = new URL(c.req.raw.url).searchParams;
   const limit = parseInt(qp.get("limit") || "24", 10);
   const page = parseInt(qp.get("page") || "0", 10);
@@ -1136,13 +1673,13 @@ librariesRouter.get("/:id/playlists", async (c) => {
     page,
     sortBy: sort,
     sortDesc: desc,
-  });
+  }, 200);
 });
 
-librariesRouter.get("/:id/personalized", async (c) => {
+librariesRouter.openapi(personalizedRoute, async (c) => {
   const supabase = c.get("supabase");
   const user = c.get("user")!;
-  const libraryId = c.req.param("id");
+  const { id: libraryId } = c.req.valid("param");
 
   // --- Resolve all library_item_ids for this library up-front.
   // This is the idiomatic two-step pattern for PostgREST: filter on a direct
@@ -1291,12 +1828,12 @@ librariesRouter.get("/:id/personalized", async (c) => {
     total: formattedRecent.length,
   });
 
-  return c.json(shelves);
+  return c.json(shelves, 200);
 });
 
-librariesRouter.get("/:id/stats", async (c) => {
+librariesRouter.openapi(statsRoute, async (c) => {
   const supabase = c.get("supabase");
-  const libraryId = c.req.param("id");
+  const { id: libraryId } = c.req.valid("param");
 
   const { data, error } = await (supabase.rpc as any)("get_library_stats", {
     p_library_id: libraryId,
@@ -1307,12 +1844,12 @@ librariesRouter.get("/:id/stats", async (c) => {
     return c.json({ error: error.message }, 500);
   }
 
-  return c.json(data);
+  return c.json(data, 200);
 });
 
-librariesRouter.get("/:id/narrators", async (c) => {
+librariesRouter.openapi(narratorsRoute, async (c) => {
   const supabase = c.get("supabase");
-  const libraryId = c.req.param("id");
+  const { id: libraryId } = c.req.valid("param");
 
   try {
     const { data } = await (supabase as any).from("narrators").select(
@@ -1325,7 +1862,7 @@ librariesRouter.get("/:id/narrators", async (c) => {
   }
 });
 
-librariesRouter.post("/:id/deduplicate", async (c) => {
+librariesRouter.openapi(deduplicateRoute, async (c) => {
   const user = c.get("user");
   if (!requireAdminRole(user)) {
     return c.json({ error: "Forbidden: Admin access required" }, 403);
@@ -1338,7 +1875,7 @@ librariesRouter.post("/:id/deduplicate", async (c) => {
     );
     if (error) throw error;
 
-    return c.json({ success: true, removedCount: removedCount || 0 });
+    return c.json({ success: true, removedCount: removedCount || 0 }, 200);
   } catch (err: any) {
     console.error("[deduplicate] Failed:", err);
     return c.json({ error: err.message || err }, 500);
