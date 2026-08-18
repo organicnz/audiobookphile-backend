@@ -1,4 +1,4 @@
-import { Context, Hono } from "hono";
+import { Context } from "hono";
 import { createClient } from "npm:@supabase/supabase-js@2.44.0";
 import { LibraryItemWithBooks, mapBookForMobile } from "../../api/mappers.ts";
 import { Variables } from "../_shared/types.ts";
@@ -7,10 +7,341 @@ import { getProxyOrigin } from "../../api/_shared/proxy.ts";
 import { generateChapterAIInsights } from "../../_shared/zai.ts";
 import { fetchBookMetadata } from "../../_shared/coverFetch.ts";
 import { ensureBookAIInsights } from "../aiService.ts";
+import { createOpenApiRouter, z } from "../_shared/openapi.ts";
 
-export const itemsRouter = new Hono<{ Variables: Variables }>();
+export const itemsRouter = createOpenApiRouter();
 
-itemsRouter.get("/check-existing", async (c) => {
+// =========================
+// OpenAPI Schemas & Route Definitions
+// =========================
+
+// Deep item payloads come from the shared mappers; catchall keeps the spec
+// honest without pinning every field of the evolving book shape.
+const BookPayloadSchema = z.object({ id: z.string() }).catchall(z.any());
+const MediaIdSchema = z.object({ mediaId: z.string().nullable() });
+const SimilarItemsSchema = z.object({
+  similarItems: z.array(z.any()),
+});
+const BatchItemsSchema = z.object({ items: z.array(z.any()) });
+const InsightsSchema = z.object({ insights: z.any() });
+const SyncResultSchema = z.object({
+  success: z.boolean(),
+  updated: z.number().optional(),
+  processed: z.number().optional(),
+  message: z.string().optional(),
+  error: z.string().optional(),
+});
+const CoverUploadResultSchema = z.object({ updated: z.boolean() });
+const ServerErrorSchema = z.object({
+  error: z.string(),
+  message: z.string().optional(),
+  stack: z.string().optional(),
+  details: z.union([z.string(), z.array(z.any())]).optional(),
+  hint: z.string().optional(),
+});
+const ForbiddenSchema = z.object({ error: z.string() });
+
+const itemDetailRoute = {
+  method: "get" as const,
+  path: "/:id",
+  tags: ["items"],
+  request: { params: z.object({ id: z.string() }) },
+  responses: {
+    200: {
+      description: "Full item payload (book or podcast)",
+      content: { "application/json": { schema: BookPayloadSchema } },
+    },
+    500: {
+      description: "Query failure",
+      content: { "application/json": { schema: ServerErrorSchema } },
+    },
+  },
+};
+
+const checkExistingRoute = {
+  method: "get" as const,
+  path: "/check-existing",
+  tags: ["items"],
+  responses: {
+    200: {
+      description: "Existing media id (null when absent)",
+      content: { "application/json": { schema: MediaIdSchema } },
+    },
+    500: {
+      description: "Query failure",
+      content: { "application/json": { schema: ServerErrorSchema } },
+    },
+  },
+};
+
+const similarItemsRoute = {
+  method: "get" as const,
+  path: "/:id/similar",
+  tags: ["items"],
+  request: { params: z.object({ id: z.string() }) },
+  responses: {
+    200: {
+      description: "Similar items ordered by relevance",
+      content: { "application/json": { schema: SimilarItemsSchema } },
+    },
+    500: {
+      description: "Query failure",
+      content: { "application/json": { schema: ServerErrorSchema } },
+    },
+  },
+};
+
+const itemCoverRoute = {
+  method: "get" as const,
+  path: "/:id/cover",
+  tags: ["items"],
+  request: { params: z.object({ id: z.string() }) },
+  responses: {
+    302: { description: "Redirect to the cover URL" },
+    404: {
+      description: "No cover available",
+      content: {
+        "application/json": { schema: z.object({ error: z.string() }) },
+      },
+    },
+    429: {
+      description: "Metadata provider rate limit reached",
+      content: {
+        "application/json": { schema: z.object({ error: z.string() }) },
+      },
+    },
+  },
+};
+
+const deleteItemCoverRoute = {
+  method: "delete" as const,
+  path: "/:id/cover",
+  tags: ["items"],
+  request: { params: z.object({ id: z.string() }) },
+  responses: {
+    204: { description: "Cover deleted" },
+    403: {
+      description: "Admin role required",
+      content: { "application/json": { schema: ForbiddenSchema } },
+    },
+  },
+};
+
+const uploadItemCoverRoute = {
+  method: "post" as const,
+  path: "/:id/cover",
+  tags: ["items"],
+  request: {
+    params: z.object({ id: z.string() }),
+    body: {
+      content: {
+        "multipart/form-data": { schema: z.any() },
+        "application/json": {
+          schema: z.object({ url: z.string().optional() }),
+        },
+        "application/octet-stream": { schema: z.any() },
+      },
+    },
+  },
+  responses: {
+    200: {
+      description: "Cover uploaded",
+      content: { "application/json": { schema: CoverUploadResultSchema } },
+    },
+    400: {
+      description: "Invalid input",
+      content: {
+        "application/json": { schema: z.object({ error: z.string() }) },
+      },
+    },
+    403: {
+      description: "Admin role required",
+      content: { "application/json": { schema: ForbiddenSchema } },
+    },
+  },
+};
+
+const deleteAudioFileRoute = {
+  method: "delete" as const,
+  path: "/:id/audio-files/:ino",
+  tags: ["items"],
+  request: { params: z.object({ id: z.string(), ino: z.string() }) },
+  responses: {
+    204: { description: "Audio file removed" },
+    401: {
+      description: "Unauthorized",
+      content: {
+        "application/json": { schema: z.object({ error: z.string() }) },
+      },
+    },
+    403: {
+      description: "Forbidden",
+      content: {
+        "application/json": { schema: z.object({ error: z.string() }) },
+      },
+    },
+    404: {
+      description: "Item not found",
+      content: {
+        "application/json": { schema: z.object({ error: z.string() }) },
+      },
+    },
+  },
+};
+
+const batchItemsRoute = {
+  method: "post" as const,
+  path: "/batch",
+  tags: ["items"],
+  request: {
+    body: {
+      content: {
+        "application/json": {
+          schema: z.object({ itemIds: z.array(z.string()).max(50).optional() }),
+        },
+      },
+    },
+  },
+  responses: {
+    200: {
+      description: "Mapped items for the requested ids",
+      content: { "application/json": { schema: BatchItemsSchema } },
+    },
+  },
+};
+
+const chapterAIRoute = {
+  method: "post" as const,
+  path: "/:id/chapters/ai",
+  tags: ["items"],
+  request: {
+    params: z.object({ id: z.string() }),
+    body: {
+      content: {
+        "application/json": {
+          schema: z.object({
+            title: z.string().optional(),
+            author: z.string().optional(),
+            chapterTitle: z.string().optional(),
+            chapterIndex: z.number().optional(),
+          }),
+        },
+      },
+    },
+  },
+  responses: {
+    200: {
+      description: "AI-generated chapter insights",
+      content: { "application/json": { schema: InsightsSchema } },
+    },
+    500: {
+      description: "AI provider failure",
+      content: {
+        "application/json": { schema: z.object({ error: z.string() }) },
+      },
+    },
+  },
+};
+
+const chapterAIGlobalRoute = {
+  method: "post" as const,
+  path: "/chapter-ai",
+  tags: ["items"],
+  request: {
+    body: {
+      content: {
+        "application/json": {
+          schema: z.object({
+            title: z.string().optional(),
+            author: z.string().optional(),
+            chapterTitle: z.string().optional(),
+            chapterIndex: z.number().optional(),
+          }),
+        },
+      },
+    },
+  },
+  responses: {
+    200: {
+      description: "AI-generated chapter insights",
+      content: { "application/json": { schema: InsightsSchema } },
+    },
+    500: {
+      description: "AI provider failure",
+      content: {
+        "application/json": { schema: z.object({ error: z.string() }) },
+      },
+    },
+  },
+};
+
+const syncCoversRoute = {
+  method: "post" as const,
+  path: "/sync-covers",
+  tags: ["items"],
+  responses: {
+    200: {
+      description: "Sync result",
+      content: { "application/json": { schema: SyncResultSchema } },
+    },
+    403: {
+      description: "Admin role required",
+      content: { "application/json": { schema: ForbiddenSchema } },
+    },
+    500: {
+      description: "Sync failure",
+      content: { "application/json": { schema: SyncResultSchema } },
+    },
+  },
+};
+
+const syncDurationsRoute = {
+  method: "post" as const,
+  path: "/sync-durations",
+  tags: ["items"],
+  responses: {
+    200: {
+      description: "Sync result",
+      content: { "application/json": { schema: SyncResultSchema } },
+    },
+    403: {
+      description: "Admin role required",
+      content: { "application/json": { schema: ForbiddenSchema } },
+    },
+    500: {
+      description: "Sync failure",
+      content: { "application/json": { schema: SyncResultSchema } },
+    },
+  },
+};
+
+const syncInsightsRoute = {
+  method: "post" as const,
+  path: "/sync-insights",
+  tags: ["items"],
+  responses: {
+    200: {
+      description: "Sync result",
+      content: { "application/json": { schema: SyncResultSchema } },
+    },
+    403: {
+      description: "Admin role required",
+      content: { "application/json": { schema: ForbiddenSchema } },
+    },
+    500: {
+      description: "Sync failure",
+      content: {
+        "application/json": { schema: z.object({ error: z.string() }) },
+      },
+    },
+  },
+};
+
+// =========================
+// Handlers
+// =========================
+
+itemsRouter.openapi(checkExistingRoute, async (c) => {
   const supabase = c.get("supabase");
   const title = c.req.query("title") || "";
   const author = c.req.query("author") || "";
@@ -36,7 +367,7 @@ itemsRouter.get("/check-existing", async (c) => {
 
     const { data: exactMatch } = await query.limit(1).maybeSingle();
     if (exactMatch?.id) {
-      return c.json({ mediaId: exactMatch.id });
+      return c.json({ mediaId: exactMatch.id }, 200);
     }
 
     // 2. Fuzzy fallback — use ilike to let the DB filter candidates so we
@@ -61,7 +392,7 @@ itemsRouter.get("/check-existing", async (c) => {
           console.info(
             `[items] Fuzzy matched "${title}" to "${book.title}" (exact norm)`,
           );
-          return c.json({ mediaId: book.id });
+          return c.json({ mediaId: book.id }, 200);
         }
 
         // Substring containment with a length-ratio guard to prevent broad false positives
@@ -78,22 +409,22 @@ itemsRouter.get("/check-existing", async (c) => {
                 ratio.toFixed(2)
               })`,
             );
-            return c.json({ mediaId: book.id });
+            return c.json({ mediaId: book.id }, 200);
           }
         }
       }
     }
 
-    return c.json({ mediaId: null });
+    return c.json({ mediaId: null }, 200);
   } catch (err) {
     console.error("[items] check-existing failed:", err);
     return c.json({ error: "Internal server error" }, 500);
   }
 });
 
-itemsRouter.get("/:id/similar", async (c) => {
+itemsRouter.openapi(similarItemsRoute, async (c) => {
   const supabase = c.get("supabase");
-  const itemId = c.req.param("id");
+  const { id: itemId } = c.req.valid("param");
 
   try {
     const { data, error } = await (supabase as any).rpc("match_library_items", {
@@ -108,7 +439,7 @@ itemsRouter.get("/:id/similar", async (c) => {
     }
 
     if (!data || data.length === 0) {
-      return c.json({ similarItems: [] });
+      return c.json({ similarItems: [] }, 200);
     }
 
     const ids = data.map((d: any) => d.id);
@@ -128,17 +459,17 @@ itemsRouter.get("/:id/similar", async (c) => {
       return indexA - indexB;
     }) || [];
 
-    return c.json({ similarItems: sortedItems });
+    return c.json({ similarItems: sortedItems as any[] }, 200);
   } catch (err: any) {
     console.error("[items] similar items failed:", err);
     return c.json({ error: "Internal server error" }, 500);
   }
 });
 
-itemsRouter.get("/:id", async (c) => {
+itemsRouter.openapi(itemDetailRoute, async (c) => {
   const user = c.get("user")!;
   const supabase = c.get("supabase");
-  const itemId = c.req.param("id");
+  const { id: itemId } = c.req.valid("param");
 
   console.info(`[handleItems] Fetching item ${itemId} for user ${user?.id}`);
   const { data: item, error } = await supabase.from("library_items").select(
@@ -152,7 +483,7 @@ itemsRouter.get("/:id", async (c) => {
   if (error) {
     return c.json(
       {
-        error: error.message || error,
+        error: typeof error === "string" ? error : error.message,
         details: error.details,
         hint: error.hint,
       },
@@ -171,13 +502,14 @@ itemsRouter.get("/:id", async (c) => {
 
   return c.json(
     mapBookForMobile(item as unknown as LibraryItemWithBooks, progressData),
+    200,
   );
 });
 
-itemsRouter.get("/:id/cover", async (c) => {
+itemsRouter.openapi(itemCoverRoute, async (c): Promise<Response> => {
   const supabaseUrl = c.get("supabaseUrl");
   const serviceRoleKey = c.get("serviceRoleKey");
-  const itemId = c.req.param("id");
+  const { id: itemId } = c.req.valid("param");
 
   const adminClient = createClient(supabaseUrl, serviceRoleKey);
   const { data: item, error: _itemError } = await adminClient
@@ -292,7 +624,7 @@ itemsRouter.get("/:id/cover", async (c) => {
   return c.redirect(publicUrl, 302);
 });
 
-itemsRouter.delete("/:id/cover", async (c) => {
+itemsRouter.openapi(deleteItemCoverRoute, async (c): Promise<Response> => {
   const user = c.get("user");
   if (!requireAdminRole(user)) {
     return c.json({ error: "Forbidden: Admin access required" }, 403);
@@ -300,7 +632,7 @@ itemsRouter.delete("/:id/cover", async (c) => {
 
   const supabaseUrl = c.get("supabaseUrl");
   const serviceRoleKey = c.get("serviceRoleKey");
-  const itemId = c.req.param("id");
+  const { id: itemId } = c.req.valid("param");
 
   const adminClient = createClient(supabaseUrl, serviceRoleKey);
   const { data: item } = await adminClient.from("library_items").select(
@@ -316,7 +648,9 @@ itemsRouter.delete("/:id/cover", async (c) => {
   return new Response(null, { status: 204 });
 });
 
-const handleCoverUpload = async (c: Context) => {
+const handleCoverUpload = async (
+  c: Context<{ Variables: Variables }>,
+) => {
   const user = c.get("user");
   if (!requireAdminRole(user)) {
     return c.json({ error: "Forbidden: Admin access required" }, 403);
@@ -380,13 +714,17 @@ const handleCoverUpload = async (c: Context) => {
   await adminClient.from("library_items").update({ cover_path: storagePath })
     .eq("id", itemId);
 
-  return c.json({ updated: true });
+  return c.json({ updated: true }, 200);
 };
 
-itemsRouter.post("/:id/cover", handleCoverUpload);
-itemsRouter.patch("/:id/cover", handleCoverUpload);
+const uploadItemCoverPatchRoute = {
+  ...uploadItemCoverRoute,
+  method: "patch" as const,
+};
+itemsRouter.openapi(uploadItemCoverRoute, handleCoverUpload);
+itemsRouter.openapi(uploadItemCoverPatchRoute, handleCoverUpload);
 
-itemsRouter.delete("/:id/audio-files/:ino", async (c) => {
+itemsRouter.openapi(deleteAudioFileRoute, async (c): Promise<Response> => {
   const user = c.get("user")!;
   if (!user) return c.json({ error: "Unauthorized" }, 401);
 
@@ -399,8 +737,7 @@ itemsRouter.delete("/:id/audio-files/:ino", async (c) => {
 
   const supabaseUrl = c.get("supabaseUrl");
   const serviceRoleKey = c.get("serviceRoleKey");
-  const itemId = c.req.param("id");
-  const fileIno = c.req.param("ino");
+  const { id: itemId, ino: fileIno } = c.req.valid("param");
 
   const adminClient = createClient(supabaseUrl, serviceRoleKey);
   const { data: item } = await adminClient.from("library_items").select(
@@ -424,7 +761,7 @@ itemsRouter.delete("/:id/audio-files/:ino", async (c) => {
   return new Response(null, { status: 204 });
 });
 
-itemsRouter.post("/batch", async (c) => {
+itemsRouter.openapi(batchItemsRoute, async (c) => {
   const user = c.get("user")!;
   const supabase = c.get("supabase");
   const body = await c.req.json().catch(() => ({}));
@@ -433,7 +770,7 @@ itemsRouter.post("/batch", async (c) => {
     : [];
 
   if (itemIds.length === 0) {
-    return c.json({ items: [] });
+    return c.json({ items: [] }, 200);
   }
 
   const { data: items, error } = await supabase.from("library_items").select(
@@ -441,7 +778,7 @@ itemsRouter.post("/batch", async (c) => {
   ).in("id", itemIds);
 
   if (error || !items) {
-    return c.json({ items: [] });
+    return c.json({ items: [] }, 200);
   }
 
   const { data: progressData } = await supabase.from("media_progress").select(
@@ -460,10 +797,12 @@ itemsRouter.post("/batch", async (c) => {
   );
 
   c.header("Cache-Control", "private, max-age=30");
-  return c.json({ items: mappedItems });
+  return c.json({ items: mappedItems as any[] }, 200);
 });
 
-export async function handleChapterAI(c: Context<{ Variables: Variables }>) {
+export async function handleChapterAI(
+  c: Context<{ Variables: Variables }>,
+) {
   const body = await c.req.json().catch(() => ({}));
   const zaiApiKey = Deno.env.get("ZAI_API_KEY") ??
     Deno.env.get("ZHIPU_API_KEY") ?? "";
@@ -481,7 +820,7 @@ export async function handleChapterAI(c: Context<{ Variables: Variables }>) {
       chapterIndex,
       zaiApiKey,
     );
-    return c.json({ insights });
+    return c.json({ insights }, 200);
   } catch (e: any) {
     return c.json({
       error: e.message || "Failed to generate chapter AI insights",
@@ -489,10 +828,12 @@ export async function handleChapterAI(c: Context<{ Variables: Variables }>) {
   }
 }
 
-itemsRouter.post("/:id/chapters/ai", handleChapterAI);
-itemsRouter.post("/chapter-ai", handleChapterAI);
+itemsRouter.openapi(chapterAIRoute, handleChapterAI);
+itemsRouter.openapi(chapterAIGlobalRoute, handleChapterAI);
 
-async function handleSyncCovers(c: Context<{ Variables: Variables }>) {
+async function handleSyncCovers(
+  c: Context<{ Variables: Variables }>,
+) {
   if (!requireAdminRole(c.get("user"))) {
     return c.json({ error: "Forbidden: Admin access required" }, 403);
   }
@@ -546,7 +887,7 @@ async function handleSyncCovers(c: Context<{ Variables: Variables }>) {
       success: true,
       updated: updatedCount,
       message: `Updated covers for ${updatedCount} books`,
-    });
+    }, 200);
   } catch (e: any) {
     return c.json(
       { success: false, error: e.message || "Sync covers failed" },
@@ -555,7 +896,9 @@ async function handleSyncCovers(c: Context<{ Variables: Variables }>) {
   }
 }
 
-async function handleSyncDurations(c: Context<{ Variables: Variables }>) {
+async function handleSyncDurations(
+  c: Context<{ Variables: Variables }>,
+) {
   if (!requireAdminRole(c.get("user"))) {
     return c.json({ error: "Forbidden: Admin access required" }, 403);
   }
@@ -588,7 +931,7 @@ async function handleSyncDurations(c: Context<{ Variables: Variables }>) {
       success: true,
       updated: updatedCount,
       message: `Updated duration for ${updatedCount} items`,
-    });
+    }, 200);
   } catch (e: any) {
     return c.json({
       success: false,
@@ -597,14 +940,9 @@ async function handleSyncDurations(c: Context<{ Variables: Variables }>) {
   }
 }
 
-itemsRouter.post("/sync-covers", handleSyncCovers);
-itemsRouter.post("/sync-durations", handleSyncDurations);
-itemsRouter.get("/sync-covers", handleSyncCovers);
-itemsRouter.get("/sync-durations", handleSyncDurations);
-itemsRouter.post("/sync-insights", handleSyncBookInsights);
-itemsRouter.get("/sync-insights", handleSyncBookInsights);
-
-async function handleSyncBookInsights(c: Context<{ Variables: Variables }>) {
+async function handleSyncBookInsights(
+  c: Context<{ Variables: Variables }>,
+) {
   if (!requireAdminRole(c.get("user"))) {
     return c.json({ error: "Forbidden: Admin access required" }, 403);
   }
@@ -636,8 +974,28 @@ async function handleSyncBookInsights(c: Context<{ Variables: Variables }>) {
       success: true,
       processed: processedCount,
       message: `Processed AI insights for ${processedCount} books`,
-    });
+    }, 200);
   } catch (e: any) {
     return c.json({ error: e.message || "Failed to sync book insights" }, 500);
   }
 }
+
+const syncCoversGetRoute = {
+  ...syncCoversRoute,
+  method: "get" as const,
+};
+const syncDurationsGetRoute = {
+  ...syncDurationsRoute,
+  method: "get" as const,
+};
+const syncInsightsGetRoute = {
+  ...syncInsightsRoute,
+  method: "get" as const,
+};
+
+itemsRouter.openapi(syncCoversRoute, handleSyncCovers);
+itemsRouter.openapi(syncDurationsRoute, handleSyncDurations);
+itemsRouter.openapi(syncInsightsRoute, handleSyncBookInsights);
+itemsRouter.openapi(syncCoversGetRoute, handleSyncCovers);
+itemsRouter.openapi(syncDurationsGetRoute, handleSyncDurations);
+itemsRouter.openapi(syncInsightsGetRoute, handleSyncBookInsights);
