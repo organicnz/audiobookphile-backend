@@ -116,6 +116,7 @@ export class StorageRouter {
         Bucket: Deno.env.get("B2_TERTIARY_BUCKET_NAME")!,
         Key: actualPath,
       });
+      // @ts-ignore: Deno npm specifier duplication causes S3Client type mismatch
       return await getSignedUrl(getB2TertiaryClient(), command, { expiresIn });
     }
 
@@ -125,6 +126,7 @@ export class StorageRouter {
         Bucket: Deno.env.get("B2_SECONDARY_BUCKET_NAME")!,
         Key: actualPath,
       });
+      // @ts-ignore: Deno npm specifier duplication causes S3Client type mismatch
       return await getSignedUrl(getB2SecondaryClient(), command, { expiresIn });
     }
 
@@ -138,6 +140,7 @@ export class StorageRouter {
         Bucket: Deno.env.get("B2_BUCKET_NAME")!,
         Key: actualPath,
       });
+      // @ts-ignore: Deno npm specifier duplication causes S3Client type mismatch
       return await getSignedUrl(getB2PrimaryClient(), command, { expiresIn });
     }
 
@@ -177,6 +180,7 @@ export class StorageRouter {
           Bucket: Deno.env.get("B2_TERTIARY_BUCKET_NAME")!,
           Key: key,
         });
+        // @ts-ignore: Deno npm specifier duplication causes S3Client type mismatch
         const signedUrl = await getSignedUrl(getB2TertiaryClient(), command, {
           expiresIn,
         });
@@ -198,6 +202,7 @@ export class StorageRouter {
         Bucket: Deno.env.get("B2_SECONDARY_BUCKET_NAME")!,
         Key: key,
       });
+      // @ts-ignore: Deno npm specifier duplication causes S3Client type mismatch
       const signedUrl = await getSignedUrl(getB2SecondaryClient(), command, {
         expiresIn,
       });
@@ -218,6 +223,7 @@ export class StorageRouter {
         Bucket: Deno.env.get("B2_BUCKET_NAME")!,
         Key: key,
       });
+      // @ts-ignore: Deno npm specifier duplication causes S3Client type mismatch
       const signedUrl = await getSignedUrl(getB2PrimaryClient(), command, {
         expiresIn,
       });

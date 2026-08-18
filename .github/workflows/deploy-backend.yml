@@ -38,41 +38,38 @@ jobs:
           path: ./
           extra_args: --only-verified
 
-      - name: Security Audit
-        id: audit
-        run: |
-          . ${{ github.workspace }}/.github/scripts/step-tree.sh
-          step_tree "Verify Deno Edge Functions" audit \
-            "checkout:Checkout Repository|deno:Setup Deno|audit:Security Audit|lint:Deno Lint|check:Deno Check (Type Safety)|tests:Deno Tests (Authorization Matrix & Security)" \
-            "checkout=${{ steps.checkout.outcome }};deno=${{ steps.deno.outcome }}"
-          ${{ github.workspace }}/scripts/security-audit.sh
+      - name: Setup Bun
+        id: bun
+        uses: oven-sh/setup-bun@v1
+        with:
+          bun-version: latest
 
-      - name: Deno Lint
-        id: lint
+      - name: Install Dependencies
+        id: deps
         run: |
           . ${{ github.workspace }}/.github/scripts/step-tree.sh
-          step_tree "Verify Deno Edge Functions" lint \
-            "checkout:Checkout Repository|deno:Setup Deno|audit:Security Audit|lint:Deno Lint|check:Deno Check (Type Safety)|tests:Deno Tests (Authorization Matrix & Security)" \
-            "checkout=${{ steps.checkout.outcome }};deno=${{ steps.deno.outcome }};audit=${{ steps.audit.outcome }}"
-          deno lint index.ts routes/ _shared/
+          step_tree "Verify Deno Edge Functions" deps \
+            "checkout:Checkout Repository|deno:Setup Deno|trufflehog:TruffleHog Secret Scanner|bun:Setup Bun|deps:Install Dependencies|pre_commit:Run Lefthook pre-commit|pre_push:Run Lefthook pre-push" \
+            "checkout=${{ steps.checkout.outcome }};deno=${{ steps.deno.outcome }};trufflehog=${{ steps.trufflehog.outcome }};bun=${{ steps.bun.outcome }}"
+          bun install --frozen-lockfile
 
-      - name: Deno Check (Type Safety)
-        id: check
+      - name: Run Lefthook pre-commit
+        id: pre_commit
         run: |
           . ${{ github.workspace }}/.github/scripts/step-tree.sh
-          step_tree "Verify Deno Edge Functions" check \
-            "checkout:Checkout Repository|deno:Setup Deno|audit:Security Audit|lint:Deno Lint|check:Deno Check (Type Safety)|tests:Deno Tests (Authorization Matrix & Security)" \
-            "checkout=${{ steps.checkout.outcome }};deno=${{ steps.deno.outcome }};audit=${{ steps.audit.outcome }};lint=${{ steps.lint.outcome }}"
-          deno check index.ts
+          step_tree "Verify Deno Edge Functions" pre_commit \
+            "checkout:Checkout Repository|deno:Setup Deno|trufflehog:TruffleHog Secret Scanner|bun:Setup Bun|deps:Install Dependencies|pre_commit:Run Lefthook pre-commit|pre_push:Run Lefthook pre-push" \
+            "checkout=${{ steps.checkout.outcome }};deno=${{ steps.deno.outcome }};trufflehog=${{ steps.trufflehog.outcome }};bun=${{ steps.bun.outcome }};deps=${{ steps.deps.outcome }}"
+          bunx lefthook run pre-commit --all-files
 
-      - name: Deno Tests (Authorization Matrix & Security)
-        id: tests
+      - name: Run Lefthook pre-push
+        id: pre_push
         run: |
           . ${{ github.workspace }}/.github/scripts/step-tree.sh
-          step_tree "Verify Deno Edge Functions" tests \
-            "checkout:Checkout Repository|deno:Setup Deno|audit:Security Audit|lint:Deno Lint|check:Deno Check (Type Safety)|tests:Deno Tests (Authorization Matrix & Security)" \
-            "checkout=${{ steps.checkout.outcome }};deno=${{ steps.deno.outcome }};audit=${{ steps.audit.outcome }};lint=${{ steps.lint.outcome }};check=${{ steps.check.outcome }}"
-          deno test --allow-env --allow-net auth_test.ts jwt_test.ts metadata_test.ts playback_test.ts two_factor_test.ts webauthn_test.ts auth_matrix_test.ts contracts_test.ts
+          step_tree "Verify Deno Edge Functions" pre_push \
+            "checkout:Checkout Repository|deno:Setup Deno|trufflehog:TruffleHog Secret Scanner|bun:Setup Bun|deps:Install Dependencies|pre_commit:Run Lefthook pre-commit|pre_push:Run Lefthook pre-push" \
+            "checkout=${{ steps.checkout.outcome }};deno=${{ steps.deno.outcome }};trufflehog=${{ steps.trufflehog.outcome }};bun=${{ steps.bun.outcome }};deps=${{ steps.deps.outcome }};pre_commit=${{ steps.pre_commit.outcome }}"
+          bunx lefthook run pre-push --all-files
 
   deploy:
     name: Deploy to Supabase Production
