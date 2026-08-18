@@ -99,7 +99,7 @@ fi
 # 8. Supabase Edge Guard (Rule 3: npm:@supabase/supabase-js@2.44.0)
 if [ -n "$TS_FILES" ]; then
     echo "🔍 [8/13] Supabase Edge Guard (Rule 3)..."
-    CREATE_CLIENT_FILES=$(grep -l 'createClient' $TS_FILES 2>/dev/null | grep -v 'src/types/supabase.ts' || true)
+    CREATE_CLIENT_FILES=$(grep -l 'createClient' $TS_FILES 2>/dev/null | grep 'supabase/functions/' | grep -v '_test\.ts' || true)
     if [ -n "$CREATE_CLIENT_FILES" ]; then
         for f in $CREATE_CLIENT_FILES; do
             if ! grep -q 'npm:@supabase/supabase-js@2.44.0' "$f"; then
