@@ -1,14 +1,13 @@
 # Environment Variables (Single Source of Truth)
 
-All per-repo env values originate here in the backend repo — one canonical
-file:
+All per-repo env values originate here in the backend repo — one canonical file:
 
-| File | Meaning |
-| --- | --- |
+| File            | Meaning                               |
+| --------------- | ------------------------------------- |
 | `env/local.env` | Local development + local Maestro E2E |
 
-It is divided into `# [backend]`, `# [web]`, and `# [maestro]` sections.
-Secrets (`SUPABASE_ACCESS_TOKEN`, `CRON_SECRET`, `SUPABASE_SERVICE_ROLE_KEY`,
+It is divided into `# [backend]`, `# [web]`, and `# [maestro]` sections. Secrets
+(`SUPABASE_ACCESS_TOKEN`, `CRON_SECRET`, `SUPABASE_SERVICE_ROLE_KEY`,
 `NEXT_PUBLIC_POSTHOG_KEY`, Maestro test credentials, ...) are stored blank.
 Production and CI values live on the platforms, never in this repo:
 
@@ -24,11 +23,11 @@ Production and CI values live on the platforms, never in this repo:
 
 This writes:
 
-| Repo | File |
-| --- | --- |
+| Repo                   | File                                  |
+| ---------------------- | ------------------------------------- |
 | audiobookphile-backend | `.env` (Supabase CLI / local scripts) |
-| audiobookphile-web | `.env.local` |
-| audiobookphile-app | `.maestro/.env` (Maestro E2E) |
+| audiobookphile-web     | `.env.local`                          |
+| audiobookphile-app     | `.maestro/.env` (Maestro E2E)         |
 
 Merge semantics: non-blank canonical values always win; blank canonical values
 preserve whatever is already set in the target file, so locally-filled secrets

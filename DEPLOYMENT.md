@@ -2,25 +2,26 @@
 
 > ## Deploying via CI/CD (standard path — no credentials needed)
 >
-> **All migrations and Edge Function deploys are handled by the GitHub
-> Actions pipeline (`.github/workflows/deploy-backend.yml`).** Secrets
-> (`SUPABASE_ACCESS_TOKEN`, `SUPABASE_DB_PASSWORD`, `SUPABASE_PROJECT_ID`)
-> are configured in GitHub. Do not ask for the database password — you do
-> not need it.
+> **All migrations and Edge Function deploys are handled by the GitHub Actions
+> pipeline (`.github/workflows/deploy-backend.yml`).** Secrets
+> (`SUPABASE_ACCESS_TOKEN`, `SUPABASE_DB_PASSWORD`, `SUPABASE_PROJECT_ID`) are
+> configured in GitHub. Do not ask for the database password — you do not need
+> it.
 >
-> 1. Commit your changes and push to `main`. The workflow runs on push
->    for any change under `supabase/**` (or the workflow file itself).
-> 2. The `verify` job runs the security audit, `deno lint`, `deno check`,
->    and the full Deno test suite (including `webauthn_test.ts`).
+> 1. Commit your changes and push to `main`. The workflow runs on push for any
+>    change under `supabase/**` (or the workflow file itself).
+> 2. The `verify` job runs the security audit, `deno lint`, `deno check`, and
+>    the full Deno test suite (including `webauthn_test.ts`).
 > 3. The `deploy` job (main only) links the project and applies pending
->    migrations with `supabase db push --linked --include-all` (Management
->    API — no DB password needed), then deploys the `api` Edge Function
->    with `supabase functions deploy api --no-verify-jwt`. It also
->    ensures the `2FA_CHALLENGE_SIGNING_KEY` Edge Function secret exists
->    (created once with a random value if missing — never rotated).
+>    migrations with `supabase db push --linked --include-all` (Management API —
+>    no DB password needed), then deploys the `api` Edge Function with
+>    `supabase functions deploy api --no-verify-jwt`. It also ensures the
+>    `2FA_CHALLENGE_SIGNING_KEY` Edge Function secret exists (created once with
+>    a random value if missing — never rotated).
 > 4. Watch the run: `gh run watch --branch main` or the GitHub UI.
 >
 > Local dry-run equivalents (no deployment):
+>
 > ```bash
 > cd supabase/functions/api
 > deno lint . && deno check index.ts
@@ -29,7 +30,9 @@
 
 # Deployment Guide: RLS Policies
 
-This guide covers the deployment of Row Level Security (RLS) policies for the audiobookphile backend database schema. It includes step-by-step instructions, testing procedures, and rollback procedures.
+This guide covers the deployment of Row Level Security (RLS) policies for the
+audiobookphile backend database schema. It includes step-by-step instructions,
+testing procedures, and rollback procedures.
 
 ## Prerequisites
 
@@ -56,6 +59,7 @@ SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
 ```
 
 For local development:
+
 ```env
 SUPABASE_URL=http://localhost:54323
 SUPABASE_ACCESS_TOKEN=your-local-token
@@ -82,6 +86,7 @@ supabase status
 ```
 
 Verify connection:
+
 - URL is accessible
 - Database credentials are valid
 - Service role access is configured
@@ -99,7 +104,9 @@ ORDER BY tablename;
 ```
 
 **Expected Output:**
-- 18 tables should show `true` for `ise_rls_enabled` (if policies already applied)
+
+- 18 tables should show `true` for `ise_rls_enabled` (if policies already
+  applied)
 - OR `false` for all tables (if this is a fresh deployment)
 
 ## Phase 2: Migration Execution
@@ -159,7 +166,9 @@ ORDER BY tablename, policyname;
 ```
 
 **Verify:**
-- 53 policies created (6 per table × 18 tables - but bookmarks, media_progress, search_history have 3 policies each = 54 total, minus 1 admin policy = 53)
+
+- 53 policies created (6 per table × 18 tables - but bookmarks, media_progress,
+  search_history have 3 policies each = 54 total, minus 1 admin policy = 53)
 - Policy naming convention: `<table_name>: <user_type> can <verb> <target>`
 - All policies have proper `USING` and `WITH CHECK` expressions
 
@@ -184,6 +193,7 @@ WHERE routine_name IN (
 ```
 
 **Expected Output:**
+
 - 6 helper functions created
 - All functions have `is_security_definer = true`
 
@@ -198,6 +208,7 @@ WHERE grantee = 'service_role'
 ```
 
 **Expected:**
+
 - service_role should have ALL privileges on ALL tables
 - service_role should have USAGE on ALL sequences
 - service_role should have EXECUTE on ALL functions
@@ -206,7 +217,8 @@ WHERE grantee = 'service_role'
 
 ### 3.1 Authentication Testing
 
-You must have authenticated users to test RLS policies. Use the Supabase CLI or Postman to authenticate:
+You must have authenticated users to test RLS policies. Use the Supabase CLI or
+Postman to authenticate:
 
 ```bash
 # Using Supabase CLI
@@ -218,95 +230,165 @@ Or create test accounts in your application.
 ### 3.2 Per-Table Testing Checklist
 
 **Table: libraries**
-- [ ] Users can READ their own libraries (`libraries: users can read own library`)
-- [ ] Users can READ other members' libraries (`libraries: members can read members' libraries`)
-- [ ] Users can INSERT their own libraries (`libraries: authenticated users can insert own library`)
-- [ ] Users can UPDATE their own libraries (`libraries: authenticated users can update own library`)
-- [ ] Users can DELETE their own libraries (`libraries: authenticated users can delete own library`)
-- [ ] Admins can perform all operations on libraries (`libraries: admins can manage all libraries`)
+
+- [ ] Users can READ their own libraries
+      (`libraries: users can read own library`)
+- [ ] Users can READ other members' libraries
+      (`libraries: members can read members' libraries`)
+- [ ] Users can INSERT their own libraries
+      (`libraries: authenticated users can insert own library`)
+- [ ] Users can UPDATE their own libraries
+      (`libraries: authenticated users can update own library`)
+- [ ] Users can DELETE their own libraries
+      (`libraries: authenticated users can delete own library`)
+- [ ] Admins can perform all operations on libraries
+      (`libraries: admins can manage all libraries`)
 
 **Table: authors**
+
 - [ ] Users can READ all authors (`authors: users can read all`)
-- [ ] Admins can create/update/delete authors (`authors: admins can manage all authors`)
+- [ ] Admins can create/update/delete authors
+      (`authors: admins can manage all authors`)
 
 **Table: narrators**
+
 - [ ] Users can READ all narrators (`narrators: users can read all`)
-- [ ] Admins can create/update/delete narrators (`narrators: admins can manage all narrators`)
+- [ ] Admins can create/update/delete narrators
+      (`narrators: admins can manage all narrators`)
 
 **Table: series**
+
 - [ ] Users can READ all series (`series: users can read all`)
-- [ ] Admins can create/update/delete series (`series: admins can manage all series`)
+- [ ] Admins can create/update/delete series
+      (`series: admins can manage all series`)
 
 **Table: playlists**
-- [ ] Users can READ their own playlists (`playlists: users can read own playlist`)
-- [ ] Users can INSERT their own playlists (`playlists: authenticated users can insert own playlist`)
-- [ ] Users can UPDATE their own playlists (`playlists: authenticated users can update own playlist`)
-- [ ] Users can DELETE their own playlists (`playlists: authenticated users can delete own playlist`)
-- [ ] Admins can manage all playlists (`playlists: admins can manage all playlists`)
+
+- [ ] Users can READ their own playlists
+      (`playlists: users can read own playlist`)
+- [ ] Users can INSERT their own playlists
+      (`playlists: authenticated users can insert own playlist`)
+- [ ] Users can UPDATE their own playlists
+      (`playlists: authenticated users can update own playlist`)
+- [ ] Users can DELETE their own playlists
+      (`playlists: authenticated users can delete own playlist`)
+- [ ] Admins can manage all playlists
+      (`playlists: admins can manage all playlists`)
 
 **Table: book_authors**
-- [ ] Users can READ accessible book authors (`book_authors: users can read accessible book authors`)
-- [ ] Users can UPDATE accessible book authors (`book_authors: users can update accessible book authors`)
-- [ ] Admins can create/book_authors (`book_authors: admins can create book authors`)
+
+- [ ] Users can READ accessible book authors
+      (`book_authors: users can read accessible book authors`)
+- [ ] Users can UPDATE accessible book authors
+      (`book_authors: users can update accessible book authors`)
+- [ ] Admins can create/book_authors
+      (`book_authors: admins can create book authors`)
 
 **Table: book_narrators**
-- [ ] Users can READ accessible book narrators (`book_narrators: users can read accessible book narrators`)
-- [ ] Users can UPDATE accessible book narrators (`book_narrators: users can update accessible book narrators`)
-- [ ] Admins can create/book_narrators (`book_narrators: admins can create book narrators`)
+
+- [ ] Users can READ accessible book narrators
+      (`book_narrators: users can read accessible book narrators`)
+- [ ] Users can UPDATE accessible book narrators
+      (`book_narrators: users can update accessible book narrators`)
+- [ ] Admins can create/book_narrators
+      (`book_narrators: admins can create book narrators`)
 
 **Table: book_series**
-- [ ] Users can READ accessible book series (`book_series: users can read accessible book series`)
-- [ ] Users can UPDATE accessible book series (`book_series: users can update accessible book series`)
-- [ ] Admins can create/book_series (`book_series: admins can create book series`)
+
+- [ ] Users can READ accessible book series
+      (`book_series: users can read accessible book series`)
+- [ ] Users can UPDATE accessible book series
+      (`book_series: users can update accessible book series`)
+- [ ] Admins can create/book_series
+      (`book_series: admins can create book series`)
 
 **Table: audio_files**
-- [ ] Users can READ accessible audio files (`audio_files: users can read accessible audio files`)
-- [ ] Users can UPDATE accessible audio files (`audio_files: users can update accessible audio files`)
-- [ ] Admins can create/audio_files (`audio_files: admins can create audio files`)
+
+- [ ] Users can READ accessible audio files
+      (`audio_files: users can read accessible audio files`)
+- [ ] Users can UPDATE accessible audio files
+      (`audio_files: users can update accessible audio files`)
+- [ ] Admins can create/audio_files
+      (`audio_files: admins can create audio files`)
 
 **Table: chapters**
-- [ ] Users can READ accessible chapters (`chapters: users can read accessible chapters`)
-- [ ] Users can UPDATE accessible chapters (`chapters: users can update accessible chapters`)
+
+- [ ] Users can READ accessible chapters
+      (`chapters: users can read accessible chapters`)
+- [ ] Users can UPDATE accessible chapters
+      (`chapters: users can update accessible chapters`)
 - [ ] Admins can create/chapters (`chapters: admins can create chapters`)
 
 **Table: podcast_episodes**
-- [ ] Users can READ accessible podcast episodes (`podcast_episodes: users can read accessible podcast episodes`)
-- [ ] Users can UPDATE accessible podcast episodes (`podcast_episodes: users can update accessible podcast episodes`)
-- [ ] Admins can create/podcast_episodes (`podcast_episodes: admins can create podcast episodes`)
+
+- [ ] Users can READ accessible podcast episodes
+      (`podcast_episodes: users can read accessible podcast episodes`)
+- [ ] Users can UPDATE accessible podcast episodes
+      (`podcast_episodes: users can update accessible podcast episodes`)
+- [ ] Admins can create/podcast_episodes
+      (`podcast_episodes: admins can create podcast episodes`)
 
 **Table: media_progress**
-- [ ] Users can READ their own progress (`media_progress: users can read own progress`)
-- [ ] Users can INSERT their own progress (`media_progress: authenticated users can insert own progress`)
-- [ ] Users can UPDATE their own progress (`media_progress: authenticated users can update own progress`)
-- [ ] Users can DELETE their own progress (`media_progress: authenticated users can delete own progress`)
+
+- [ ] Users can READ their own progress
+      (`media_progress: users can read own progress`)
+- [ ] Users can INSERT their own progress
+      (`media_progress: authenticated users can insert own progress`)
+- [ ] Users can UPDATE their own progress
+      (`media_progress: authenticated users can update own progress`)
+- [ ] Users can DELETE their own progress
+      (`media_progress: authenticated users can delete own progress`)
 
 **Table: playlist_items**
-- [ ] Users can READ accessible playlist items (`playlist_items: users can read accessible playlist items`)
-- [ ] Users can UPDATE accessible playlist items (`playlist_items: users can update accessible playlist items`)
-- [ ] Admins can create/playlist_items (`playlist_items: admins can create playlist items`)
+
+- [ ] Users can READ accessible playlist items
+      (`playlist_items: users can read accessible playlist items`)
+- [ ] Users can UPDATE accessible playlist items
+      (`playlist_items: users can update accessible playlist items`)
+- [ ] Admins can create/playlist_items
+      (`playlist_items: admins can create playlist items`)
 
 **Table: collections**
-- [ ] Users can READ their own collections (`collections: users can read own collection`)
-- [ ] Users can INSERT their own collections (`collections: authenticated users can insert own collection`)
-- [ ] Users can UPDATE their own collections (`collections: authenticated users can update own collection`)
-- [ ] Users can DELETE their own collections (`collections: authenticated users can delete own collection`)
-- [ ] Admins can manage all collections (`collections: admins can manage all collections`)
+
+- [ ] Users can READ their own collections
+      (`collections: users can read own collection`)
+- [ ] Users can INSERT their own collections
+      (`collections: authenticated users can insert own collection`)
+- [ ] Users can UPDATE their own collections
+      (`collections: authenticated users can update own collection`)
+- [ ] Users can DELETE their own collections
+      (`collections: authenticated users can delete own collection`)
+- [ ] Admins can manage all collections
+      (`collections: admins can manage all collections`)
 
 **Table: collection_items**
-- [ ] Users can READ accessible collection items (`collection_items: users can read accessible collection items`)
-- [ ] Users can UPDATE accessible collection items (`collection_items: users can update accessible collection items`)
-- [ ] Admins can create/collection_items (`collection_items: admins can create collection items`)
+
+- [ ] Users can READ accessible collection items
+      (`collection_items: users can read accessible collection items`)
+- [ ] Users can UPDATE accessible collection items
+      (`collection_items: users can update accessible collection items`)
+- [ ] Admins can create/collection_items
+      (`collection_items: admins can create collection items`)
 
 **Table: bookmarks**
-- [ ] Users can READ their own bookmarks (`bookmarks: users can read own bookmarks`)
-- [ ] Users can INSERT their own bookmarks (`bookmarks: authenticated users can insert own bookmarks`)
-- [ ] Users can UPDATE their own bookmarks (`bookmarks: authenticated users can update own bookmarks`)
-- [ ] Users can DELETE their own bookmarks (`bookmarks: authenticated users can delete own bookmarks`)
+
+- [ ] Users can READ their own bookmarks
+      (`bookmarks: users can read own bookmarks`)
+- [ ] Users can INSERT their own bookmarks
+      (`bookmarks: authenticated users can insert own bookmarks`)
+- [ ] Users can UPDATE their own bookmarks
+      (`bookmarks: authenticated users can update own bookmarks`)
+- [ ] Users can DELETE their own bookmarks
+      (`bookmarks: authenticated users can delete own bookmarks`)
 
 **Table: search_history**
-- [ ] Users can READ their own search history (`search_history: users can read own search history`)
-- [ ] Users can INSERT their own search history (`search_history: authenticated users can insert own search history`)
-- [ ] Users can DELETE their own search history (`search_history: authenticated users can delete own search history`)
+
+- [ ] Users can READ their own search history
+      (`search_history: users can read own search history`)
+- [ ] Users can INSERT their own search history
+      (`search_history: authenticated users can insert own search history`)
+- [ ] Users can DELETE their own search history
+      (`search_history: authenticated users can delete own search history`)
 
 ### 3.3 Test with Supabase CLI
 
@@ -329,6 +411,7 @@ SELECT * FROM libraries WHERE library_id = '<library_id>';
 ```
 
 **Expected:**
+
 - User X can see their own library
 - Member of library can see it
 - Other users cannot see it
@@ -356,6 +439,7 @@ RESET ROLE;
 **Symptom:** Queries fail with `permission denied for table`
 
 **Solution:**
+
 ```sql
 -- Check if RLS is enabled
 SELECT rowsecurity FROM pg_tables WHERE tablename = 'libraries';
@@ -369,6 +453,7 @@ ALTER TABLE libraries ENABLE ROW LEVEL SECURITY;
 **Symptom:** Query succeeds when it shouldn't
 
 **Solution:**
+
 ```sql
 -- Drop and recreate policy
 DROP POLICY IF EXISTS "libraries: users can read own library" ON libraries;
@@ -387,6 +472,7 @@ WITH CHECK (auth.uid() = library_owner_id OR library_owner_id IN (
 **Symptom:** Helper functions fail with permission denied
 
 **Solution:**
+
 ```sql
 -- Ensure functions use SECURITY DEFINER
 ALTER FUNCTION is_owner_of_library(UUID) SET SECURITY DEFINER;
@@ -402,6 +488,7 @@ ALTER FUNCTION has_role(TEXT) SET SECURITY DEFINER;
 **Symptom:** External APIs or admin operations fail
 
 **Solution:**
+
 ```sql
 -- Grant service role access to all objects
 GRANT ALL ON ALL TABLES IN SCHEMA public TO service_role;
@@ -422,6 +509,7 @@ END $$;
 **Symptom:** Some operations work, others fail
 
 **Solution:**
+
 ```sql
 -- List all policies for a specific table
 SELECT * FROM pg_policies WHERE tablename = 'library_items';
@@ -460,6 +548,7 @@ supabase gen types typescript --db > ../audiobookphile-web/src/types/database.ts
 ### 5.2 Review Generated Types
 
 **Check for:**
+
 - All 18 tables are exported
 - All columns have correct types
 - All enum values are present
@@ -478,6 +567,7 @@ supabase gen types typescript --project-ref <your-project-ref> --lang=typescript
 ```
 
 **Verify frontend types:**
+
 ```bash
 cd audiobookphile-web
 npm run typecheck
@@ -493,6 +583,7 @@ supabase gen types typescript --project-ref <your-project-ref> --lang=typescript
 ```
 
 **Review and update:**
+
 - `src/types/database.ts`
 - `src/types/index.ts` (exported types)
 - Any types that depend on schema changes
@@ -611,6 +702,7 @@ supabase db exec "SELECT tablename, rowsecurity FROM pg_tables WHERE schemaname 
 ### 7.4 Monitor for Issues
 
 **Set up monitoring for:**
+
 - RLS-related errors in application logs
 - Performance degradation after RLS enforcement
 - Unusual access patterns
@@ -631,6 +723,7 @@ ORDER BY count DESC;
 ### 8.1 Adding New Tables
 
 When adding new tables:
+
 1. Add RLS enablement in migration:
    ```sql
    ALTER TABLE <new_table> ENABLE ROW LEVEL SECURITY;
@@ -652,6 +745,7 @@ When adding new tables:
 ### 8.2 Updating Existing Policies
 
 When updating a policy:
+
 1. Drop the old policy:
    ```sql
    DROP POLICY IF EXISTS "old_policy_name" ON <table>;
@@ -673,11 +767,13 @@ When updating a policy:
 ### 8.3 Periodic Audits
 
 **Monthly:**
+
 - Check for any RLS-related errors in logs
 - Review access patterns
 - Verify policy effectiveness
 
 **Quarterly:**
+
 - Review all RLS policies for effectiveness
 - Test all user access patterns
 - Update policies based on usage changes
@@ -788,4 +884,4 @@ ALTER TABLE narrators DISABLE ROW LEVEL SECURITY;
 
 ---
 
-*Last updated: 2026-07-25*
+_Last updated: 2026-07-25_

@@ -121,8 +121,8 @@ The tertiary bucket (`audiobookphile-b2-tertiary`, account `c41a6a28c47f`) is
 the current write tier: `ACTIVE_B2_TIER=tertiary`. It uses the same flow with
 the `B2_TERTIARY_*` variable names (`B2_TERTIARY_KEY_ID` / `B2_TERTIARY_APP_KEY`
 / `B2_TERTIARY_BUCKET_NAME` / `B2_TERTIARY_ENDPOINT` / `B2_TERTIARY_REGION`).
-The scoped key is bucket-restricted to `audiobookphile-b2-tertiary` with NO
-name prefix (uploads are named `{itemId}/{filename}`, which would never match a
+The scoped key is bucket-restricted to `audiobookphile-b2-tertiary` with NO name
+prefix (uploads are named `{itemId}/{filename}`, which would never match a
 prefix).
 
 The storage router probes tiers in order **tertiary → secondary → primary →
