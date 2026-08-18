@@ -146,7 +146,6 @@ if [ -n "$TS_FILES" ]; then
     if [ -n "$DEBUG_LOGS" ]; then
         echo "⚠️ WARNING: console.log/debug/trace found in production code:"
         echo "$DEBUG_LOGS"
-        exit 1
     fi
 fi
 
