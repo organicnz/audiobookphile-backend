@@ -5,11 +5,13 @@
  * - Login / Signup / Logout
  * - Password Management (Forgot / Reset / Change)
  * - Token Authorization (/authorize)
+ *
+ * Schema-first: every route is declared via createRoute (see
+ * _shared/openapi.ts) so the OpenAPI document, Schemathesis fuzzing and the
+ * post-deploy smoke suite all derive from these definitions.
  */
 
-import { Hono } from "hono";
 import { createClient } from "npm:@supabase/supabase-js@2.44.0";
-import { Variables } from "../_shared/types.ts";
 import { getWebOrigin } from "../../api/_shared/proxy.ts";
 import {
   authErrorHandlers,
@@ -20,8 +22,15 @@ import {
 import { generate2FAChallengeToken } from "../_shared/totp.ts";
 import { buildUserPayload } from "../_shared/payloads.ts";
 import { z } from "zod";
+import {
+  createOpenApiRouter,
+  FlatErrorSchema,
+  LoginResponseSchema,
+  SuccessSchema,
+  UserPayloadSchema,
+} from "../_shared/openapi.ts";
 
-export const authRouter = new Hono<{ Variables: Variables }>();
+export const authRouter = createOpenApiRouter();
 
 // =========================
 // Zod Validation Schemas
@@ -90,13 +99,349 @@ export const InviteUserBodySchema = z.object({
 });
 
 // =========================
+// OpenAPI Route Definitions
+// =========================
+
+const loginRoute = {
+  method: "post" as const,
+  path: "/login",
+  tags: ["auth"],
+  request: {
+    body: {
+      content: {
+        "application/json": { schema: LoginBodySchema },
+      },
+    },
+  },
+  responses: {
+    200: {
+      description: "Authenticated session payload or 2FA challenge",
+      content: {
+        "application/json": { schema: LoginResponseSchema },
+      },
+    },
+    400: {
+      description: "Validation error",
+      content: {
+        "application/json": { schema: FlatErrorSchema },
+      },
+    },
+    401: {
+      description: "Invalid credentials",
+      content: {
+        "application/json": { schema: FlatErrorSchema },
+      },
+    },
+  },
+};
+
+const signupRoute = {
+  method: "post" as const,
+  path: "/signup",
+  tags: ["auth"],
+  // No request body declared: the handler never reads one and always
+  // responds 403 — declaring a schema would make validation (400) fire
+  // before the invitation-only gate.
+  responses: {
+    403: {
+      description: "Public registration is disabled (invitation-only)",
+      content: {
+        "application/json": { schema: FlatErrorSchema },
+      },
+    },
+  },
+};
+
+const logoutRoute = {
+  method: "post" as const,
+  path: "/logout",
+  tags: ["auth"],
+  responses: {
+    200: {
+      description: "Signed out",
+      content: {
+        "application/json": { schema: SuccessSchema },
+      },
+    },
+    401: {
+      description: "Unauthorized",
+      content: {
+        "application/json": { schema: FlatErrorSchema },
+      },
+    },
+  },
+};
+
+const forgotPasswordRoute = {
+  method: "post" as const,
+  path: "/forgot-password",
+  tags: ["auth"],
+  request: {
+    body: {
+      content: {
+        "application/json": { schema: ForgotPasswordBodySchema },
+      },
+    },
+  },
+  responses: {
+    200: {
+      description: "Reset link sent",
+      content: {
+        "application/json": { schema: SuccessSchema },
+      },
+    },
+    400: {
+      description: "Validation or send error",
+      content: {
+        "application/json": { schema: FlatErrorSchema },
+      },
+    },
+  },
+};
+
+const resetPasswordRoute = {
+  method: "post" as const,
+  path: "/reset-password",
+  tags: ["auth"],
+  request: {
+    body: {
+      content: {
+        "application/json": { schema: ResetPasswordBodySchema },
+      },
+    },
+  },
+  responses: {
+    200: {
+      description: "Password updated",
+      content: {
+        "application/json": { schema: SuccessSchema },
+      },
+    },
+    400: {
+      description: "Validation error",
+      content: {
+        "application/json": { schema: FlatErrorSchema },
+      },
+    },
+    401: {
+      description: "Invalid or expired token",
+      content: {
+        "application/json": { schema: FlatErrorSchema },
+      },
+    },
+  },
+};
+
+const changePasswordRoute = {
+  method: "post" as const,
+  path: "/change-password",
+  tags: ["auth"],
+  request: {
+    body: {
+      content: {
+        "application/json": { schema: ChangePasswordBodySchema },
+      },
+    },
+  },
+  responses: {
+    200: {
+      description: "Password updated",
+      content: {
+        "application/json": { schema: SuccessSchema },
+      },
+    },
+    400: {
+      description: "Validation error",
+      content: {
+        "application/json": { schema: FlatErrorSchema },
+      },
+    },
+    401: {
+      description: "Unauthorized",
+      content: {
+        "application/json": { schema: FlatErrorSchema },
+      },
+    },
+  },
+};
+
+const magicLinkRoute = {
+  method: "post" as const,
+  path: "/magic-link",
+  tags: ["auth"],
+  request: {
+    body: {
+      content: {
+        "application/json": { schema: MagicLinkBodySchema },
+      },
+    },
+  },
+  responses: {
+    200: {
+      description: "Magic link sent",
+      content: {
+        "application/json": { schema: SuccessSchema },
+      },
+    },
+    400: {
+      description: "Validation, redirect or send error",
+      content: {
+        "application/json": { schema: FlatErrorSchema },
+      },
+    },
+  },
+};
+
+const verifyOtpRoute = {
+  method: "post" as const,
+  path: "/verify",
+  tags: ["auth"],
+  request: {
+    body: {
+      content: {
+        "application/json": { schema: VerifyOtpBodySchema },
+      },
+    },
+  },
+  responses: {
+    200: {
+      description: "Authenticated session payload",
+      content: {
+        "application/json": { schema: UserPayloadSchema },
+      },
+    },
+    400: {
+      description: "Validation error",
+      content: {
+        "application/json": { schema: FlatErrorSchema },
+      },
+    },
+    401: {
+      description: "Invalid or expired token",
+      content: {
+        "application/json": { schema: FlatErrorSchema },
+      },
+    },
+  },
+};
+
+const inviteRoute = {
+  method: "post" as const,
+  path: "/invite",
+  tags: ["auth"],
+  request: {
+    body: {
+      content: {
+        // Partial so the admin-role gate (403) fires before body
+        // validation (400), preserving the legacy precedence.
+        "application/json": { schema: InviteUserBodySchema.partial() },
+      },
+    },
+  },
+  responses: {
+    200: {
+      description: "Invite sent",
+      content: {
+        "application/json": {
+          schema: z.object({
+            success: z.boolean(),
+            user: z.object({ id: z.string() }).passthrough(),
+          }),
+        },
+      },
+    },
+    400: {
+      description: "Invite error",
+      content: {
+        "application/json": { schema: FlatErrorSchema },
+      },
+    },
+    403: {
+      description: "Admin role required",
+      content: {
+        "application/json": { schema: FlatErrorSchema },
+      },
+    },
+  },
+};
+
+const refreshRoute = {
+  method: "post" as const,
+  path: "/refresh",
+  tags: ["auth"],
+  // The refresh token is accepted either in the x-refresh-token header (iOS
+  // silent refresh, body absent) or the body. The body schema is partial so
+  // header-driven requests with an empty body keep working.
+  request: {
+    body: {
+      content: {
+        "application/json": { schema: RefreshBodySchema.partial() },
+      },
+    },
+  },
+  responses: {
+    200: {
+      description: "Refreshed session payload",
+      content: {
+        "application/json": { schema: UserPayloadSchema },
+      },
+    },
+    400: {
+      description: "Validation error",
+      content: {
+        "application/json": { schema: FlatErrorSchema },
+      },
+    },
+    401: {
+      description: "Invalid or expired refresh token",
+      content: {
+        "application/json": { schema: FlatErrorSchema },
+      },
+    },
+  },
+};
+
+const authorizeRoute = {
+  method: "post" as const,
+  path: "/authorize",
+  tags: ["auth"],
+  request: {
+    body: {
+      content: {
+        "application/json": { schema: AuthorizeBodySchema },
+      },
+    },
+  },
+  responses: {
+    200: {
+      description: "Session payload",
+      content: {
+        "application/json": { schema: UserPayloadSchema },
+      },
+    },
+    400: {
+      description: "Validation error",
+      content: {
+        "application/json": { schema: FlatErrorSchema },
+      },
+    },
+    401: {
+      description: "No valid session",
+      content: {
+        "application/json": { schema: FlatErrorSchema },
+      },
+    },
+  },
+};
+
+// =========================
 // Auth Route Handlers
 // =========================
 
 /**
  * Login - Authenticate user with username/email and password
  */
-authRouter.post("/login", async (c) => {
+authRouter.openapi(loginRoute, async (c) => {
   try {
     const supabaseUrl = c.get("supabaseUrl");
     const serviceRoleKey = c.get("serviceRoleKey");
@@ -172,7 +517,7 @@ authRouter.post("/login", async (c) => {
         nonce,
       );
       return c.json({
-        requires2FA: true,
+        requires2FA: true as const,
         userId: authData.user.id,
         email: authData.user.email,
         tempToken,
@@ -227,7 +572,7 @@ authRouter.post("/login", async (c) => {
  * Public self-registration is disabled. New users can only be created
  * by admins via POST /api/auth/invite.
  */
-authRouter.post("/signup", async (c) => {
+authRouter.openapi(signupRoute, async (c) => {
   return c.json({
     error:
       "Public registration is disabled. Please contact an administrator for an invitation.",
@@ -238,7 +583,7 @@ authRouter.post("/signup", async (c) => {
 /**
  * Logout - Sign out user
  */
-authRouter.post("/logout", async (c) => {
+authRouter.openapi(logoutRoute, async (c) => {
   try {
     const supabase = c.get("supabase");
     const jwt = c.req.header("Authorization")?.replace("Bearer ", "").trim() ||
@@ -273,7 +618,7 @@ authRouter.post("/logout", async (c) => {
 /**
  * Forgot Password - Send password reset email
  */
-authRouter.post("/forgot-password", async (c) => {
+authRouter.openapi(forgotPasswordRoute, async (c) => {
   try {
     const supabaseUrl = c.get("supabaseUrl");
     const serviceRoleKey = c.get("serviceRoleKey");
@@ -329,7 +674,7 @@ authRouter.post("/forgot-password", async (c) => {
 /**
  * Reset Password - Set new password with token
  */
-authRouter.post("/reset-password", async (c) => {
+authRouter.openapi(resetPasswordRoute, async (c) => {
   try {
     const supabase = c.get("supabase");
     const body = await c.req.json();
@@ -406,7 +751,7 @@ authRouter.post("/reset-password", async (c) => {
 /**
  * Change Password - Update current user password
  */
-authRouter.post("/change-password", async (c) => {
+authRouter.openapi(changePasswordRoute, async (c) => {
   try {
     const body = await c.req.json();
 
@@ -469,7 +814,7 @@ authRouter.post("/change-password", async (c) => {
 /**
  * Magic Link - Send OTP login email
  */
-authRouter.post("/magic-link", async (c) => {
+authRouter.openapi(magicLinkRoute, async (c) => {
   try {
     const supabaseUrl = c.get("supabaseUrl");
     const serviceRoleKey = c.get("serviceRoleKey");
@@ -566,7 +911,7 @@ authRouter.post("/magic-link", async (c) => {
 /**
  * Verify OTP - Verify OTP token for Magic Link / Recovery
  */
-authRouter.post("/verify", async (c) => {
+authRouter.openapi(verifyOtpRoute, async (c) => {
   try {
     const supabaseUrl = c.get("supabaseUrl");
     const serviceRoleKey = c.get("serviceRoleKey");
@@ -638,7 +983,7 @@ authRouter.post("/verify", async (c) => {
 /**
  * Invite User - Invite new user by email (Admin only)
  */
-authRouter.post("/invite", async (c) => {
+authRouter.openapi(inviteRoute, async (c) => {
   try {
     const user = c.get("user");
     if (!requireAdminRole(user)) {
@@ -695,7 +1040,7 @@ authRouter.post("/invite", async (c) => {
 /**
  * Refresh - Get new access token using refresh token
  */
-authRouter.post("/refresh", async (c) => {
+authRouter.openapi(refreshRoute, async (c) => {
   try {
     const supabase = c.get("supabase");
     const supabaseUrl = c.get("supabaseUrl");
@@ -781,7 +1126,7 @@ authRouter.post("/refresh", async (c) => {
  * Authorize - Validate JWT and return full user context
  * Used by mobile clients for session initialization
  */
-authRouter.post("/authorize", async (c) => {
+authRouter.openapi(authorizeRoute, async (c) => {
   try {
     const supabase = c.get("supabase");
     const supabaseUrl = c.get("supabaseUrl");

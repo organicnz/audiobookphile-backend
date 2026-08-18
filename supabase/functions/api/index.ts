@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { OpenAPIHono } from "@hono/zod-openapi";
 import { cors } from "hono/cors";
 import { compress } from "hono/compress";
 import { createClient } from "npm:@supabase/supabase-js@2.44.0";
@@ -31,8 +32,17 @@ import { Variables } from "./_shared/types.ts";
 import { ApiError, serviceRoleMiddleware } from "./_shared/errors.ts";
 import { authMiddleware } from "./_shared/auth.ts";
 import { runContractChecks } from "./_shared/contracts.ts";
+import { HealthResponseSchema } from "./_shared/openapi.ts";
 
-const app = new Hono<{ Variables: Variables }>();
+const app = new OpenAPIHono<{ Variables: Variables }>({
+  defaultHook: (result, c) => {
+    if (!result.success) {
+      const message = result.error?.issues?.[0]?.message ||
+        "Validation error";
+      return c.json({ error: message, code: "VALIDATION_ERROR" }, 400);
+    }
+  },
+});
 
 // === MIDDLEWARE CHAIN ===
 // Order matters: CORS → health → logging → error handling → auth → service role → routes
@@ -95,7 +105,21 @@ app.use("/api/*", async (c, next) => {
 });
 
 // 3. Health check (before auth so it's always accessible)
-app.get("/api/health", async (c) => {
+const healthDoc = {
+  method: "get" as const,
+  path: "/api/health",
+  tags: ["system"],
+  responses: {
+    200: {
+      description:
+        "Service health, database connectivity and API contract status",
+      content: {
+        "application/json": { schema: HealthResponseSchema },
+      },
+    },
+  },
+};
+const healthHandler = async (c: any) => {
   const zaiConfigured = Boolean(
     Deno.env.get("ZAI_API_KEY") || Deno.env.get("ZHIPU_API_KEY"),
   );
@@ -143,7 +167,8 @@ app.get("/api/health", async (c) => {
   }
 
   return c.json(payload);
-});
+};
+app.openapi(healthDoc, healthHandler);
 
 // 4. Structured Logging Middleware
 app.use(async (c, next) => {

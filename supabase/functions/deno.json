@@ -3,8 +3,9 @@
   "imports": {
     "@supabase/functions-js": "jsr:@supabase/functions-js@^2",
     "@supabase/supabase-js": "npm:@supabase/supabase-js@2.44.0",
-    "zod": "npm:zod@3.23.8",
-    "hono": "npm:hono@4.4.0",
+    "zod": "npm:zod@3.25.76",
+    "hono": "npm:hono@4.13.2",
+    "@hono/zod-openapi": "npm:@hono/zod-openapi@0.19.4",
     "@aws-sdk/client-s3": "npm:@aws-sdk/client-s3@3.1085.0",
     "@aws-sdk/s3-request-presigner": "npm:@aws-sdk/s3-request-presigner@3.1085.0",
     "music-metadata": "npm:music-metadata@10.2.0",

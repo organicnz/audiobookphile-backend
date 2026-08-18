@@ -10,7 +10,7 @@
  * that protected routes still reject unauthenticated requests with the
  * standard error envelope, which doubles as an auth regression probe.
  */
-import { z } from "npm:zod@3.24.1";
+import { z } from "zod";
 import type { Hono } from "hono";
 import type { Variables } from "./types.ts";
 

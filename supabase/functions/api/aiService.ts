@@ -1,6 +1,5 @@
-import { createClient } from "npm:@supabase/supabase-js@2.44.0";
-import { Context, Hono } from "npm:hono@^4.6.0";
-import { z } from "npm:zod@^3.23.8";
+import { Hono } from "hono";
+import { z } from "zod";
 import { zValidator } from "npm:@hono/zod-validator@^0.4.0";
 import { ApiError } from "./_shared/errors.ts";
 import { Variables } from "./_shared/types.ts";
