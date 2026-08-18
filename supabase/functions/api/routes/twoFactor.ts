@@ -1,7 +1,5 @@
-import { Hono } from "hono";
-import { z } from "zod";
+import { createOpenApiRouter, z } from "../_shared/openapi.ts";
 import { createClient } from "npm:@supabase/supabase-js@2.44.0";
-import { Variables } from "../_shared/types.ts";
 import {
   generateTotpSecret,
   generateTotpUri,
@@ -18,7 +16,7 @@ import {
 } from "../_shared/twoFactorGuard.ts";
 import { mintSessionFor2FAUser } from "../_shared/sessions.ts";
 
-export const twoFactorRouter = new Hono<{ Variables: Variables }>();
+export const twoFactorRouter = createOpenApiRouter();
 
 const VerifyCodeSchema = z.object({
   code: z.string().min(6, "6-digit code is required"),
@@ -49,10 +47,232 @@ const VerifyLoginSchema = z.object({
   method: z.enum(["totp", "pin", "biometric"]).optional(),
 });
 
+const ErrorSchema = z.object({ error: z.string() });
+const UnauthorizedSchema = z.object({ error: z.string() });
+const TooManyRequestsSchema = z.object({
+  error: z.string(),
+  seconds: z.number().optional(),
+});
+
+const statusRoute = {
+  method: "get" as const,
+  path: "/status",
+  tags: ["2fa"],
+  responses: {
+    200: {
+      description: "2FA status for the authenticated user",
+      content: {
+        "application/json": { schema: z.record(z.string(), z.any()) },
+      },
+    },
+    401: {
+      description: "Unauthorized",
+      content: { "application/json": { schema: UnauthorizedSchema } },
+    },
+    500: {
+      description: "Server error",
+      content: { "application/json": { schema: ErrorSchema } },
+    },
+  },
+};
+
+const enrollRoute = {
+  method: "post" as const,
+  path: "/enroll",
+  tags: ["2fa"],
+  responses: {
+    200: {
+      description: "Enroll in 2FA",
+      content: {
+        "application/json": { schema: z.record(z.string(), z.any()) },
+      },
+    },
+    401: {
+      description: "Unauthorized",
+      content: { "application/json": { schema: UnauthorizedSchema } },
+    },
+    500: {
+      description: "Server error",
+      content: { "application/json": { schema: ErrorSchema } },
+    },
+  },
+};
+
+const enrollPinRoute = {
+  method: "post" as const,
+  path: "/enroll-pin",
+  tags: ["2fa"],
+  request: {
+    body: { content: { "application/json": { schema: EnrollPinSchema } } },
+  },
+  responses: {
+    200: {
+      description: "Enroll in PIN Code 2FA",
+      content: {
+        "application/json": { schema: z.record(z.string(), z.any()) },
+      },
+    },
+    400: {
+      description: "Validation error",
+      content: { "application/json": { schema: ErrorSchema } },
+    },
+    401: {
+      description: "Unauthorized",
+      content: { "application/json": { schema: UnauthorizedSchema } },
+    },
+    404: {
+      description: "Profile not found",
+      content: { "application/json": { schema: ErrorSchema } },
+    },
+    500: {
+      description: "Server error",
+      content: { "application/json": { schema: ErrorSchema } },
+    },
+  },
+};
+
+const enrollBiometricRoute = {
+  method: "post" as const,
+  path: "/enroll-biometric",
+  tags: ["2fa"],
+  request: {
+    body: {
+      content: { "application/json": { schema: EnrollBiometricSchema } },
+    },
+  },
+  responses: {
+    200: {
+      description: "Enroll in Biometric 2FA",
+      content: {
+        "application/json": { schema: z.record(z.string(), z.any()) },
+      },
+    },
+    400: {
+      description: "Validation error",
+      content: { "application/json": { schema: ErrorSchema } },
+    },
+    401: {
+      description: "Unauthorized",
+      content: { "application/json": { schema: UnauthorizedSchema } },
+    },
+    404: {
+      description: "Profile not found",
+      content: { "application/json": { schema: ErrorSchema } },
+    },
+    500: {
+      description: "Server error",
+      content: { "application/json": { schema: ErrorSchema } },
+    },
+  },
+};
+
+const verifyRoute = {
+  method: "post" as const,
+  path: "/verify",
+  tags: ["2fa"],
+  request: {
+    body: { content: { "application/json": { schema: VerifyCodeSchema } } },
+  },
+  responses: {
+    200: {
+      description: "Confirm and activate 2FA enrollment",
+      content: {
+        "application/json": { schema: z.record(z.string(), z.any()) },
+      },
+    },
+    400: {
+      description: "Validation error or invalid code",
+      content: { "application/json": { schema: ErrorSchema } },
+    },
+    401: {
+      description: "Unauthorized",
+      content: { "application/json": { schema: UnauthorizedSchema } },
+    },
+    500: {
+      description: "Server error",
+      content: { "application/json": { schema: ErrorSchema } },
+    },
+  },
+};
+
+const disableRoute = {
+  method: "post" as const,
+  path: "/disable",
+  tags: ["2fa"],
+  request: {
+    body: { content: { "application/json": { schema: DisableSchema } } },
+  },
+  responses: {
+    200: {
+      description: "Disable 2FA",
+      content: {
+        "application/json": { schema: z.record(z.string(), z.any()) },
+      },
+    },
+    400: {
+      description: "Validation error or unauthorized code/password",
+      content: { "application/json": { schema: ErrorSchema } },
+    },
+    401: {
+      description: "Unauthorized",
+      content: { "application/json": { schema: UnauthorizedSchema } },
+    },
+    404: {
+      description: "Profile not found",
+      content: { "application/json": { schema: ErrorSchema } },
+    },
+    429: {
+      description: "Rate limit lockout",
+      content: { "application/json": { schema: TooManyRequestsSchema } },
+    },
+    500: {
+      description: "Server error",
+      content: { "application/json": { schema: ErrorSchema } },
+    },
+  },
+};
+
+const verifyLoginRoute = {
+  method: "post" as const,
+  path: "/verify-login",
+  tags: ["2fa"],
+  request: {
+    body: { content: { "application/json": { schema: VerifyLoginSchema } } },
+  },
+  responses: {
+    200: {
+      description: "Session Payload",
+      content: {
+        "application/json": { schema: z.record(z.string(), z.any()) },
+      },
+    },
+    400: {
+      description: "Validation error",
+      content: { "application/json": { schema: ErrorSchema } },
+    },
+    401: {
+      description: "Unauthorized or invalid code",
+      content: { "application/json": { schema: UnauthorizedSchema } },
+    },
+    404: {
+      description: "Profile not found",
+      content: { "application/json": { schema: ErrorSchema } },
+    },
+    429: {
+      description: "Rate limit lockout",
+      content: { "application/json": { schema: TooManyRequestsSchema } },
+    },
+    500: {
+      description: "Server error",
+      content: { "application/json": { schema: ErrorSchema } },
+    },
+  },
+};
+
 /**
  * GET /status - Get 2FA status for the authenticated user
  */
-twoFactorRouter.get("/status", async (c) => {
+twoFactorRouter.openapi(statusRoute, async (c) => {
   const user = c.get("user");
   if (!user) {
     return c.json({ error: "Unauthorized" }, 401);
@@ -119,7 +339,7 @@ twoFactorRouter.get("/status", async (c) => {
 /**
  * POST /enroll - Enroll in 2FA (generate secret and QR URI)
  */
-twoFactorRouter.post("/enroll", async (c) => {
+twoFactorRouter.openapi(enrollRoute, async (c) => {
   const user = c.get("user");
   if (!user) {
     return c.json({ error: "Unauthorized" }, 401);
@@ -159,7 +379,7 @@ twoFactorRouter.post("/enroll", async (c) => {
 /**
  * POST /enroll-pin - Enroll in PIN Code 2FA
  */
-twoFactorRouter.post("/enroll-pin", async (c) => {
+twoFactorRouter.openapi(enrollPinRoute, async (c) => {
   const user = c.get("user");
   if (!user) {
     return c.json({ error: "Unauthorized" }, 401);
@@ -221,7 +441,7 @@ twoFactorRouter.post("/enroll-pin", async (c) => {
 /**
  * POST /enroll-biometric - Enroll in Facial 2FA / Biometric Sign-In
  */
-twoFactorRouter.post("/enroll-biometric", async (c) => {
+twoFactorRouter.openapi(enrollBiometricRoute, async (c) => {
   const user = c.get("user");
   if (!user) {
     return c.json({ error: "Unauthorized" }, 401);
@@ -284,7 +504,7 @@ twoFactorRouter.post("/enroll-biometric", async (c) => {
 /**
  * POST /verify - Confirm and activate 2FA enrollment with 6-digit code
  */
-twoFactorRouter.post("/verify", async (c) => {
+twoFactorRouter.openapi(verifyRoute, async (c) => {
   const user = c.get("user");
   if (!user) {
     return c.json({ error: "Unauthorized" }, 401);
@@ -351,7 +571,7 @@ twoFactorRouter.post("/verify", async (c) => {
 /**
  * POST /disable - Disable 2FA with verification code or password
  */
-twoFactorRouter.post("/disable", async (c) => {
+twoFactorRouter.openapi(disableRoute, async (c) => {
   const user = c.get("user");
   if (!user) {
     return c.json({ error: "Unauthorized" }, 401);
@@ -472,7 +692,7 @@ twoFactorRouter.post("/disable", async (c) => {
 /**
  * POST /verify-login - Verify 2FA challenge during sign in
  */
-twoFactorRouter.post("/verify-login", async (c) => {
+twoFactorRouter.openapi(verifyLoginRoute, async (c) => {
   const supabaseUrl = c.get("supabaseUrl");
   const serviceRoleKey = c.get("serviceRoleKey");
   const adminSupabase = createClient(supabaseUrl, serviceRoleKey);

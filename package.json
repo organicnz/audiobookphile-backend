@@ -18,7 +18,7 @@
     "@aws-sdk/s3-request-presigner": "^3.1085.0"
   },
   "devDependencies": {
-    "@evilmartians/lefthook": "^2.1.9",
+    "@evilmartians/lefthook": "^2.1.10",
     "supabase": "^2.98.2"
   }
 }
