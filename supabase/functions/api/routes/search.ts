@@ -1,7 +1,7 @@
-import { z } from "zod";
-import { Hono } from "hono";
-import { Variables } from "../_shared/types.ts";
+import { createOpenApiRouter, z } from "../_shared/openapi.ts";
 import { LibraryItemWithBooks, mapBookForMobile } from "../../api/mappers.ts";
+
+export const searchRouter = createOpenApiRouter();
 
 // ===== Zod schemas for search endpoints =====
 const SmartSearchBodySchema = z.object({
@@ -14,9 +14,135 @@ const GenerateEmbeddingBodySchema = z.object({
   input: z.string().max(4096).optional(),
 });
 
-export const searchRouter = new Hono<{ Variables: Variables }>();
+const ServerErrorSchema = z.object({ error: z.string() });
+const HistoryResultSchema = z.array(z.record(z.string(), z.any()));
+const HistoryCreateSchema = z.object({ query: z.string() });
+const SuccessSchema = z.object({ success: z.boolean() });
+const SmartSearchResultSchema = z.object({
+  results: z.array(z.record(z.string(), z.any())),
+  searchIntent: z.record(z.string(), z.any()),
+});
+const EmbeddingResultSchema = z.object({
+  embedding: z.array(z.number()),
+  model: z.string(),
+});
 
-searchRouter.get("/history", async (c) => {
+const getHistoryRoute = {
+  method: "get" as const,
+  path: "/history",
+  tags: ["search"],
+  responses: {
+    200: {
+      description: "Get search history",
+      content: { "application/json": { schema: HistoryResultSchema } },
+    },
+    500: {
+      description: "Database error",
+      content: { "application/json": { schema: ServerErrorSchema } },
+    },
+  },
+};
+
+const createHistoryRoute = {
+  method: "post" as const,
+  path: "/history",
+  tags: ["search"],
+  request: {
+    body: {
+      content: { "application/json": { schema: HistoryCreateSchema } },
+    },
+  },
+  responses: {
+    201: {
+      description: "History created",
+      content: {
+        "application/json": { schema: z.record(z.string(), z.any()) },
+      },
+    },
+    400: {
+      description: "Invalid payload",
+      content: {
+        "application/json": { schema: z.record(z.string(), z.any()) },
+      },
+    },
+    500: {
+      description: "Database error",
+      content: { "application/json": { schema: ServerErrorSchema } },
+    },
+  },
+};
+
+const deleteHistoryRoute = {
+  method: "delete" as const,
+  path: "/history",
+  tags: ["search"],
+  responses: {
+    200: {
+      description: "History deleted",
+      content: { "application/json": { schema: SuccessSchema } },
+    },
+    500: {
+      description: "Database error",
+      content: { "application/json": { schema: ServerErrorSchema } },
+    },
+  },
+};
+
+const createSmartSearchRoute = (path: string) => ({
+  method: "post" as const,
+  path,
+  tags: ["search"],
+  request: {
+    body: {
+      content: { "application/json": { schema: SmartSearchBodySchema } },
+    },
+  },
+  responses: {
+    200: {
+      description: "Search results",
+      content: { "application/json": { schema: SmartSearchResultSchema } },
+    },
+    400: {
+      description: "Invalid payload",
+      content: {
+        "application/json": { schema: z.record(z.string(), z.any()) },
+      },
+    },
+    500: {
+      description: "Server error",
+      content: { "application/json": { schema: ServerErrorSchema } },
+    },
+  },
+});
+
+const createEmbeddingRoute = (path: string) => ({
+  method: "post" as const,
+  path,
+  tags: ["search"],
+  request: {
+    body: {
+      content: { "application/json": { schema: GenerateEmbeddingBodySchema } },
+    },
+  },
+  responses: {
+    200: {
+      description: "Embedding generated",
+      content: { "application/json": { schema: EmbeddingResultSchema } },
+    },
+    400: {
+      description: "Invalid payload",
+      content: {
+        "application/json": { schema: z.record(z.string(), z.any()) },
+      },
+    },
+    500: {
+      description: "Server error",
+      content: { "application/json": { schema: ServerErrorSchema } },
+    },
+  },
+});
+
+searchRouter.openapi(getHistoryRoute, async (c) => {
   const supabase = c.get("supabase");
   const user = c.get("user")!;
 
@@ -28,10 +154,10 @@ searchRouter.get("/history", async (c) => {
     return c.json({ error: error.message }, 500);
   }
 
-  return c.json(history);
+  return c.json(history, 200);
 });
 
-searchRouter.post("/history", async (c) => {
+searchRouter.openapi(createHistoryRoute, async (c) => {
   const supabase = c.get("supabase");
   const user = c.get("user")!;
 
@@ -68,7 +194,7 @@ searchRouter.post("/history", async (c) => {
   return c.json(newHistory, 201);
 });
 
-searchRouter.delete("/history", async (c) => {
+searchRouter.openapi(deleteHistoryRoute, async (c) => {
   const supabase = c.get("supabase");
   const user = c.get("user")!;
 
@@ -81,7 +207,7 @@ searchRouter.delete("/history", async (c) => {
     return c.json({ error: error.message }, 500);
   }
 
-  return c.json({ success: true });
+  return c.json({ success: true }, 200);
 });
 
 async function handleSmartSearch(c: any) {
@@ -164,12 +290,15 @@ async function handleSmartSearch(c: any) {
     mapBookForMobile(item as unknown as LibraryItemWithBooks)
   );
 
-  return c.json({ results: formattedResults, searchIntent });
+  return c.json({ results: formattedResults, searchIntent }, 200);
 }
 
-searchRouter.post("/smart", handleSmartSearch);
-searchRouter.post("/semantic", handleSmartSearch);
-searchRouter.post("/search-semantic", handleSmartSearch);
+searchRouter.openapi(createSmartSearchRoute("/smart"), handleSmartSearch);
+searchRouter.openapi(createSmartSearchRoute("/semantic"), handleSmartSearch);
+searchRouter.openapi(
+  createSmartSearchRoute("/search-semantic"),
+  handleSmartSearch,
+);
 
 async function handleGenerateEmbedding(c: any) {
   let body;
@@ -216,11 +345,17 @@ async function handleGenerateEmbedding(c: any) {
     return c.json({
       embedding: aiData.data?.[0]?.embedding || [],
       model: "embedding-2",
-    });
+    }, 200);
   } catch (e: any) {
     return c.json({ error: e.message || "Embedding generation failed" }, 500);
   }
 }
 
-searchRouter.post("/generate-embedding", handleGenerateEmbedding);
-searchRouter.post("/embeddings/generate", handleGenerateEmbedding);
+searchRouter.openapi(
+  createEmbeddingRoute("/generate-embedding"),
+  handleGenerateEmbedding,
+);
+searchRouter.openapi(
+  createEmbeddingRoute("/embeddings/generate"),
+  handleGenerateEmbedding,
+);

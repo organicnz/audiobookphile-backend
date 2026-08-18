@@ -1,15 +1,13 @@
-import { z } from "zod";
-import { Hono } from "hono";
+import { createOpenApiRouter, z } from "../_shared/openapi.ts";
 
-import { Variables } from "../_shared/types.ts";
-export const playlistsRouter = new Hono<{ Variables: Variables }>();
+export const playlistsRouter = createOpenApiRouter();
 
 // ===== Zod schemas for playlist endpoints =====
 const PlaylistCreateSchema = z.object({
   libraryId: z.string().min(1),
   name: z.string().max(256).optional(),
   description: z.string().max(4096).optional(),
-  items: z.array(z.number()).optional(), // array of library item IDs (auto-ordered)
+  items: z.array(z.string()).optional(), // array of library item IDs (auto-ordered)
 });
 
 const PlaylistUpdateSchema = z.object({
@@ -17,7 +15,134 @@ const PlaylistUpdateSchema = z.object({
   description: z.string().max(4096).optional(),
 });
 
-playlistsRouter.post("/", async (c) => {
+const PlaylistItemsAddSchema = z.array(
+  z.object({
+    libraryItemId: z.string().uuid(),
+    order: z.number().optional(),
+  }),
+);
+
+const PlaylistItemDeleteSchema = z.object({
+  libraryItemId: z.string().uuid(),
+});
+
+const ServerErrorSchema = z.object({ error: z.string() });
+const PlaylistResultSchema = z.record(z.string(), z.any());
+
+const createPlaylistRoute = {
+  method: "post" as const,
+  path: "/",
+  tags: ["playlists"],
+  request: {
+    body: {
+      content: { "application/json": { schema: PlaylistCreateSchema } },
+    },
+  },
+  responses: {
+    200: {
+      description: "Playlist created",
+      content: { "application/json": { schema: PlaylistResultSchema } },
+    },
+    400: {
+      description: "Invalid payload",
+      content: {
+        "application/json": { schema: z.record(z.string(), z.any()) },
+      },
+    },
+    500: {
+      description: "Database error",
+      content: { "application/json": { schema: ServerErrorSchema } },
+    },
+  },
+};
+
+const updatePlaylistRoute = {
+  method: "patch" as const,
+  path: "/:id",
+  tags: ["playlists"],
+  request: {
+    params: z.object({ id: z.string() }),
+    body: {
+      content: {
+        "application/json": { schema: PlaylistUpdateSchema.partial() },
+      },
+    },
+  },
+  responses: {
+    200: {
+      description: "Playlist updated",
+      content: { "application/json": { schema: PlaylistResultSchema } },
+    },
+    400: {
+      description: "Invalid payload",
+      content: {
+        "application/json": { schema: z.record(z.string(), z.any()) },
+      },
+    },
+    500: {
+      description: "Database error",
+      content: { "application/json": { schema: ServerErrorSchema } },
+    },
+  },
+};
+
+const addPlaylistItemsRoute = {
+  method: "post" as const,
+  path: "/:id/items",
+  tags: ["playlists"],
+  request: {
+    params: z.object({ id: z.string() }),
+    body: {
+      content: { "application/json": { schema: PlaylistItemsAddSchema } },
+    },
+  },
+  responses: {
+    200: {
+      description: "Items added to playlist",
+      content: { "application/json": { schema: PlaylistResultSchema } },
+    },
+    400: {
+      description: "Invalid payload",
+      content: {
+        "application/json": { schema: z.record(z.string(), z.any()) },
+      },
+    },
+    500: {
+      description: "Database error",
+      content: { "application/json": { schema: ServerErrorSchema } },
+    },
+  },
+};
+
+const deletePlaylistItemRoute = {
+  method: "delete" as const,
+  path: "/:id/items",
+  tags: ["playlists"],
+  request: {
+    params: z.object({ id: z.string() }),
+    body: {
+      content: { "application/json": { schema: PlaylistItemDeleteSchema } },
+    },
+  },
+  responses: {
+    200: {
+      description: "Item removed from playlist",
+      content: { "application/json": { schema: PlaylistResultSchema } },
+    },
+    400: {
+      description: "Invalid payload",
+      content: {
+        "application/json": { schema: z.record(z.string(), z.any()) },
+      },
+    },
+    500: {
+      description: "Database error",
+      content: { "application/json": { schema: ServerErrorSchema } },
+    },
+  },
+};
+
+playlistsRouter.openapi(createPlaylistRoute, async (c) => {
   const supabase = c.get("supabase");
   const user = c.get("user")!;
 
@@ -41,7 +166,7 @@ playlistsRouter.post("/", async (c) => {
   if (items && items.length > 0) {
     for (const itemId of items) {
       try {
-        z.string().uuid().safeParse(itemId.toString());
+        z.string().uuid().parse(itemId);
       } catch (_e) {
         return c.json({ error: `Invalid library item ID: ${itemId}` }, 400);
       }
@@ -59,10 +184,13 @@ playlistsRouter.post("/", async (c) => {
     })
     .select()
     .single();
-  if (error) throw error;
+  if (error) {
+    console.error("[playlists] Create error:", error);
+    return c.json({ error: "Failed to create playlist" }, 500);
+  }
 
   if (items && items.length > 0) {
-    const playlistItems = items.map((item: any, index: number) => ({
+    const playlistItems = items.map((item: string, index: number) => ({
       id: crypto.randomUUID(),
       playlist_id: data.id,
       media_item_id: item,
@@ -71,12 +199,12 @@ playlistsRouter.post("/", async (c) => {
     }));
     await supabase.from("playlist_media_items").insert(playlistItems);
   }
-  return c.json(data);
+  return c.json(data, 200);
 });
 
-playlistsRouter.patch("/:id", async (c) => {
+playlistsRouter.openapi(updatePlaylistRoute, async (c) => {
   const supabase = c.get("supabase");
-  const playlistId = c.req.param("id");
+  const { id: playlistId } = c.req.valid("param");
 
   let body;
   try {
@@ -102,13 +230,16 @@ playlistsRouter.patch("/:id", async (c) => {
     .eq("id", playlistId)
     .select()
     .single();
-  if (error) throw error;
-  return c.json(data);
+  if (error) {
+    console.error("[playlists] Update error:", error);
+    return c.json({ error: "Failed to update playlist" }, 500);
+  }
+  return c.json(data, 200);
 });
 
-playlistsRouter.post("/:id/items", async (c) => {
+playlistsRouter.openapi(addPlaylistItemsRoute, async (c) => {
   const supabase = c.get("supabase");
-  const playlistId = c.req.param("id");
+  const { id: playlistId } = c.req.valid("param");
 
   let rows;
   try {
@@ -117,26 +248,9 @@ playlistsRouter.post("/:id/items", async (c) => {
     return c.json({ error: "Invalid JSON" }, 400);
   }
 
-  // Validate the payload structure (should be array of objects with libraryItemId)
-  if (!Array.isArray(rows)) {
-    return c.json({ error: "Payload must be an array" }, 400);
-  }
-
-  for (const r of rows) {
-    if (!r.libraryItemId || typeof r.libraryItemId !== "string") {
-      return c.json(
-        { error: "Each item must have a libraryItemId string" },
-        400,
-      );
-    }
-    try {
-      z.string().uuid().safeParse(r.libraryItemId);
-    } catch (_e) {
-      return c.json(
-        { error: `Invalid library item ID: ${r.libraryItemId}` },
-        400,
-      );
-    }
+  const parsed = PlaylistItemsAddSchema.safeParse(rows);
+  if (!parsed.success) {
+    return c.json({ error: parsed.error.flatten().fieldErrors }, 400);
   }
 
   const { count } = await supabase
@@ -147,14 +261,7 @@ playlistsRouter.post("/:id/items", async (c) => {
     })
     .eq("playlist_id", playlistId);
 
-  // Validate order field exists and is a number (optional)
-  for (const r of rows) {
-    if ("order" in r && typeof r.order !== "number") {
-      return c.json({ error: "'order' must be a number" }, 400);
-    }
-  }
-
-  const insertRows = rows.map((r: any, index: number) => ({
+  const insertRows = parsed.data.map((r, index: number) => ({
     id: crypto.randomUUID(),
     playlist_id: playlistId,
     media_item_id: r.libraryItemId,
@@ -166,122 +273,41 @@ playlistsRouter.post("/:id/items", async (c) => {
   const { data, error } = await supabase.from("playlists").select(
     "*, playlist_media_items(*)",
   ).eq("id", playlistId).single();
-  if (error) throw error;
-  return c.json(data);
-});
-
-playlistsRouter.delete("/:id/items", async (c) => {
-  const supabase = c.get("supabase");
-  const playlistId = c.req.param("id");
-  const item = await c.req.json();
-
-  let query = supabase.from("playlist_media_items").delete().eq(
-    "playlist_id",
-    playlistId,
-  ).eq("media_item_id", item.libraryItemId);
-  // If we had episode differentiation, we'd do it here, but media_item_id maps to library_item_id generally
-  await query;
-
-  const { data, error } = await supabase.from("playlists").select(
-    "*, playlist_media_items(*)",
-  ).eq("id", playlistId).single();
-  if (error) throw error;
-  return c.json(data);
-});
-
-playlistsRouter.post("/", async (c) => {
-  const supabase = c.get("supabase");
-  const user = c.get("user")!;
-  const { libraryId, name, description, items } = await c.req.json();
-  const newId = crypto.randomUUID();
-
-  const { data, error } = await supabase
-    .from("playlists")
-    .insert({
-      id: newId,
-      library_id: libraryId,
-      name,
-      description: description ?? null,
-      user_id: user.id,
-    })
-    .select()
-    .single();
-  if (error) throw error;
-
-  if (items && items.length > 0) {
-    const playlistItems = items.map((item: any, index: number) => ({
-      playlist_id: data.id,
-      media_item_id: item.libraryItemId,
-      order: index,
-      media_item_type: "book",
-    }));
-    await supabase.from("playlist_media_items").insert(playlistItems);
+  if (error) {
+    console.error("[playlists] Add items error:", error);
+    return c.json({ error: "Failed to add items to playlist" }, 500);
   }
-  return c.json(data);
+  return c.json(data, 200);
 });
 
-playlistsRouter.patch("/:id", async (c) => {
+playlistsRouter.openapi(deletePlaylistItemRoute, async (c) => {
   const supabase = c.get("supabase");
-  const playlistId = c.req.param("id");
-  const { name, description } = await c.req.json();
+  const { id: playlistId } = c.req.valid("param");
 
-  const { data, error } = await supabase
-    .from("playlists")
-    .update({
-      name,
-      description,
-    })
-    .eq("id", playlistId)
-    .select()
-    .single();
-  if (error) throw error;
-  return c.json(data);
-});
-
-playlistsRouter.post("/:id/items", async (c) => {
-  const supabase = c.get("supabase");
-  const playlistId = c.req.param("id");
-  const rows = await c.req.json(); // Array of items
-
-  const { count } = await supabase
-    .from("playlist_media_items")
-    .select("*", {
-      count: "exact",
-      head: true,
-    })
-    .eq("playlist_id", playlistId);
-
-  const insertRows = rows.map((r: any, index: number) => ({
-    id: crypto.randomUUID(),
-    playlist_id: playlistId,
-    media_item_id: r.libraryItemId,
-    order: (count ?? 0) + index,
-    media_item_type: "book",
-  }));
-  await supabase.from("playlist_media_items").insert(insertRows);
-
-  const { data, error } = await supabase.from("playlists").select(
-    "*, playlist_media_items(*)",
-  ).eq("id", playlistId).single();
-  if (error) throw error;
-  return c.json(data);
-});
-
-playlistsRouter.delete("/:id/items", async (c) => {
-  const supabase = c.get("supabase");
-  const playlistId = c.req.param("id");
-  const item = await c.req.json();
+  let body;
+  try {
+    body = await c.req.json();
+  } catch (_e) {
+    return c.json({ error: "Invalid JSON" }, 400);
+  }
+  const parsed = PlaylistItemDeleteSchema.safeParse(body);
+  if (!parsed.success) {
+    return c.json({ error: parsed.error.flatten().fieldErrors }, 400);
+  }
 
   let query = supabase.from("playlist_media_items").delete().eq(
     "playlist_id",
     playlistId,
-  ).eq("media_item_id", item.libraryItemId);
+  ).eq("media_item_id", parsed.data.libraryItemId);
   // If we had episode differentiation, we'd do it here, but media_item_id maps to library_item_id generally
   await query;
 
   const { data, error } = await supabase.from("playlists").select(
     "*, playlist_media_items(*)",
   ).eq("id", playlistId).single();
-  if (error) throw error;
-  return c.json(data);
+  if (error) {
+    console.error("[playlists] Delete item error:", error);
+    return c.json({ error: "Failed to delete item from playlist" }, 500);
+  }
+  return c.json(data, 200);
 });

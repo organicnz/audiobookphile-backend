@@ -1,11 +1,191 @@
-import { Hono } from "hono";
 import { createClient } from "npm:@supabase/supabase-js@2.44.0";
-import { Variables } from "../_shared/types.ts";
 import { requireAdminRole } from "../_shared/auth.ts";
+import { createOpenApiRouter, z } from "../_shared/openapi.ts";
 
-export const usersRouter = new Hono<{ Variables: Variables }>();
+export const usersRouter = createOpenApiRouter();
 
-usersRouter.get("/", async (c) => {
+const UserCreateSchema = z.object({
+  username: z.string().min(1),
+  password: z.string().min(6),
+  type: z.string().optional(),
+});
+
+const UserUpdateSchema = z.object({
+  username: z.string().min(1).optional(),
+  password: z.string().min(6).optional(),
+  type: z.string().optional(),
+});
+
+const ServerErrorSchema = z.object({ error: z.string() });
+const ForbiddenSchema = z.object({ error: z.string() });
+const UsersResultSchema = z.object({
+  users: z.array(z.record(z.string(), z.any())),
+});
+const SuccessIdSchema = z.object({ success: z.boolean(), id: z.string() });
+const SuccessSchema = z.object({ success: z.boolean() });
+const PreferencesResultSchema = z.object({
+  preferences: z.record(z.string(), z.any()),
+});
+
+const getUsersRoute = {
+  method: "get" as const,
+  path: "/",
+  tags: ["users"],
+  responses: {
+    200: {
+      description: "List users",
+      content: { "application/json": { schema: UsersResultSchema } },
+    },
+    403: {
+      description: "Admin role required",
+      content: { "application/json": { schema: ForbiddenSchema } },
+    },
+    500: {
+      description: "Database error",
+      content: { "application/json": { schema: ServerErrorSchema } },
+    },
+  },
+};
+
+const createUserRoute = {
+  method: "post" as const,
+  path: "/",
+  tags: ["users"],
+  responses: {
+    200: {
+      description: "User created",
+      content: { "application/json": { schema: SuccessIdSchema } },
+    },
+    400: {
+      description: "Invalid payload",
+      content: {
+        "application/json": { schema: z.record(z.string(), z.any()) },
+      },
+    },
+    403: {
+      description: "Admin role required",
+      content: { "application/json": { schema: ForbiddenSchema } },
+    },
+    500: {
+      description: "Database error",
+      content: { "application/json": { schema: ServerErrorSchema } },
+    },
+  },
+};
+
+const deleteUserRoute = {
+  method: "delete" as const,
+  path: "/:id",
+  tags: ["users"],
+  request: {
+    params: z.object({ id: z.string() }),
+  },
+  responses: {
+    200: {
+      description: "User deleted",
+      content: { "application/json": { schema: SuccessSchema } },
+    },
+    403: {
+      description: "Admin role required",
+      content: { "application/json": { schema: ForbiddenSchema } },
+    },
+    500: {
+      description: "Database error",
+      content: { "application/json": { schema: ServerErrorSchema } },
+    },
+  },
+};
+
+const updateUserRoute = {
+  method: "patch" as const,
+  path: "/:id",
+  tags: ["users"],
+  request: {
+    params: z.object({ id: z.string() }),
+    body: {
+      content: { "application/json": { schema: UserUpdateSchema } },
+    },
+  },
+  responses: {
+    200: {
+      description: "User updated",
+      content: { "application/json": { schema: SuccessSchema } },
+    },
+    400: {
+      description: "Invalid payload",
+      content: {
+        "application/json": { schema: z.record(z.string(), z.any()) },
+      },
+    },
+    403: {
+      description: "Admin role required",
+      content: { "application/json": { schema: ForbiddenSchema } },
+    },
+    500: {
+      description: "Database error",
+      content: { "application/json": { schema: ServerErrorSchema } },
+    },
+  },
+};
+
+const getPreferencesRoute = {
+  method: "get" as const,
+  path: "/me/preferences",
+  tags: ["users"],
+  responses: {
+    200: {
+      description: "Get user preferences",
+      content: { "application/json": { schema: PreferencesResultSchema } },
+    },
+    401: {
+      description: "Unauthorized",
+      content: {
+        "application/json": { schema: z.object({ error: z.string() }) },
+      },
+    },
+    500: {
+      description: "Database error",
+      content: { "application/json": { schema: ServerErrorSchema } },
+    },
+  },
+};
+
+const updatePreferencesRoute = {
+  method: "patch" as const,
+  path: "/me/preferences",
+  tags: ["users"],
+  request: {
+    body: {
+      content: {
+        "application/json": { schema: z.record(z.string(), z.any()) },
+      },
+    },
+  },
+  responses: {
+    200: {
+      description: "User preferences updated",
+      content: { "application/json": { schema: PreferencesResultSchema } },
+    },
+    400: {
+      description: "Invalid payload",
+      content: {
+        "application/json": { schema: z.object({ error: z.string() }) },
+      },
+    },
+    401: {
+      description: "Unauthorized",
+      content: {
+        "application/json": { schema: z.object({ error: z.string() }) },
+      },
+    },
+    500: {
+      description: "Database error",
+      content: { "application/json": { schema: ServerErrorSchema } },
+    },
+  },
+};
+
+usersRouter.openapi(getUsersRoute, async (c) => {
   const user = c.get("user")!;
   if (!requireAdminRole(user)) {
     return c.json({ error: "Forbidden: Admin access required" }, 403);
@@ -18,7 +198,10 @@ usersRouter.get("/", async (c) => {
   const { data: users, error } = await adminSupabase.from("profiles").select(
     "*",
   );
-  if (error) throw error;
+  if (error) {
+    console.error("[users] Get users error:", error);
+    return c.json({ error: "Failed to get users" }, 500);
+  }
 
   // Fetch auth info
   const { data: authUsers } = await adminSupabase.auth.admin.listUsers();
@@ -51,10 +234,10 @@ usersRouter.get("/", async (c) => {
     createdAt: new Date(u.created_at).getTime(),
   }));
 
-  return c.json({ users: formattedUsers });
+  return c.json({ users: formattedUsers }, 200);
 });
 
-usersRouter.post("/", async (c) => {
+usersRouter.openapi(createUserRoute, async (c) => {
   const user = c.get("user")!;
   if (!requireAdminRole(user)) {
     return c.json({ error: "Forbidden: Admin access required" }, 403);
@@ -63,39 +246,56 @@ usersRouter.post("/", async (c) => {
   const serviceRoleKey = c.get("serviceRoleKey");
 
   const adminSupabase = createClient(supabaseUrl, serviceRoleKey);
-  const body = await c.req.json();
-  const emailToUse = body.username.includes("@")
-    ? body.username
-    : `${body.username}@local.abp`;
+
+  let body;
+  try {
+    body = await c.req.json();
+  } catch (_e) {
+    return c.json({ error: "Invalid JSON" }, 400);
+  }
+  const parsed = UserCreateSchema.safeParse(body);
+  if (!parsed.success) {
+    return c.json({ error: parsed.error.flatten().fieldErrors }, 400);
+  }
+
+  const emailToUse = parsed.data.username.includes("@")
+    ? parsed.data.username
+    : `${parsed.data.username}@local.abp`;
 
   const { data: authData, error: authError } = await adminSupabase.auth.admin
     .createUser({
       email: emailToUse,
-      password: body.password,
+      password: parsed.data.password,
       email_confirm: true,
     });
-  if (authError) throw authError;
+  if (authError) {
+    console.error("[users] Create user auth error:", authError);
+    return c.json({ error: "Failed to create user auth" }, 500);
+  }
 
   const { error: profileError } = await adminSupabase
     .from("profiles")
     .update({
-      username: body.username,
-      user_type: body.type === "admin" ? "admin" : "user",
+      username: parsed.data.username,
+      user_type: parsed.data.type === "admin" ? "admin" : "user",
     })
     .eq("id", authData.user.id);
 
-  if (profileError) throw profileError;
+  if (profileError) {
+    console.error("[users] Create user profile error:", profileError);
+    return c.json({ error: "Failed to create user profile" }, 500);
+  }
 
-  return c.json({ success: true, id: authData.user.id });
+  return c.json({ success: true, id: authData.user.id }, 200);
 });
 
-usersRouter.delete("/:id", async (c) => {
+usersRouter.openapi(deleteUserRoute, async (c) => {
   const user = c.get("user")!;
   const supabaseUrl = c.get("supabaseUrl");
   const serviceRoleKey = c.get("serviceRoleKey");
   const adminSupabase = createClient(supabaseUrl, serviceRoleKey);
 
-  const userId = c.req.param("id");
+  const { id: userId } = c.req.valid("param");
 
   // Self-deletion is allowed; managing other users is strictly admin-only
   if (user.id !== userId && !requireAdminRole(user)) {
@@ -103,23 +303,35 @@ usersRouter.delete("/:id", async (c) => {
   }
 
   const { error } = await adminSupabase.auth.admin.deleteUser(userId);
-  if (error) throw error;
-  return c.json({ success: true });
+  if (error) {
+    console.error("[users] Delete user error:", error);
+    return c.json({ error: "Failed to delete user" }, 500);
+  }
+  return c.json({ success: true }, 200);
 });
 
-usersRouter.patch("/:id", async (c) => {
+usersRouter.openapi(updateUserRoute, async (c) => {
   const user = c.get("user")!;
   const supabaseUrl = c.get("supabaseUrl");
   const serviceRoleKey = c.get("serviceRoleKey");
   const adminSupabase = createClient(supabaseUrl, serviceRoleKey);
 
-  const userId = c.req.param("id");
+  const { id: userId } = c.req.valid("param");
 
-  const body = await c.req.json();
+  let body;
+  try {
+    body = await c.req.json();
+  } catch (_e) {
+    return c.json({ error: "Invalid JSON" }, 400);
+  }
+  const parsed = UserUpdateSchema.safeParse(body);
+  if (!parsed.success) {
+    return c.json({ error: parsed.error.flatten().fieldErrors }, 400);
+  }
 
   // Role changes are strictly admin-only and can never be applied to yourself
   // (prevents self-elevation). Any management of other users also requires admin.
-  if (body.type) {
+  if (parsed.data.type) {
     if (user.id === userId || !requireAdminRole(user)) {
       return c.json({ error: "Forbidden: Admin access required" }, 403);
     }
@@ -127,28 +339,36 @@ usersRouter.patch("/:id", async (c) => {
     return c.json({ error: "Forbidden: Admin access required" }, 403);
   }
 
-  if (body.password) {
+  if (parsed.data.password) {
     const { error: authError } = await adminSupabase.auth.admin.updateUserById(
       userId,
-      { password: body.password },
+      { password: parsed.data.password },
     );
-    if (authError) throw authError;
+    if (authError) {
+      console.error("[users] Update user auth error:", authError);
+      return c.json({ error: "Failed to update user auth" }, 500);
+    }
   }
 
-  if (body.type || body.username) {
+  if (parsed.data.type || parsed.data.username) {
     const updates: any = {};
-    if (body.type) updates.user_type = body.type === "admin" ? "admin" : "user";
-    if (body.username) updates.username = body.username;
+    if (parsed.data.type) {
+      updates.user_type = parsed.data.type === "admin" ? "admin" : "user";
+    }
+    if (parsed.data.username) updates.username = parsed.data.username;
     const { error: profileError } = await adminSupabase.from("profiles").update(
       updates,
     ).eq("id", userId);
-    if (profileError) throw profileError;
+    if (profileError) {
+      console.error("[users] Update user profile error:", profileError);
+      return c.json({ error: "Failed to update user profile" }, 500);
+    }
   }
 
-  return c.json({ success: true });
+  return c.json({ success: true }, 200);
 });
 
-usersRouter.get("/me/preferences", async (c) => {
+usersRouter.openapi(getPreferencesRoute, async (c) => {
   const user = c.get("user")!;
   if (!user || !user.id) return c.json({ error: "Unauthorized" }, 401);
 
@@ -159,7 +379,10 @@ usersRouter.get("/me/preferences", async (c) => {
   const { data: authUser, error } = await adminSupabase.auth.admin.getUserById(
     user.id,
   );
-  if (error) throw error;
+  if (error) {
+    console.error("[users] Get preferences error:", error);
+    return c.json({ error: "Failed to get user preferences" }, 500);
+  }
   const defaultPreferences = {
     jumpForwardTime: 30,
     jumpBackwardsTime: 10,
@@ -175,10 +398,10 @@ usersRouter.get("/me/preferences", async (c) => {
   };
   const userPrefs = authUser.user.user_metadata?.preferences || {};
   const preferences = { ...defaultPreferences, ...userPrefs };
-  return c.json({ preferences });
+  return c.json({ preferences }, 200);
 });
 
-usersRouter.patch("/me/preferences", async (c) => {
+usersRouter.openapi(updatePreferencesRoute, async (c) => {
   const user = c.get("user")!;
   if (!user || !user.id) return c.json({ error: "Unauthorized" }, 401);
 
@@ -186,11 +409,19 @@ usersRouter.patch("/me/preferences", async (c) => {
   const serviceRoleKey = c.get("serviceRoleKey");
   const adminSupabase = createClient(supabaseUrl, serviceRoleKey);
 
-  const body = await c.req.json();
+  let body;
+  try {
+    body = await c.req.json();
+  } catch (_e) {
+    return c.json({ error: "Invalid JSON" }, 400);
+  }
 
   const { data: authUser, error: getError } = await adminSupabase.auth.admin
     .getUserById(user.id);
-  if (getError) throw getError;
+  if (getError) {
+    console.error("[users] Get user metadata error:", getError);
+    return c.json({ error: "Failed to get user metadata" }, 500);
+  }
   const currentPreferences = authUser.user.user_metadata?.preferences || {};
 
   const newPreferences = { ...currentPreferences, ...body };
@@ -202,7 +433,10 @@ usersRouter.patch("/me/preferences", async (c) => {
   const { error } = await adminSupabase.auth.admin.updateUserById(user.id, {
     user_metadata: newMetadata,
   });
-  if (error) throw error;
+  if (error) {
+    console.error("[users] Update user metadata error:", error);
+    return c.json({ error: "Failed to update user metadata" }, 500);
+  }
 
-  return c.json({ preferences: newPreferences });
+  return c.json({ preferences: newPreferences }, 200);
 });

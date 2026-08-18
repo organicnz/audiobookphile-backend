@@ -1,15 +1,13 @@
-import { z } from "zod";
-import { Hono } from "hono";
+import { createOpenApiRouter, z } from "../_shared/openapi.ts";
 
-import { Variables } from "../_shared/types.ts";
-export const collectionsRouter = new Hono<{ Variables: Variables }>();
+export const collectionsRouter = createOpenApiRouter();
 
 // ===== Zod schemas for collection endpoints =====
 const CollectionCreateSchema = z.object({
   libraryId: z.string().min(1),
   name: z.string().max(256).optional(),
   description: z.string().max(4096).optional(),
-  items: z.array(z.number()).optional(), // array of item IDs to add (auto-ordered)
+  items: z.array(z.string()).optional(), // array of item IDs to add (auto-ordered)
 });
 
 const CollectionUpdateSchema = z.object({
@@ -17,9 +15,142 @@ const CollectionUpdateSchema = z.object({
   description: z.string().max(4096).optional(),
 });
 
-const CollectionItemsPayloadSchema = z.array(z.number()); // array of library item IDs
+const CollectionItemsPayloadSchema = z.array(z.string()); // array of library item IDs
 
-collectionsRouter.post("/", async (c) => {
+const ServerErrorSchema = z.object({ error: z.string() });
+const CollectionResultSchema = z.record(z.string(), z.any());
+const SuccessSchema = z.object({ success: z.boolean() });
+
+const createCollectionRoute = {
+  method: "post" as const,
+  path: "/",
+  tags: ["collections"],
+  request: {
+    body: {
+      content: { "application/json": { schema: CollectionCreateSchema } },
+    },
+  },
+  responses: {
+    200: {
+      description: "Collection created",
+      content: { "application/json": { schema: CollectionResultSchema } },
+    },
+    400: {
+      description: "Invalid payload",
+      content: {
+        "application/json": { schema: z.record(z.string(), z.any()) },
+      },
+    },
+    500: {
+      description: "Database error",
+      content: { "application/json": { schema: ServerErrorSchema } },
+    },
+  },
+};
+
+const updateCollectionRoute = {
+  method: "patch" as const,
+  path: "/:id",
+  tags: ["collections"],
+  request: {
+    params: z.object({ id: z.string() }),
+    body: {
+      content: {
+        "application/json": { schema: CollectionUpdateSchema.partial() },
+      },
+    },
+  },
+  responses: {
+    200: {
+      description: "Collection updated",
+      content: { "application/json": { schema: CollectionResultSchema } },
+    },
+    400: {
+      description: "Invalid payload",
+      content: {
+        "application/json": { schema: z.record(z.string(), z.any()) },
+      },
+    },
+    500: {
+      description: "Database error",
+      content: { "application/json": { schema: ServerErrorSchema } },
+    },
+  },
+};
+
+const deleteCollectionRoute = {
+  method: "delete" as const,
+  path: "/:id",
+  tags: ["collections"],
+  request: {
+    params: z.object({ id: z.string() }),
+  },
+  responses: {
+    200: {
+      description: "Collection deleted",
+      content: { "application/json": { schema: SuccessSchema } },
+    },
+    500: {
+      description: "Database error",
+      content: { "application/json": { schema: ServerErrorSchema } },
+    },
+  },
+};
+
+const addCollectionItemsRoute = {
+  method: "post" as const,
+  path: "/:id/items",
+  tags: ["collections"],
+  request: {
+    params: z.object({ id: z.string() }),
+    body: {
+      content: { "application/json": { schema: CollectionItemsPayloadSchema } },
+    },
+  },
+  responses: {
+    200: {
+      description: "Items added to collection",
+      content: { "application/json": { schema: CollectionResultSchema } },
+    },
+    400: {
+      description: "Invalid payload",
+      content: {
+        "application/json": { schema: z.record(z.string(), z.any()) },
+      },
+    },
+    500: {
+      description: "Database error",
+      content: { "application/json": { schema: ServerErrorSchema } },
+    },
+  },
+};
+
+const deleteCollectionItemRoute = {
+  method: "delete" as const,
+  path: "/:id/items/:itemId",
+  tags: ["collections"],
+  request: {
+    params: z.object({ id: z.string(), itemId: z.string() }),
+  },
+  responses: {
+    200: {
+      description: "Item removed from collection",
+      content: { "application/json": { schema: CollectionResultSchema } },
+    },
+    400: {
+      description: "Invalid payload",
+      content: {
+        "application/json": { schema: z.record(z.string(), z.any()) },
+      },
+    },
+    500: {
+      description: "Database error",
+      content: { "application/json": { schema: ServerErrorSchema } },
+    },
+  },
+};
+
+collectionsRouter.openapi(createCollectionRoute, async (c) => {
   const supabase = c.get("supabase");
 
   let body;
@@ -42,7 +173,7 @@ collectionsRouter.post("/", async (c) => {
   if (items && items.length > 0) {
     for (const itemId of items) {
       try {
-        z.string().uuid().safeParse(itemId.toString());
+        z.string().uuid().parse(itemId);
       } catch (_e) {
         return c.json({ error: `Invalid library item ID: ${itemId}` }, 400);
       }
@@ -59,10 +190,13 @@ collectionsRouter.post("/", async (c) => {
     })
     .select()
     .single();
-  if (error) throw error;
+  if (error) {
+    console.error("[collections] Create error:", error);
+    return c.json({ error: "Failed to create collection" }, 500);
+  }
 
   if (items && items.length > 0) {
-    const collectionItems = items.map((item: any, index: number) => ({
+    const collectionItems = items.map((item: string, index: number) => ({
       id: crypto.randomUUID(),
       collection_id: data.id,
       library_item_id: item,
@@ -70,12 +204,12 @@ collectionsRouter.post("/", async (c) => {
     }));
     await supabase.from("collection_items").insert(collectionItems);
   }
-  return c.json(data);
+  return c.json(data, 200);
 });
 
-collectionsRouter.patch("/:id", async (c) => {
+collectionsRouter.openapi(updateCollectionRoute, async (c) => {
   const supabase = c.get("supabase");
-  const collectionId = c.req.param("id");
+  const { id: collectionId } = c.req.valid("param");
 
   let body;
   try {
@@ -101,25 +235,31 @@ collectionsRouter.patch("/:id", async (c) => {
     .eq("id", collectionId)
     .select()
     .single();
-  if (error) throw error;
-  return c.json(data);
+  if (error) {
+    console.error("[collections] Update error:", error);
+    return c.json({ error: "Failed to update collection" }, 500);
+  }
+  return c.json(data, 200);
 });
 
-collectionsRouter.delete("/:id", async (c) => {
+collectionsRouter.openapi(deleteCollectionRoute, async (c) => {
   const supabase = c.get("supabase");
-  const collectionId = c.req.param("id");
+  const { id: collectionId } = c.req.valid("param");
 
   const { error } = await supabase.from("collections").delete().eq(
     "id",
     collectionId,
   );
-  if (error) throw error;
-  return c.json({ success: true });
+  if (error) {
+    console.error("[collections] Delete error:", error);
+    return c.json({ error: "Failed to delete collection" }, 500);
+  }
+  return c.json({ success: true }, 200);
 });
 
-collectionsRouter.post("/:id/items", async (c) => {
+collectionsRouter.openapi(addCollectionItemsRoute, async (c) => {
   const supabase = c.get("supabase");
-  const collectionId = c.req.param("id");
+  const { id: collectionId } = c.req.valid("param");
 
   let body;
   try {
@@ -137,7 +277,7 @@ collectionsRouter.post("/:id/items", async (c) => {
   // Validate each item ID as UUID
   for (const itemId of parsed.data) {
     try {
-      z.string().uuid().safeParse(itemId.toString());
+      z.string().uuid().parse(itemId);
     } catch (_e) {
       return c.json({ error: `Invalid library item ID: ${itemId}` }, 400);
     }
@@ -154,25 +294,27 @@ collectionsRouter.post("/:id/items", async (c) => {
   await supabase.from("collection_items").insert({
     id: newId,
     collection_id: collectionId,
-    library_item_id: parsed.data[0].toString(),
+    library_item_id: parsed.data[0],
     order: count ?? 0,
   });
 
   const { data, error } = await supabase.from("collections").select(
     "*, collection_items(*)",
   ).eq("id", collectionId).single();
-  if (error) throw error;
-  return c.json(data);
+  if (error) {
+    console.error("[collections] Add item error:", error);
+    return c.json({ error: "Failed to add item to collection" }, 500);
+  }
+  return c.json(data, 200);
 });
 
-collectionsRouter.delete("/:id/items/:itemId", async (c) => {
+collectionsRouter.openapi(deleteCollectionItemRoute, async (c) => {
   const supabase = c.get("supabase");
-  const collectionId = c.req.param("id");
-  const libraryItemId = c.req.param("itemId");
+  const { id: collectionId, itemId: libraryItemId } = c.req.valid("param");
 
   // Validate itemId as UUID before deleting
   try {
-    z.string().uuid().safeParse(libraryItemId);
+    z.string().uuid().parse(libraryItemId);
   } catch (_e) {
     return c.json({ error: `Invalid library item ID: ${libraryItemId}` }, 400);
   }
@@ -185,6 +327,9 @@ collectionsRouter.delete("/:id/items/:itemId", async (c) => {
   const { data, error } = await supabase.from("collections").select(
     "*, collection_items(*)",
   ).eq("id", collectionId).single();
-  if (error) throw error;
-  return c.json(data);
+  if (error) {
+    console.error("[collections] Delete item error:", error);
+    return c.json({ error: "Failed to delete item from collection" }, 500);
+  }
+  return c.json(data, 200);
 });
