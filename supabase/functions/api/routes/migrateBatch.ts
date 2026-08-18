@@ -1,10 +1,8 @@
-import { z } from "zod";
-import { Hono } from "hono";
 import { createClient } from "npm:@supabase/supabase-js@2.44.0";
-import { Variables } from "../_shared/types.ts";
 import { requireAdminRole } from "../_shared/auth.ts";
+import { createOpenApiRouter, z } from "../_shared/openapi.ts";
 
-export const migrateBatchRouter = new Hono<{ Variables: Variables }>();
+export const migrateBatchRouter = createOpenApiRouter();
 
 // ===== Zod schemas for migration batch endpoint =====
 const MigrationBatchSchema = z.object({
@@ -12,7 +10,42 @@ const MigrationBatchSchema = z.object({
   rows: z.array(z.unknown()).length(1, "At least one row is required"),
 });
 
-migrateBatchRouter.post("/", async (c) => {
+const ForbiddenSchema = z.object({ error: z.string() });
+const ServerErrorSchema = z.object({ error: z.string() });
+const SuccessSchema = z.object({
+  success: z.boolean(),
+  count: z.number(),
+});
+
+const migrateBatchRoute = {
+  method: "post" as const,
+  path: "/",
+  tags: ["admin"],
+  responses: {
+    200: {
+      description: "Batch upsert completed",
+      content: { "application/json": { schema: SuccessSchema } },
+    },
+    400: {
+      description: "Invalid payload",
+      content: {
+        "application/json": {
+          schema: z.record(z.string(), z.any()),
+        },
+      },
+    },
+    403: {
+      description: "Admin role required",
+      content: { "application/json": { schema: ForbiddenSchema } },
+    },
+    500: {
+      description: "Database error",
+      content: { "application/json": { schema: ServerErrorSchema } },
+    },
+  },
+};
+
+migrateBatchRouter.openapi(migrateBatchRoute, async (c) => {
   const user = c.get("user");
   if (!requireAdminRole(user)) {
     return c.json({ error: "Forbidden: Admin access required" }, 403);
@@ -51,5 +84,5 @@ migrateBatchRouter.post("/", async (c) => {
     return c.json({ error: error.message }, 500);
   }
 
-  return c.json({ success: true, count: rows.length });
+  return c.json({ success: true, count: rows.length }, 200);
 });

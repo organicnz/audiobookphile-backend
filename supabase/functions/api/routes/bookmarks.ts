@@ -1,6 +1,4 @@
-import { z } from "zod";
-import { Hono } from "hono";
-import { Variables } from "../_shared/types.ts";
+import { createOpenApiRouter, z } from "../_shared/openapi.ts";
 
 // ===== Zod schemas for bookmark endpoints =====
 export const BookmarkCreateSchema = z.object({
@@ -14,9 +12,111 @@ export const BookmarkUpdateSchema = z.object({
   title: z.string().max(256).optional(),
 });
 
-export const bookmarksRouter = new Hono<{ Variables: Variables }>();
+export const bookmarksRouter = createOpenApiRouter();
 
-bookmarksRouter.get("/", async (c) => {
+const ServerErrorSchema = z.object({ error: z.string() });
+const BookmarkResultSchema = z.object({
+  bookmark: z.record(z.string(), z.any()),
+});
+const BookmarkListSchema = z.object({
+  bookmarks: z.array(z.record(z.string(), z.any())),
+});
+const SuccessSchema = z.object({ success: z.boolean() });
+
+const listBookmarksRoute = {
+  method: "get" as const,
+  path: "/",
+  tags: ["bookmarks"],
+  responses: {
+    200: {
+      description: "List of bookmarks for a library item",
+      content: { "application/json": { schema: BookmarkListSchema } },
+    },
+    400: {
+      description: "Missing or invalid libraryItemId",
+      content: { "application/json": { schema: ServerErrorSchema } },
+    },
+    500: {
+      description: "Query failure",
+      content: { "application/json": { schema: ServerErrorSchema } },
+    },
+  },
+};
+
+const createBookmarkRoute = {
+  method: "post" as const,
+  path: "/",
+  tags: ["bookmarks"],
+  request: {
+    body: {
+      content: {
+        "application/json": { schema: BookmarkCreateSchema },
+      },
+    },
+  },
+  responses: {
+    200: {
+      description: "Bookmark created",
+      content: { "application/json": { schema: BookmarkResultSchema } },
+    },
+    400: {
+      description: "Invalid payload",
+      content: {
+        "application/json": {
+          schema: z.record(z.string(), z.any()),
+        },
+      },
+    },
+    500: {
+      description: "Database error",
+      content: { "application/json": { schema: ServerErrorSchema } },
+    },
+  },
+};
+
+const updateBookmarkRoute = {
+  method: "patch" as const,
+  path: "/:id",
+  tags: ["bookmarks"],
+  request: { params: z.object({ id: z.string() }) },
+  responses: {
+    200: {
+      description: "Bookmark updated",
+      content: { "application/json": { schema: BookmarkResultSchema } },
+    },
+    400: {
+      description: "Invalid payload",
+      content: {
+        "application/json": {
+          schema: z.record(z.string(), z.any()),
+        },
+      },
+    },
+    500: {
+      description: "Database error",
+      content: { "application/json": { schema: ServerErrorSchema } },
+    },
+  },
+};
+
+const deleteBookmarkRoute = {
+  method: "delete" as const,
+  path: "/:id",
+  tags: ["bookmarks"],
+  request: { params: z.object({ id: z.string() }) },
+  responses: {
+    200: {
+      description: "Bookmark deleted",
+      content: { "application/json": { schema: SuccessSchema } },
+    },
+    500: {
+      description: "Database error",
+      content: { "application/json": { schema: ServerErrorSchema } },
+    },
+  },
+};
+
+bookmarksRouter.openapi(listBookmarksRoute, async (c) => {
   const user = c.get("user")!;
   const supabase: any = c.get("supabase");
 
@@ -45,10 +145,10 @@ bookmarksRouter.get("/", async (c) => {
     return c.json({ error: error.message }, 500);
   }
 
-  return c.json({ bookmarks: bookmarks || [] });
+  return c.json({ bookmarks: bookmarks || [] }, 200);
 });
 
-bookmarksRouter.post("/", async (c) => {
+bookmarksRouter.openapi(createBookmarkRoute, async (c) => {
   const user = c.get("user")!;
   const supabase: any = c.get("supabase");
 
@@ -82,13 +182,13 @@ bookmarksRouter.post("/", async (c) => {
     return c.json({ error: error.message }, 500);
   }
 
-  return c.json({ bookmark });
+  return c.json({ bookmark }, 200);
 });
 
-bookmarksRouter.patch("/:id", async (c) => {
+bookmarksRouter.openapi(updateBookmarkRoute, async (c) => {
   const user = c.get("user")!;
   const supabase: any = c.get("supabase");
-  const id = c.req.param("id");
+  const { id } = c.req.valid("param");
 
   let body;
   try {
@@ -117,13 +217,13 @@ bookmarksRouter.patch("/:id", async (c) => {
     return c.json({ error: error.message }, 500);
   }
 
-  return c.json({ bookmark });
+  return c.json({ bookmark }, 200);
 });
 
-bookmarksRouter.delete("/:id", async (c) => {
+bookmarksRouter.openapi(deleteBookmarkRoute, async (c) => {
   const user = c.get("user")!;
   const supabase: any = c.get("supabase");
-  const id = c.req.param("id");
+  const { id } = c.req.valid("param");
 
   const { error } = await supabase.from("bookmarks").delete().eq("id", id).eq(
     "user_id",
@@ -134,5 +234,5 @@ bookmarksRouter.delete("/:id", async (c) => {
     return c.json({ error: error.message }, 500);
   }
 
-  return c.json({ success: true });
+  return c.json({ success: true }, 200);
 });

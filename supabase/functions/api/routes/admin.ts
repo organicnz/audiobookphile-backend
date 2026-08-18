@@ -1,11 +1,39 @@
 import { createClient } from "npm:@supabase/supabase-js@2.44.0";
-import { Hono } from "hono";
-import { Variables } from "../_shared/types.ts";
 import { requireAdminRole } from "../_shared/auth.ts";
+import { createOpenApiRouter, z } from "../_shared/openapi.ts";
 
-export const adminRouter = new Hono<{ Variables: Variables }>();
+export const adminRouter = createOpenApiRouter();
 
-adminRouter.all("*", async (c) => {
+const ForbiddenSchema = z.object({ error: z.string() });
+const ServerErrorSchema = z.object({ error: z.string() });
+const AnalyticsSchema = z.object({
+  totalUsers: z.number(),
+  totalLibraries: z.number(),
+  totalItems: z.number(),
+  activeSessions: z.number(),
+});
+
+const analyticsRoute = {
+  method: "get" as const,
+  path: "/",
+  tags: ["admin"],
+  responses: {
+    200: {
+      description: "Server analytics overview",
+      content: { "application/json": { schema: AnalyticsSchema } },
+    },
+    403: {
+      description: "Admin role required",
+      content: { "application/json": { schema: ForbiddenSchema } },
+    },
+    500: {
+      description: "Query failure",
+      content: { "application/json": { schema: ServerErrorSchema } },
+    },
+  },
+};
+
+adminRouter.openapi(analyticsRoute, async (c) => {
   const user = c.get("user");
   if (!requireAdminRole(user)) {
     return c.json({ error: "Forbidden: Admin access required" }, 403);
@@ -43,7 +71,7 @@ adminRouter.all("*", async (c) => {
       totalLibraries: totalLibraries || 0,
       totalItems: totalItems || 0,
       activeSessions: 1,
-    });
+    }, 200);
   } catch (err) {
     console.error("[admin-analytics] Error:", err);
     return c.json({ error: "Internal Server Error" }, 500);

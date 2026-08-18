@@ -1,10 +1,50 @@
-import { Hono } from "hono";
-import { Variables } from "../_shared/types.ts";
 import { buildUserPayload } from "../_shared/payloads.ts";
+import { createOpenApiRouter, z } from "../_shared/openapi.ts";
 
-export const meRouter = new Hono<{ Variables: Variables }>();
+export const meRouter = createOpenApiRouter();
 
-meRouter.get("/", async (c) => {
+const ServerErrorSchema = z.object({ error: z.string() });
+
+const meProfileRoute = {
+  method: "get" as const,
+  path: "/",
+  tags: ["me"],
+  responses: {
+    200: {
+      description: "Current user profile payload",
+      content: { "application/json": { schema: z.record(z.any()) } },
+    },
+    500: {
+      description: "Profile fetch failure",
+      content: { "application/json": { schema: ServerErrorSchema } },
+    },
+  },
+};
+
+const meStatsRoute = {
+  method: "get" as const,
+  path: "/stats",
+  tags: ["me"],
+  responses: {
+    200: {
+      description: "User listening stats and recent sessions",
+      content: {
+        "application/json": {
+          schema: z.object({
+            mediaProgress: z.array(z.record(z.string(), z.any())),
+            recentSessions: z.array(z.record(z.string(), z.any())),
+          }),
+        },
+      },
+    },
+    500: {
+      description: "Stats fetch failure",
+      content: { "application/json": { schema: ServerErrorSchema } },
+    },
+  },
+};
+
+meRouter.openapi(meProfileRoute, async (c) => {
   const user = c.get("user")!;
   const supabase = c.get("supabase");
 
@@ -28,6 +68,7 @@ meRouter.get("/", async (c) => {
         email: user.email,
         created_at: user.created_at,
       }),
+      200,
     );
   } catch (err: any) {
     console.error("[me] profile fetch failed:", err);
@@ -35,7 +76,7 @@ meRouter.get("/", async (c) => {
   }
 });
 
-meRouter.get("/stats", async (c) => {
+meRouter.openapi(meStatsRoute, async (c) => {
   const user = c.get("user")!;
   const supabase = c.get("supabase");
 
@@ -94,7 +135,7 @@ meRouter.get("/stats", async (c) => {
       updated_at: row.updated_at,
     }));
 
-    return c.json({ mediaProgress, recentSessions });
+    return c.json({ mediaProgress, recentSessions }, 200);
   } catch (err: any) {
     console.error("[me] stats failed:", err);
     return c.json({ error: "Failed to fetch stats" }, 500);
