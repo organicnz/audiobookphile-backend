@@ -459,7 +459,8 @@ export async function generateBookAIInsights(
   themes: string[];
 }> {
   const authorName = author || "Unknown Author";
-  const fallbackSummary = `"${title}" by ${authorName} explores key narrative themes of human resilience, transformation, and self-discovery. Through intricate storytelling, it weaves together emotional depth and thought-provoking dialogue that resonates deeply with listeners.`;
+  const fallbackSummary =
+    `"${title}" by ${authorName} explores key narrative themes of human resilience, transformation, and self-discovery. Through intricate storytelling, it weaves together emotional depth and thought-provoking dialogue that resonates deeply with listeners.`;
   const fallbackTakeaways = [
     "Core Theme: Growth through challenge and adaptability.",
     "Character Dynamics: Complex relationships reveal deeper human truths.",
@@ -477,7 +478,8 @@ export async function generateBookAIInsights(
 
   if (!title) return fallback;
 
-  const cacheKey = `book_insights_${title.toLowerCase().trim()}||${authorName.toLowerCase().trim()}`;
+  const cacheKey =
+    `book_insights_${title.toLowerCase().trim()}||${authorName.toLowerCase().trim()}`;
   const cachedInsights = getCachedResult<{
     summary: string;
     keyTakeaways: string[];
@@ -534,9 +536,10 @@ Format response strictly in valid JSON with keys: "summary", "keyTakeaways", "mo
         const parsed = JSON.parse(match[0]);
         const result = {
           summary: parsed.summary || fallbackSummary,
-          keyTakeaways: Array.isArray(parsed.keyTakeaways) && parsed.keyTakeaways.length > 0
-            ? parsed.keyTakeaways
-            : fallbackTakeaways,
+          keyTakeaways:
+            Array.isArray(parsed.keyTakeaways) && parsed.keyTakeaways.length > 0
+              ? parsed.keyTakeaways
+              : fallbackTakeaways,
           mood: parsed.mood || fallbackMood,
           themes: Array.isArray(parsed.themes) && parsed.themes.length > 0
             ? parsed.themes
