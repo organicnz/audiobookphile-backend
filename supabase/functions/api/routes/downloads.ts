@@ -24,6 +24,7 @@ const UploadFinalizeSchema = z.object({
     name: z.string().max(512).optional(),
     type: z.string().max(512).optional(),
   })).length(1, "At least one file is required").optional(),
+  overwrite: z.boolean().optional(),
 });
 
 const PresignSchema = z.object({
@@ -156,6 +157,17 @@ const uploadFinalizeRoute = {
     401: {
       description: "Unauthorized",
       content: { "application/json": { schema: ErrorSchema } },
+    },
+    409: {
+      description: "Conflict (Duplicate Book)",
+      content: {
+        "application/json": {
+          schema: z.object({
+            error: z.string(),
+            existingId: z.string().optional(),
+          }),
+        },
+      },
     },
   },
 };
@@ -495,6 +507,7 @@ downloadsRouter.openapi(uploadFinalizeRoute, async (c) => {
     library: libraryId,
     mediaType = "book",
     files,
+    overwrite,
   } = parsed.data;
 
   let { cleanTitle: title, cleanAuthor: author } = parseTitleAndAuthor(
@@ -687,6 +700,37 @@ downloadsRouter.openapi(uploadFinalizeRoute, async (c) => {
 
   let libraryItemId = crypto.randomUUID();
   if (existingItem) {
+    if (!overwrite) {
+      // Clean up orphaned files that were just uploaded to the new UUID folder
+      if (bookId !== existingItem.id && bookId !== existingItem.media_id) {
+        try {
+          const filePathsToDelete = files.map((f: any) => f.storagePath);
+          if (filePathsToDelete.length > 0) {
+            const { error: delErr } = await supabase.storage.from("audio-files")
+              .remove(filePathsToDelete);
+            if (delErr) {
+              console.warn(
+                "[upload-finalize] Failed to clean up orphaned files:",
+                delErr,
+              );
+            } else {
+              console.info(
+                `[upload-finalize] Cleaned up ${filePathsToDelete.length} orphaned files for ${bookId}`,
+              );
+            }
+          }
+        } catch (e) {
+          console.warn(
+            "[upload-finalize] Exception cleaning up orphaned files:",
+            e,
+          );
+        }
+      }
+      return c.json({
+        error: "Book already exists",
+        existingId: existingItem.id,
+      }, 409);
+    }
     libraryItemId = existingItem.id;
     bookId = existingItem.media_id || existingItem.id;
     console.info(

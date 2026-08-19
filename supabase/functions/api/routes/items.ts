@@ -4,7 +4,10 @@ import { LibraryItemWithBooks, mapBookForMobile } from "../../api/mappers.ts";
 import { Variables } from "../_shared/types.ts";
 import { requireAdminRole } from "../_shared/auth.ts";
 import { getProxyOrigin } from "../../api/_shared/proxy.ts";
-import { generateChapterAIInsights } from "../../_shared/zai.ts";
+import {
+  generateChapterAIInsights,
+  matchExistingBookWithZAI,
+} from "../../_shared/zai.ts";
 import { fetchBookMetadata } from "../../_shared/coverFetch.ts";
 import { ensureBookAIInsights } from "../aiService.ts";
 import { createOpenApiRouter, z } from "../_shared/openapi.ts";
@@ -411,6 +414,34 @@ itemsRouter.openapi(checkExistingRoute, async (c) => {
             );
             return c.json({ mediaId: book.id }, 200);
           }
+        }
+      }
+    }
+
+    // 3. Fallback to Z.AI Semantic Matching
+    const zaiApiKey = Deno.env.get("ZAI_API_KEY") ??
+      Deno.env.get("ZHIPU_API_KEY");
+    if (zaiApiKey && title) {
+      const { data: allLibItems } = await supabase
+        .from("library_items")
+        .select(
+          "id, title, author_names_first_last, duration, size, library_files, audio_files",
+        )
+        .eq("library_id", libraryId)
+        .eq("media_type", mediaType);
+
+      if (allLibItems?.length) {
+        const matchedId = await matchExistingBookWithZAI(
+          title,
+          author || "",
+          allLibItems,
+          zaiApiKey,
+        );
+        if (matchedId) {
+          console.info(
+            `[items] ZAI matched "${title}" to existing book ${matchedId}`,
+          );
+          return c.json({ mediaId: matchedId }, 200);
         }
       }
     }
