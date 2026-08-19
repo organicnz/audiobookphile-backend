@@ -19,11 +19,11 @@ const UploadFinalizeSchema = z.object({
   mediaType: z.enum(["book", "audiobook", "podcast"]).default("book")
     .optional(),
   files: z.array(z.object({
-    storagePath: z.string().url("storage path is required"),
+    storagePath: z.string().min(1, "storage path is required"),
     size: z.number().min(0, "Size must be non-negative"),
     name: z.string().max(512).optional(),
     type: z.string().max(512).optional(),
-  })).length(1, "At least one file is required").optional(),
+  })).min(1, "At least one file is required").optional(),
   overwrite: z.boolean().optional(),
 });
 
