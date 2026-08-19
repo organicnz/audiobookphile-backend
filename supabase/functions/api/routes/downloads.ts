@@ -10,6 +10,12 @@ import {
 } from "../../_shared/zai.ts";
 
 // ===== Zod schemas for /upload/finalize =====
+const UploadCheckSchema = z.object({
+  title: z.string().max(512).optional(),
+  author: z.string().max(256).optional(),
+  library: z.string().min(1, "Library ID is required"),
+});
+
 const UploadFinalizeSchema = z.object({
   bookId: z.string().uuid().optional(),
   title: z.string().max(512).optional(),
@@ -177,6 +183,42 @@ const uploadFinalizeRoute = {
           }),
         },
       },
+    },
+  },
+};
+
+const uploadCheckRoute = {
+  method: "post" as const,
+  path: "/upload/check",
+  tags: ["downloads"],
+  request: {
+    body: { content: { "application/json": { schema: UploadCheckSchema } } },
+  },
+  responses: {
+    200: {
+      description: "Check result",
+      content: {
+        "application/json": {
+          schema: z.object({
+            exists: z.boolean(),
+            existingItem: z.record(z.string(), z.any()).optional(),
+          }),
+        },
+      },
+    },
+    400: {
+      description: "Validation error",
+      content: {
+        "application/json": { schema: z.record(z.string(), z.any()) },
+      },
+    },
+    401: {
+      description: "Unauthorized",
+      content: { "application/json": { schema: ErrorSchema } },
+    },
+    500: {
+      description: "Server error",
+      content: { "application/json": { schema: ErrorSchema } },
     },
   },
 };
@@ -520,74 +562,22 @@ downloadsRouter.openapi(uploadFinalizeRoute, async (c) => {
       overwrite,
     } = parsed.data;
 
-    let { cleanTitle: title, cleanAuthor: author } = parseTitleAndAuthor(
-      rawTitle,
-      rawAuthor,
-    );
-
-    // Ensure parsed metadata isn't empty (we can't fully validate internal parsing logic)
-    if (!title || !author) {
-      return c.json({ error: "Missing book title or author" }, 400);
-    }
-
     const zaiApiKey = Deno.env.get("ZAI_API_KEY") ??
       Deno.env.get("ZHIPU_API_KEY") ?? "";
+    const { title, author } = await resolveTitleAndAuthor(
+      rawTitle,
+      rawAuthor,
+      zaiApiKey,
+    );
 
-    // AI title/author extraction fallback via Z.ai GLM-4 when author is unknown
-    // or the title is ambiguous
-    if (
-      (!author || author === "Unknown Author" || !title) && rawTitle &&
-      zaiApiKey
-    ) {
-      try {
-        const aiRes = await fetch(
-          "https://open.bigmodel.cn/api/paas/v4/chat/completions",
-          {
-            method: "POST",
-            headers: {
-              Authorization: `Bearer ${zaiApiKey}`,
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              model: "glm-4-flash",
-              messages: [
-                {
-                  role: "user",
-                  content:
-                    `Extract the exact book title and author name from this filename/text: "${rawTitle}". Return ONLY a JSON object: {"title": "...", "author": "..."}`,
-                },
-              ],
-              temperature: 0.1,
-            }),
-            signal: AbortSignal.timeout(15_000),
-          },
-        );
-        if (aiRes.ok) {
-          const aiData = await aiRes.json();
-          const content = aiData.choices?.[0]?.message?.content || "";
-          const match = content.match(/\{[\s\S]*\}/);
-          if (match) {
-            const parsed = JSON.parse(match[0]);
-            if (parsed.title) title = parsed.title;
-            if (parsed.author) author = parsed.author;
-          }
-        }
-      } catch (e: unknown) {
-        const err = e as Error;
-        console.error(
-          "[upload-finalize] Z.ai GLM-4 fallback error:",
-          err.message,
-        );
-      }
-    }
-
-    if (!bookId || !title || !libraryId || !files?.length) {
-      return c.json({ error: "Missing fields" }, 400);
+    const validFiles = files || [];
+    if (!bookId && !title) {
+      return c.json({ error: "Missing title or bookId fields" }, 400);
     }
 
     // --- Check for missing files in storage ---
     const missingFiles: string[] = [];
-    const fileCheckPromises = files.map(async (file: any) => {
+    const fileCheckPromises = validFiles.map(async (file: any) => {
       const exists = await storageRouter.fileExists(file.storagePath);
       return exists ? null : file.storagePath;
     });
@@ -603,7 +593,7 @@ downloadsRouter.openapi(uploadFinalizeRoute, async (c) => {
     }
 
     // Basic file structure validation (required fields must be present and non-empty)
-    for (const f of files) {
+    for (const f of validFiles) {
       if (
         !f.storagePath || !f.size || typeof f.size !== "number" || f.size <= 0
       ) {
@@ -620,94 +610,20 @@ downloadsRouter.openapi(uploadFinalizeRoute, async (c) => {
       }
     }
 
-    const totalSize = files.reduce((sum: number, f: any) => sum + f.size, 0);
+    const totalSize = validFiles.reduce(
+      (sum: number, f: any) => sum + f.size,
+      0,
+    );
 
     // --- SMART REBINDING & DUPLICATE PREVENTION ---
-    let existingItem: any = null;
-
-    const normalizeTitle = (s: string) => {
-      if (!s) return "";
-      let v = s.toLowerCase().trim();
-      v = v.replace(
-        /\[(audiobook|unabridged|abridged|mp3)\]|\((audiobook|unabridged|abridged|mp3)\)/gi,
-        "",
-      );
-      v = v.replace(/\b(cd|disc|part|vol|volume)\s*\d+\b/gi, "");
-      return v.replace(/[^\p{L}\p{N}]/gu, "");
-    };
-
-    // 1. Try matching directly by bookId or media_id
-    const { data: itemsById } = await supabase
-      .from("library_items")
-      .select(
-        "id, media_id, size, library_files, audio_files, duration, author_names_first_last, title",
-      )
-      .or(`id.eq.${bookId},media_id.eq.${bookId}`)
-      .eq("library_id", libraryId)
-      .limit(1);
-
-    if (itemsById && itemsById.length > 0) {
-      existingItem = itemsById[0];
-    } else if (title) {
-      // Fetch all items in library for exact, normalized, and Z.AI matching
-      const { data: allLibItems } = await supabase
-        .from("library_items")
-        .select(
-          "id, media_id, size, library_files, audio_files, duration, author_names_first_last, title",
-        )
-        .eq("library_id", libraryId);
-
-      if (allLibItems?.length) {
-        const normTitle = normalizeTitle(title);
-
-        // 2. Try exact title, normalized fuzzy title match, or prefix title + matching author
-        for (const item of allLibItems) {
-          const itemTitle = (item.title || "").trim();
-          if (itemTitle.toLowerCase() === title.trim().toLowerCase()) {
-            existingItem = item;
-            break;
-          }
-          const normItemTitle = normalizeTitle(itemTitle);
-          if (normItemTitle && normItemTitle === normTitle) {
-            existingItem = item;
-            break;
-          }
-          if (
-            normItemTitle && normTitle &&
-            (normItemTitle.startsWith(normTitle) ||
-              normTitle.startsWith(normItemTitle))
-          ) {
-            const itemAuthor = (item.author_names_first_last || "")
-              .toLowerCase().replace(/[^\p{L}\p{N}]/gu, "");
-            const uploadAuthor = (author || "").toLowerCase().replace(
-              /[^\p{L}\p{N}]/gu,
-              "",
-            );
-            if (
-              !itemAuthor || !uploadAuthor ||
-              itemAuthor.includes(uploadAuthor) ||
-              uploadAuthor.includes(itemAuthor)
-            ) {
-              existingItem = item;
-              break;
-            }
-          }
-        }
-
-        // 3. Try Z.AI AI Semantic/Fuzzy Match if normalized match didn't find item
-        if (!existingItem && zaiApiKey) {
-          const matchedId = await matchExistingBookWithZAI(
-            title,
-            author,
-            allLibItems,
-            zaiApiKey,
-          );
-          if (matchedId) {
-            existingItem = allLibItems.find((i) => i.id === matchedId) || null;
-          }
-        }
-      }
-    }
+    let existingItem = await checkDuplicateBook(
+      supabase,
+      title,
+      author,
+      libraryId,
+      zaiApiKey,
+      bookId,
+    );
 
     let libraryItemId = crypto.randomUUID();
     if (existingItem) {
@@ -715,7 +631,7 @@ downloadsRouter.openapi(uploadFinalizeRoute, async (c) => {
         // Clean up orphaned files that were just uploaded to the new UUID folder
         if (bookId !== existingItem.id && bookId !== existingItem.media_id) {
           try {
-            const filePathsToDelete = files.map((f: any) => f.storagePath);
+            const filePathsToDelete = validFiles.map((f: any) => f.storagePath);
             if (filePathsToDelete.length > 0) {
               const { error: delErr } = await supabase.storage.from(
                 "audio-files",
@@ -763,7 +679,7 @@ downloadsRouter.openapi(uploadFinalizeRoute, async (c) => {
       currentDuration = existingItem.duration || 0;
     }
 
-    const audioFilesJson = files.map((file: any, i: number) => ({
+    const audioFilesJson = validFiles.map((file: any, i: number) => ({
       index: baseIndex + i + 1,
       ino: crypto.randomUUID(),
       duration: 0,
@@ -907,47 +823,49 @@ downloadsRouter.openapi(uploadFinalizeRoute, async (c) => {
           console.warn("[upload-finalize] Could not load music-metadata");
         }
 
-        const metadataPromises = files.map(async (file: any, i: number) => {
-          const existingAf = audioFilesJson[i];
-          let duration = 0;
-          try {
-            const signedUrl = await storageRouter.getSignedUrl(
-              file.storagePath,
-              60,
-            );
-            if (signedUrl && mm) {
-              const res = await fetch(signedUrl);
-              if (res.body) {
-                const metadata = await mm.parseWebStream(
-                  res.body,
-                  { mimeType: file.type, size: file.size },
-                  { duration: true, skipCovers: true, skipPostHeaders: true },
-                );
-                duration = metadata.format?.duration || 0;
+        const metadataPromises = validFiles.map(
+          async (file: any, i: number) => {
+            const existingAf = audioFilesJson[i];
+            let duration = 0;
+            try {
+              const signedUrl = await storageRouter.getSignedUrl(
+                file.storagePath,
+                60,
+              );
+              if (signedUrl && mm) {
+                const res = await fetch(signedUrl);
+                if (res.body) {
+                  const metadata = await mm.parseWebStream(
+                    res.body,
+                    { mimeType: file.type, size: file.size },
+                    { duration: true, skipCovers: true, skipPostHeaders: true },
+                  );
+                  duration = metadata.format?.duration || 0;
 
-                try {
-                  res.body.cancel();
-                } catch (_e) {
-                  // Ignore
+                  try {
+                    res.body.cancel();
+                  } catch (_e) {
+                    // Ignore
+                  }
                 }
               }
+            } catch (err) {
+              console.warn(
+                `[upload-finalize] Background duration parse failed for ${file.name}:`,
+                err,
+              );
             }
-          } catch (err) {
-            console.warn(
-              `[upload-finalize] Background duration parse failed for ${file.name}:`,
-              err,
-            );
-          }
 
-          return {
-            ...existingAf,
-            duration,
-            metadata: {
-              ...existingAf.metadata,
+            return {
+              ...existingAf,
               duration,
-            },
-          };
-        });
+              metadata: {
+                ...existingAf.metadata,
+                duration,
+              },
+            };
+          },
+        );
 
         const updatedAudioFilesJson = await Promise.all(metadataPromises);
 
@@ -1147,6 +1065,240 @@ downloadsRouter.openapi(uploadFinalizeRoute, async (c) => {
     );
     return c.json(
       { error: "Finalization failed", detail: (err as Error).message },
+      500,
+    );
+  }
+});
+
+async function resolveTitleAndAuthor(
+  rawTitle: string,
+  rawAuthor: string,
+  zaiApiKey: string,
+) {
+  let { cleanTitle: title, cleanAuthor: author } = parseTitleAndAuthor(
+    rawTitle,
+    rawAuthor,
+  );
+
+  if (
+    (!author || author === "Unknown Author" || !title) && rawTitle &&
+    zaiApiKey
+  ) {
+    try {
+      const aiRes = await fetch(
+        "https://open.bigmodel.cn/api/paas/v4/chat/completions",
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${zaiApiKey}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            model: "glm-4-flash",
+            messages: [
+              {
+                role: "user",
+                content:
+                  `Extract the exact book title and author name from this filename/text: "${rawTitle}". Return ONLY a JSON object: {"title": "...", "author": "..."}`,
+              },
+            ],
+            temperature: 0.1,
+          }),
+          signal: AbortSignal.timeout(15_000),
+        },
+      );
+      if (aiRes.ok) {
+        const aiData = await aiRes.json();
+        const content = aiData.choices?.[0]?.message?.content || "";
+        const match = content.match(/\{[\s\S]*\}/);
+        if (match) {
+          const parsed = JSON.parse(match[0]);
+          if (parsed.title) title = parsed.title;
+          if (parsed.author) author = parsed.author;
+        }
+      }
+    } catch (e: unknown) {
+      const err = e as Error;
+      console.error(
+        "[upload-fallback] Z.ai GLM-4 fallback error:",
+        err.message,
+      );
+    }
+  }
+  return { title, author };
+}
+
+async function checkDuplicateBook(
+  supabase: any,
+  title: string,
+  author: string,
+  libraryId: string,
+  zaiApiKey: string,
+  bookId?: string,
+) {
+  let existingItem: any = null;
+
+  const normalizeTitle = (s: string) => {
+    if (!s) return "";
+    let v = s.toLowerCase().trim();
+    v = v.replace(
+      /\[(audiobook|unabridged|abridged|mp3)\]|\((audiobook|unabridged|abridged|mp3)\)/gi,
+      "",
+    );
+    v = v.replace(/\b(cd|disc|part|vol|volume)\s*\d+\b/gi, "");
+    return v.replace(/[^\p{L}\p{N}]/gu, "");
+  };
+
+  if (bookId) {
+    const { data: itemsById } = await supabase
+      .from("library_items")
+      .select(
+        "id, media_id, size, library_files, audio_files, duration, author_names_first_last, title",
+      )
+      .or(`id.eq.${bookId},media_id.eq.${bookId}`)
+      .eq("library_id", libraryId)
+      .limit(1);
+
+    if (itemsById && itemsById.length > 0) {
+      existingItem = itemsById[0];
+    }
+  }
+
+  if (!existingItem && title) {
+    const { data: allLibItems } = await supabase
+      .from("library_items")
+      .select(
+        "id, media_id, size, library_files, audio_files, duration, author_names_first_last, title",
+      )
+      .eq("library_id", libraryId);
+
+    if (allLibItems?.length) {
+      const normTitle = normalizeTitle(title);
+
+      for (const item of allLibItems) {
+        const itemTitle = (item.title || "").trim();
+        if (itemTitle.toLowerCase() === title.trim().toLowerCase()) {
+          existingItem = item;
+          break;
+        }
+        const normItemTitle = normalizeTitle(itemTitle);
+        if (normItemTitle && normItemTitle === normTitle) {
+          existingItem = item;
+          break;
+        }
+        if (
+          normItemTitle && normTitle &&
+          (normItemTitle.startsWith(normTitle) ||
+            normTitle.startsWith(normItemTitle))
+        ) {
+          const itemAuthor = (item.author_names_first_last || "").toLowerCase()
+            .replace(/[^\p{L}\p{N}]/gu, "");
+          const uploadAuthor = (author || "").toLowerCase().replace(
+            /[^\p{L}\p{N}]/gu,
+            "",
+          );
+          if (
+            !itemAuthor || !uploadAuthor ||
+            itemAuthor.includes(uploadAuthor) ||
+            uploadAuthor.includes(itemAuthor)
+          ) {
+            existingItem = item;
+            break;
+          }
+        }
+      }
+
+      if (!existingItem && zaiApiKey) {
+        const matchedId = await matchExistingBookWithZAI(
+          title,
+          author,
+          allLibItems,
+          zaiApiKey,
+        );
+        if (matchedId) {
+          existingItem = allLibItems.find((i: any) => i.id === matchedId) ||
+            null;
+        }
+      }
+    }
+  }
+
+  return existingItem;
+}
+
+downloadsRouter.openapi(uploadCheckRoute, async (c) => {
+  try {
+    const user = c.get("user");
+    if (!requireAdminRole(user)) {
+      return c.json({ error: "Forbidden: Admin access required" }, 401);
+    }
+    const supabase = c.get("supabase");
+
+    let body;
+    try {
+      body = await c.req.json();
+    } catch (_e) {
+      return c.json({ error: "Invalid JSON" }, 400);
+    }
+
+    const parsed = UploadCheckSchema.safeParse(body);
+    if (!parsed.success) {
+      return c.json(
+        {
+          error: "Validation error",
+          details: parsed.error.flatten().fieldErrors,
+        } as Record<string, any>,
+        400,
+      );
+    }
+
+    const { title: rawTitle = "", author: rawAuthor = "", library: libraryId } =
+      parsed.data;
+
+    const zaiApiKey = Deno.env.get("ZAI_API_KEY") ??
+      Deno.env.get("ZHIPU_API_KEY") ?? "";
+    const { title, author } = await resolveTitleAndAuthor(
+      rawTitle,
+      rawAuthor,
+      zaiApiKey,
+    );
+
+    if (!title) {
+      return c.json({ error: "Missing book title" }, 400);
+    }
+
+    const existingItem = await checkDuplicateBook(
+      supabase,
+      title,
+      author,
+      libraryId,
+      zaiApiKey,
+    );
+
+    if (existingItem) {
+      return c.json(
+        {
+          exists: true,
+          existingItem: {
+            id: existingItem.id,
+            title: existingItem.title,
+            author: existingItem.author_names_first_last,
+          },
+        } as { exists: boolean; existingItem?: Record<string, any> },
+        200,
+      );
+    }
+
+    return c.json(
+      { exists: false } as {
+        exists: boolean;
+        existingItem?: Record<string, any>;
+      },
+      200,
+    );
+  } catch (err) {
+    return c.json(
+      { error: "Check failed", detail: (err as Error).message },
       500,
     );
   }
