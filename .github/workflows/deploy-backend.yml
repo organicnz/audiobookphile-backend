@@ -21,7 +21,7 @@ jobs:
     steps:
       - name: Checkout Repository
         id: checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -40,7 +40,7 @@ jobs:
 
       - name: Setup Bun
         id: bun
-        uses: oven-sh/setup-bun@v1
+        uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
 
@@ -82,7 +82,7 @@ jobs:
     steps:
       - name: Checkout Repository
         id: checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Setup Supabase CLI
         id: cli
@@ -215,7 +215,7 @@ jobs:
     steps:
       - name: Checkout Repository
         id: checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Setup Deno
         id: deno
