@@ -180,7 +180,7 @@ If it is a completely new/different book, return: {"matchedId": null}`;
           messages: [{ role: "user", content: prompt }],
           temperature: 0.1,
         }),
-        signal: AbortSignal.timeout(15_000),
+        signal: AbortSignal.timeout(10_000),
       },
     );
 

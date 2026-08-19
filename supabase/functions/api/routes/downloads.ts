@@ -6,6 +6,7 @@ import { parseTitleAndAuthor } from "../../_shared/titleAuthorParser.ts";
 import {
   enrichMetadataWithZAI,
   matchExistingBookWithZAI,
+  naturalSortFilenames,
   sortFilesWithZAI,
 } from "../../_shared/zai.ts";
 
@@ -575,15 +576,27 @@ downloadsRouter.openapi(uploadFinalizeRoute, async (c) => {
       return c.json({ error: "Missing title or bookId fields" }, 400);
     }
 
-    // --- Check for missing files in storage ---
-    const missingFiles: string[] = [];
-    const fileCheckPromises = validFiles.map(async (file: any) => {
-      const exists = await storageRouter.fileExists(file.storagePath);
-      return exists ? null : file.storagePath;
-    });
-
-    const checkResults = await Promise.all(fileCheckPromises);
-    missingFiles.push(...checkResults.filter((r): r is string => r !== null));
+    // --- Check for missing files in storage + duplicate detection in parallel ---
+    const [missingFiles, existingItem] = await Promise.all([
+      (async () => {
+        const missing: string[] = [];
+        const fileCheckPromises = validFiles.map(async (file: any) => {
+          const exists = await storageRouter.fileExists(file.storagePath);
+          return exists ? null : file.storagePath;
+        });
+        const checkResults = await Promise.all(fileCheckPromises);
+        missing.push(...checkResults.filter((r): r is string => r !== null));
+        return missing;
+      })(),
+      checkDuplicateBook(
+        supabase,
+        title,
+        author,
+        libraryId,
+        zaiApiKey,
+        bookId,
+      ),
+    ]);
 
     if (missingFiles.length > 0) {
       return c.json(
@@ -613,16 +626,6 @@ downloadsRouter.openapi(uploadFinalizeRoute, async (c) => {
     const totalSize = validFiles.reduce(
       (sum: number, f: any) => sum + f.size,
       0,
-    );
-
-    // --- SMART REBINDING & DUPLICATE PREVENTION ---
-    let existingItem = await checkDuplicateBook(
-      supabase,
-      title,
-      author,
-      libraryId,
-      zaiApiKey,
-      bookId,
     );
 
     let libraryItemId = crypto.randomUUID();
@@ -710,13 +713,16 @@ downloadsRouter.openapi(uploadFinalizeRoute, async (c) => {
     }
     let deduplicatedFiles = Array.from(uniqueFilesMap.values());
 
-    // --- Z.AI AI-OPTIMIZED SEQUENCE SORTING ---
+    // --- SEQUENCE SORTING: fast natural sort in the critical path; the
+    // Z.AI-optimized order is computed detached and persisted in the
+    // background (keeps the synchronous request well under the function
+    // execution budget) ---
     const filenames = deduplicatedFiles.map((af: any) =>
       af.metadata?.filename || af.metadata?.relPath || ""
     ).filter(Boolean);
 
     if (filenames.length > 1) {
-      const sortedFilenames = await sortFilesWithZAI(filenames, zaiApiKey);
+      const sortedFilenames = naturalSortFilenames(filenames);
       const filenameOrderMap = new Map<string, number>();
       sortedFilenames.forEach((name: string, index: number) =>
         filenameOrderMap.set(name, index)
@@ -889,6 +895,35 @@ downloadsRouter.openapi(uploadFinalizeRoute, async (c) => {
         }
 
         const finalMergedAudioFiles = Array.from(updatedMap.values());
+
+        // Z.AI-optimized chapter ordering, applied detached after durations
+        // are merged (both are persisted in this single background write)
+        try {
+          const mergedFilenames = finalMergedAudioFiles.map((af: any) =>
+            af.metadata?.filename || af.metadata?.relPath || ""
+          ).filter(Boolean);
+          if (mergedFilenames.length > 1 && zaiApiKey) {
+            const aiSorted = await sortFilesWithZAI(mergedFilenames, zaiApiKey);
+            if (aiSorted.length === mergedFilenames.length) {
+              const orderMap = new Map<string, number>();
+              aiSorted.forEach((name: string, i: number) =>
+                orderMap.set(name, i)
+              );
+              finalMergedAudioFiles.sort((a: any, b: any) => {
+                const nameA = a.metadata?.filename || a.metadata?.relPath || "";
+                const nameB = b.metadata?.filename || b.metadata?.relPath || "";
+                return (orderMap.get(nameA) ?? 999) -
+                  (orderMap.get(nameB) ?? 999);
+              });
+            }
+          }
+        } catch (err: unknown) {
+          console.warn(
+            "[upload-finalize] Background Z.AI sorting skipped:",
+            (err as Error).message,
+          );
+        }
+
         finalMergedAudioFiles.forEach((af, idx) => (af.index = idx + 1));
 
         const totalDuration = finalMergedAudioFiles.reduce(
@@ -1104,7 +1139,7 @@ async function resolveTitleAndAuthor(
             ],
             temperature: 0.1,
           }),
-          signal: AbortSignal.timeout(15_000),
+          signal: AbortSignal.timeout(8_000),
         },
       );
       if (aiRes.ok) {
@@ -1136,7 +1171,7 @@ async function checkDuplicateBook(
   zaiApiKey: string,
   bookId?: string,
 ) {
-  let existingItem: any = null;
+  let matchedId: string | null = null;
 
   const normalizeTitle = (s: string) => {
     if (!s) return "";
@@ -1149,28 +1184,31 @@ async function checkDuplicateBook(
     return v.replace(/[^\p{L}\p{N}]/gu, "");
   };
 
+  // Lightweight candidate scan: only id/title/author columns (audio_files and
+  // library_files JSONB columns can be huge). The full record is hydrated in a
+  // second indexed query only for the single matched item.
+  const LIGHT_SELECT = "id, media_id, title, author_names_first_last";
+  const SCAN_LIMIT = 500;
+
   if (bookId) {
     const { data: itemsById } = await supabase
       .from("library_items")
-      .select(
-        "id, media_id, size, library_files, audio_files, duration, author_names_first_last, title",
-      )
+      .select(LIGHT_SELECT)
       .or(`id.eq.${bookId},media_id.eq.${bookId}`)
       .eq("library_id", libraryId)
       .limit(1);
 
     if (itemsById && itemsById.length > 0) {
-      existingItem = itemsById[0];
+      matchedId = itemsById[0].id;
     }
   }
 
-  if (!existingItem && title) {
+  if (!matchedId && title) {
     const { data: allLibItems } = await supabase
       .from("library_items")
-      .select(
-        "id, media_id, size, library_files, audio_files, duration, author_names_first_last, title",
-      )
-      .eq("library_id", libraryId);
+      .select(LIGHT_SELECT)
+      .eq("library_id", libraryId)
+      .limit(SCAN_LIMIT);
 
     if (allLibItems?.length) {
       const normTitle = normalizeTitle(title);
@@ -1178,12 +1216,12 @@ async function checkDuplicateBook(
       for (const item of allLibItems) {
         const itemTitle = (item.title || "").trim();
         if (itemTitle.toLowerCase() === title.trim().toLowerCase()) {
-          existingItem = item;
+          matchedId = item.id;
           break;
         }
         const normItemTitle = normalizeTitle(itemTitle);
         if (normItemTitle && normItemTitle === normTitle) {
-          existingItem = item;
+          matchedId = item.id;
           break;
         }
         if (
@@ -1202,28 +1240,36 @@ async function checkDuplicateBook(
             itemAuthor.includes(uploadAuthor) ||
             uploadAuthor.includes(itemAuthor)
           ) {
-            existingItem = item;
+            matchedId = item.id;
             break;
           }
         }
       }
 
-      if (!existingItem && zaiApiKey) {
-        const matchedId = await matchExistingBookWithZAI(
+      if (!matchedId && zaiApiKey) {
+        matchedId = await matchExistingBookWithZAI(
           title,
           author,
           allLibItems,
           zaiApiKey,
         );
-        if (matchedId) {
-          existingItem = allLibItems.find((i: any) => i.id === matchedId) ||
-            null;
-        }
       }
     }
   }
 
-  return existingItem;
+  if (!matchedId) return null;
+
+  const { data: fullItem } = await supabase
+    .from("library_items")
+    .select(
+      "id, media_id, size, library_files, audio_files, duration, author_names_first_last, title",
+    )
+    .eq("id", matchedId)
+    .eq("library_id", libraryId)
+    .limit(1)
+    .maybeSingle();
+
+  return fullItem || null;
 }
 
 downloadsRouter.openapi(uploadCheckRoute, async (c) => {
