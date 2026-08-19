@@ -29,9 +29,7 @@ const UploadFinalizeSchema = z.object({
 
 const PresignSchema = z.object({
   filename: z.string().min(1, "Filename is required"),
-  contentType: z.string().url(
-    "Content-Type must be a valid URL pattern (e.g. audio/mpeg)",
-  ).optional(),
+  contentType: z.string().min(1, "Content-Type is required").optional(),
 });
 
 const ErrorSchema = z.object({ error: z.string() });
