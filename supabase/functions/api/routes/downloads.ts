@@ -464,8 +464,9 @@ downloadsRouter.openapi(downloadFileRoute, async (c) => {
 });
 
 async function handleUploadPresign(c: any) {
-  if (!requireAdminRole(c.get("user"))) {
-    return c.json({ error: "Forbidden: Admin access required" }, 403);
+  const user = c.get("user");
+  if (!user) {
+    return c.json({ error: "Not authorized" }, 401);
   }
   const supabase = c.get("supabase");
 

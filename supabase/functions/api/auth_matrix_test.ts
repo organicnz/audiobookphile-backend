@@ -214,8 +214,6 @@ const protectedRoutes: Array<[string, string]> = [
   ["POST", "/api/items/sync-covers"],
   ["POST", "/api/items/sync-durations"],
   ["POST", "/api/items/sync-insights"],
-  ["POST", "/api/upload-presign"],
-  ["POST", "/api/items/upload-presign"],
   ["POST", "/api/migrate-batch"],
 ];
 
@@ -347,6 +345,8 @@ Deno.test("AuthZ Matrix: user-facing routes remain open to members", async () =>
     ["POST", "/api/chapter-ai"],
     ["POST", "/api/ai/chapter"],
     ["POST", "/api/ai/insights"],
+    ["POST", "/api/upload-presign"],
+    ["POST", "/api/items/upload-presign"],
     ["GET", "/api/libraries/library-1/items"],
     ["GET", "/api/users/me/preferences"],
   ];
