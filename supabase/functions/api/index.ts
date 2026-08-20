@@ -200,6 +200,21 @@ app.use(async (c, next) => {
         "unknown",
     };
     console.log(JSON.stringify(log));
+
+    // Track API Application Metrics via Sentry
+    Sentry.metrics.increment("api_requests_total", 1, {
+      tags: {
+        method: c.req.method,
+        status: c.res.status.toString(),
+      },
+    });
+
+    Sentry.metrics.distribution("api_request_duration", duration, {
+      unit: "millisecond",
+      tags: {
+        method: c.req.method,
+      },
+    });
   }
 });
 

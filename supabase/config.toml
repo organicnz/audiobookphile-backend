@@ -442,3 +442,7 @@ s3_secret_key = "env(S3_SECRET_KEY)"
 verify_jwt = false
 import_map = "./functions/deno.json"
 entrypoint = "./functions/api/index.ts"
+# Local-only env for `supabase functions serve`/`supabase start`. Production
+# values are provisioned by the deploy workflow's "Ensure Sentry Secrets" step
+# (SENTRY_DSN from GitHub secret, NODE_ENV=production) via the Management API.
+env = { NODE_ENV = "production", SENTRY_DSN = "https://73b955343fb09bc7770dc93fa7d2c18a@o4509901022691328.ingest.de.sentry.io/4511573264236624" }

@@ -1,8 +1,8 @@
 import * as Sentry from "@sentry/deno";
 
 Sentry.init({
-  dsn:
-    "https://73b955343fb09bc7770dc93fa7d2c18a@o4509901022691328.ingest.de.sentry.io/4511573264236624",
+  dsn: Deno.env.get("SENTRY_DSN"),
+  environment: Deno.env.get("NODE_ENV") || "development",
   tracesSampleRate: 1.0,
 });
 
