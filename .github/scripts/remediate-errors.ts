@@ -107,7 +107,7 @@ async function sentryGet(path: string): Promise<unknown | null> {
   return await res.json();
 }
 
-async function loadCheckpoint(): Promise<Checkpoint> {
+function loadCheckpoint(): Checkpoint {
   const fallback: Checkpoint = { lastProcessedAt: null, processedIssueIds: [] };
   if (DRY_RUN || !REPO) return fallback;
   if (!execOk(["git", "fetch", "origin", CHECKPOINT_BRANCH, "--depth=1"])) {
@@ -335,7 +335,7 @@ function validateFix(): { output: string; ok: boolean } {
   return { output, ok: check.code === 0 && test.code === 0 };
 }
 
-async function hasOpenPrFor(issueId: string): Promise<boolean> {
+function hasOpenPrFor(issueId: string): boolean {
   if (DRY_RUN || !REPO || !GITHUB_TOKEN) return false;
   const list = exec([
     "gh",
@@ -416,26 +416,29 @@ function createDraftPr(
 async function commentOnIssue(issueId: string, branch: string): Promise<void> {
   if (DRY_RUN || !SENTRY_AUTH_TOKEN) return;
   try {
-    await fetch(`${SENTRY_API}/issues/${issueId}/comments/`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${SENTRY_AUTH_TOKEN}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        data: {
-          text:
-            `Automated remediation: draft PR opened on branch \`${branch}\` for human review.`,
+    await fetch(
+      `${SENTRY_API}/organizations/${ORG}/issues/${issueId}/comments/`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${SENTRY_AUTH_TOKEN}`,
+          "Content-Type": "application/json",
         },
-      }),
-      signal: AbortSignal.timeout(30_000),
-    });
+        body: JSON.stringify({
+          data: {
+            text:
+              `Automated remediation: draft PR opened on branch \`${branch}\` for human review.`,
+          },
+        }),
+        signal: AbortSignal.timeout(30_000),
+      },
+    );
   } catch (err) {
     warn("could not comment on Sentry issue:", String(err));
   }
 }
 
-async function saveCheckpoint(checkpoint: Checkpoint): Promise<void> {
+function saveCheckpoint(checkpoint: Checkpoint): void {
   if (DRY_RUN || !REPO || !GITHUB_TOKEN) return;
   ensureRemoteAuth();
   // Decide from LOCAL refs only — ls-remote would need the network and could
@@ -496,7 +499,7 @@ async function remediateIssue(
   const shortId = String(issue.shortId ?? id);
   log(`processing issue ${shortId} (${String(issue.title ?? "")})`);
   const event = (await sentryGet(
-    `/projects/${ORG}/${PROJECT}/issues/${id}/events/latest/`,
+    `/organizations/${ORG}/issues/${id}/events/latest/`,
   )) as
     | Record<string, unknown>
     | null;
@@ -635,7 +638,7 @@ async function main(): Promise<void> {
   );
 
   const issues = (await sentryGet(
-    `/projects/${ORG}/${PROJECT}/issues/?query=is:unresolved&sort=date&statsPeriod=7d`,
+    `/organizations/${ORG}/issues/?query=is:unresolved&sort=date&statsPeriod=7d&project=${PROJECT}`,
   )) as Array<Record<string, unknown>> | null;
   if (!issues) {
     warn("could not list Sentry issues; aborting run");
