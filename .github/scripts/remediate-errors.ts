@@ -528,6 +528,7 @@ async function remediateIssue(
     try {
       const content = await callLLM(prompt, feedback);
       diff = extractDiff(content);
+      log(`LLM generated diff:\n${diff}`);
     } catch (err) {
       warn(`LLM attempt ${attempt} failed:`, String(err));
       if (attempt === attempts) return false;
@@ -559,6 +560,7 @@ async function remediateIssue(
       validated = true;
       validation = "deno check and deno test pass";
       diff = exec(["git", "diff"]).stdout;
+      log(`git diff output length: ${diff.length}`);
       log(`issue ${shortId}: validated on attempt ${attempt}`);
       break;
     }
