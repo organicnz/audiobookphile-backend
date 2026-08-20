@@ -63,3 +63,20 @@ survive re-syncs. All generated files are gitignored.
   `supabase/config.toml` intentionally has no `[functions.api] env` map:
   `supabase config push` only accepts `env(VAR)` references, and inline
   strings break its parser.
+
+### Error-remediation workflow (`error-remediation.yml`)
+
+Runs daily at 03:00 UTC (plus `workflow_dispatch`). Needs these GitHub Actions
+secrets on `organicnz/audiobookphile-backend` (workflow warns and skips while
+missing):
+
+| Secret              | Value                                   |
+| ------------------- | --------------------------------------- |
+| `SENTRY_AUTH_TOKEN` | Sentry user/API token with `issue:write`|
+| `SENTRY_ORG`        | `organicnz` (see dashboard URL)         |
+| `SENTRY_PROJECT`    | `audiobookphile` (project ID 4511573264236624) |
+| `ZAI_API_KEY`       | Zhipu GLM API key for patch generation  |
+
+It creates draft PRs (`bot/fix-sentry-*`) and never merges; progress is
+tracked on the `sentry-checkpoint` branch. For local testing see the script
+header (`DRY_RUN`, `SENTRY_API`, `ZAI_URL` overrides).
