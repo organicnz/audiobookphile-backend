@@ -18,7 +18,7 @@
 //   SENTRY_ORG          Sentry org slug (default: organicnz)
 //   SENTRY_PROJECT      Sentry project slug (default: audiobookphile)
 //   MAX_PRS             max draft PRs per run (default: 2)
-//   ZAI_MODEL           GLM model (default: glm-4-flash)
+//   ZAI_MODEL           GLM model (default: glm-4-plus)
 //   GITHUB_REPOSITORY   owner/repo (set by Actions; used for gh/git URLs)
 //   GITHUB_TOKEN        gh/git credentials (set by Actions)
 //   DRY_RUN=1           local testing — no repo mutations, no network writes
@@ -33,7 +33,7 @@ const SENTRY_API = env.SENTRY_API || "https://sentry.io/api/0";
 const ORG = env.SENTRY_ORG || "organicnz";
 const PROJECT = env.SENTRY_PROJECT || "audiobookphile";
 const MAX_PRS = Number.parseInt(env.MAX_PRS || "2", 10);
-const ZAI_MODEL = env.ZAI_MODEL || "glm-4-flash";
+const ZAI_MODEL = env.ZAI_MODEL || "glm-4-plus";
 const ZAI_URL = env.ZAI_URL ||
   "https://open.bigmodel.cn/api/paas/v4/chat/completions";
 const REPO = env.GITHUB_REPOSITORY || "";
