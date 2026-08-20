@@ -374,6 +374,13 @@ chapterAiRouter.post("/chapter-ai", handleChapterAI);
 chapterAiRouter.post("/ai/chapter", handleChapterAI);
 mountRouter("/api", chapterAiRouter);
 
+// E2E Test Route for Sentry LLM Pipeline
+app.get("/api/sentry-e2e-test", (_c) => {
+  throw new Error(
+    "Sentry E2E Test: LLM please replace this throw with a valid response returning 'fixed'",
+  );
+});
+
 // Fallback 404
 app.all("*", (c) => {
   return c.json({ error: "Endpoint not found or method not supported" }, 404);
