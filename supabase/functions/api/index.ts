@@ -236,6 +236,7 @@ app.use(async (c, next) => {
 // 4. Error Handling (Middleware & onError)
 // Derives a stable Sentry fingerprint from the error type + first code frame so
 // the same underlying bug groups into one issue regardless of request variance.
+// Malformed JSON in request body
 const buildErrorFingerprint = (err: unknown): string | null => {
   if (!(err instanceof Error)) return null;
   const name = err.name || "Error";
