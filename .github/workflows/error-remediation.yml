@@ -1,0 +1,46 @@
+name: Error Remediation (Sentry + LLM)
+
+on:
+  schedule:
+    - cron: "0 3 * * *" # Every day at 3:00 AM UTC
+  workflow_dispatch: # Allow manual triggering
+
+concurrency:
+  group: error-remediation
+  cancel-in-progress: false
+
+permissions:
+  contents: write # Push fix branches + the sentry-checkpoint branch
+  pull-requests: write # Open draft PRs
+  issues: read
+
+jobs:
+  remediate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+      SENTRY_ORG: ${{ secrets.SENTRY_ORG }}
+      SENTRY_PROJECT: ${{ secrets.SENTRY_PROJECT }}
+      ZAI_API_KEY: ${{ secrets.ZAI_API_KEY }}
+      MAX_PRS: "2"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Setup Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Run LLM Error Remediation
+        run: |
+          if [ -z "${{ secrets.SENTRY_AUTH_TOKEN }}" ]; then
+            echo "Warning: SENTRY_AUTH_TOKEN secret is missing — remediation will skip."
+          fi
+          if [ -z "${{ secrets.ZAI_API_KEY }}" ]; then
+            echo "Warning: ZAI_API_KEY secret is missing — remediation will skip."
+          fi
+          deno run -A .github/scripts/remediate-errors.ts

@@ -40,8 +40,38 @@ if (dsn) {
   Sentry.init({
     dsn,
     environment: Deno.env.get("NODE_ENV") || "development",
+    // DENO_DEPLOYMENT_ID is the deployed function version — tags events so the
+    // remediation pipeline can map a crash to the exact code that threw.
+    release: Deno.env.get("DENO_DEPLOYMENT_ID") || undefined,
     tracesSampleRate: 1.0,
   });
+}
+
+/**
+ * Per-request API metrics. Safe by construction: no-ops when the SDK is not
+ * initialized and swallows any SDK error so observability can never break the
+ * request path.
+ */
+export function trackRequestMetrics(
+  method: string,
+  status: number,
+  durationMs: number,
+): void {
+  if (!Sentry.getClient()) return;
+  try {
+    Sentry.metrics.increment("api_requests_total", 1, {
+      tags: { method, status: status.toString() },
+    });
+    Sentry.metrics.distribution("api_request_duration", durationMs, {
+      unit: "millisecond",
+      tags: { method },
+    });
+  } catch (err) {
+    console.warn(
+      "[Sentry] metrics error:",
+      err instanceof Error ? err.message : String(err),
+    );
+  }
 }
 
 export { Sentry };

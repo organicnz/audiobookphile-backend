@@ -3,7 +3,7 @@ import { OpenAPIHono } from "@hono/zod-openapi";
 import { cors } from "hono/cors";
 import { compress } from "hono/compress";
 import { createClient } from "npm:@supabase/supabase-js@2.44.0";
-import { Sentry } from "../_shared/sentry.ts";
+import { Sentry, trackRequestMetrics } from "../_shared/sentry.ts";
 
 // ============================================================================
 // OpenAPI Routers
@@ -35,6 +35,33 @@ import { ApiError, serviceRoleMiddleware } from "./_shared/errors.ts";
 import { authMiddleware } from "./_shared/auth.ts";
 import { runContractChecks } from "./_shared/contracts.ts";
 import { HealthResponseSchema } from "./_shared/openapi.ts";
+
+// Global error listeners — capture errors that escape the Hono middleware chain
+// (background tasks, timers, unawaited promises) so they land in Sentry instead
+// of silently dying with the isolate. Gated on production like the middleware.
+const captureGlobalError = (err: unknown, eventType: string) => {
+  const error = err instanceof Error ? err : new Error(String(err));
+  console.error(`[API] ${eventType}:`, error.message);
+  if (Deno.env.get("NODE_ENV") === "production") {
+    Sentry.setTag("event_type", eventType);
+    Sentry.captureException(error);
+    // Fire-and-forget flush; the isolate may be reaped before the default
+    // async transport drains.
+    Sentry.flush(2000);
+  }
+};
+addEventListener("unhandledrejection", (event) => {
+  captureGlobalError(
+    event.reason ?? new Error("Unhandled promise rejection"),
+    "unhandledrejection",
+  );
+});
+addEventListener("error", (event) => {
+  captureGlobalError(
+    event.error ?? new Error(event.message ?? "Uncaught error"),
+    "uncaught_error",
+  );
+});
 
 const app = new OpenAPIHono<{ Variables: Variables }>({
   defaultHook: (result, c) => {
@@ -201,25 +228,25 @@ app.use(async (c, next) => {
     };
     console.log(JSON.stringify(log));
 
-    // Track API Application Metrics via Sentry
-    Sentry.metrics.increment("api_requests_total", 1, {
-      tags: {
-        method: c.req.method,
-        status: c.res.status.toString(),
-      },
-    });
-
-    Sentry.metrics.distribution("api_request_duration", duration, {
-      unit: "millisecond",
-      tags: {
-        method: c.req.method,
-      },
-    });
+    // Track API Application Metrics via Sentry (safe: no-ops when uninitialized)
+    trackRequestMetrics(c.req.method, c.res.status, duration);
   }
 });
 
 // 4. Error Handling (Middleware & onError)
-const handleApiError = (err: unknown, c: any) => {
+// Derives a stable Sentry fingerprint from the error type + first code frame so
+// the same underlying bug groups into one issue regardless of request variance.
+const buildErrorFingerprint = (err: unknown): string | null => {
+  if (!(err instanceof Error)) return null;
+  const name = err.name || "Error";
+  const stack = (err as Error).stack || "";
+  const frame = stack
+    .split("\n")
+    .map((line) => line.trim())
+    .find((line) => /at\s+.+\.ts:\d+/.test(line));
+  return frame ? `${name}:${frame}` : name;
+};
+const handleApiError = async (err: unknown, c: any) => {
   const apiErr = err as ApiError;
   if (apiErr?.statusCode) {
     return c.json(
@@ -252,11 +279,26 @@ const handleApiError = (err: unknown, c: any) => {
         path: c.req.path,
         requestId: c.get("requestId"),
       });
+      Sentry.setTag("route", c.req.path);
+      Sentry.setTag("error_id", errorId);
       const userId = c.get("userId") as string | undefined;
       if (userId) {
         Sentry.setUser({ id: userId });
       }
-      Sentry.captureException(err);
+      // Stable fingerprint (exception + first code frame) so repeated
+      // occurrences of the same bug group into one Sentry issue instead of
+      // flooding the remediation pipeline with near-duplicates.
+      const fingerprint = buildErrorFingerprint(err);
+      if (fingerprint) {
+        Sentry.setContext("fingerprint", { value: fingerprint });
+      }
+      Sentry.captureException(
+        err,
+        fingerprint ? { fingerprint: [fingerprint] } : undefined,
+      );
+      // Flush before responding — the isolate may be reaped immediately after
+      // the response, and a buffered envelope would be lost.
+      await Sentry.flush(2000);
     }
     return c.json({ error: "Internal Server Error" }, 500);
   }
