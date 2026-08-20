@@ -57,5 +57,9 @@ survive re-syncs. All generated files are gitignored.
 - `NODE_ENV=production` is an Edge Function secret (`Ensure Edge Function
   Secrets` step, equivalent to `supabase secrets set NODE_ENV=production`) and
   gates the structured-logging + Sentry metrics/error-capture middleware.
-- Local dev: `[functions.api] env` in `supabase/config.toml` sets both; the
-  env var takes precedence over Vault in `_shared/sentry.ts`.
+- Local dev: export `SENTRY_DSN` (and optionally `NODE_ENV=production`) in your
+  shell before `supabase functions serve` — the env var takes precedence over
+  Vault in `_shared/sentry.ts`. Without it Sentry stays disabled locally.
+  `supabase/config.toml` intentionally has no `[functions.api] env` map:
+  `supabase config push` only accepts `env(VAR)` references, and inline
+  strings break its parser.

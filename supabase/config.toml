@@ -442,9 +442,9 @@ s3_secret_key = "env(S3_SECRET_KEY)"
 verify_jwt = false
 import_map = "./functions/deno.json"
 entrypoint = "./functions/api/index.ts"
-# Local-only env for `supabase functions serve`/`supabase start`. In
-# production SENTRY_DSN is read from Supabase Vault (provisioned by the deploy
-# workflow's "Provision Sentry Vault Secret" step) and NODE_ENV comes from Edge
-# Function secrets ("Ensure Edge Function Secrets" step). The env var always
-# wins in code, so this also serves as an emergency override.
-env = { NODE_ENV = "production", SENTRY_DSN = "https://73b955343fb09bc7770dc93fa7d2c18a@o4509901022691328.ingest.de.sentry.io/4511573264236624" }
+# NOTE: no `env` map here — `supabase config push` (run by the deploy
+# workflow) requires env() references, and inline strings break its parser.
+# In production SENTRY_DSN is read from Supabase Vault and NODE_ENV is set via
+# Edge Function secrets. For local dev, export SENTRY_DSN in your shell before
+# `supabase functions serve` (the env var wins in code; Sentry stays disabled
+# otherwise).
