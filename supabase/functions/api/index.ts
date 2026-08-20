@@ -316,6 +316,13 @@ app.onError((err, c) => {
   return handleApiError(err, c);
 });
 
+// E2E Test Route for Sentry LLM Pipeline
+app.get("/api/sentry-e2e-test", (_c) => {
+  throw new Error(
+    "Sentry E2E Test: LLM please replace this throw with a valid response returning 'fixed'",
+  );
+});
+
 // 5. Service Role Middleware (injects supabaseUrl + serviceRoleKey into context — must run before auth)
 app.use(serviceRoleMiddleware);
 
@@ -373,13 +380,6 @@ const chapterAiRouter = new Hono<{ Variables: Variables }>();
 chapterAiRouter.post("/chapter-ai", handleChapterAI);
 chapterAiRouter.post("/ai/chapter", handleChapterAI);
 mountRouter("/api", chapterAiRouter);
-
-// E2E Test Route for Sentry LLM Pipeline
-app.get("/api/sentry-e2e-test", (_c) => {
-  throw new Error(
-    "Sentry E2E Test: LLM please replace this throw with a valid response returning 'fixed'",
-  );
-});
 
 // Fallback 404
 app.all("*", (c) => {
