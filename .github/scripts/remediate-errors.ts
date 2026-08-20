@@ -621,6 +621,7 @@ function pushFixBranch(branch: string): boolean {
     warn("GITHUB_TOKEN missing — cannot push fix branch");
     return false;
   }
+  ensureRemoteAuth();
   const push = exec(["git", "push", "origin", `HEAD:${branch}`]);
   if (push.code !== 0) {
     warn(`push of ${branch} failed: ${push.stderr.slice(0, 300)}`);
