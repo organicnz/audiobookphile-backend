@@ -378,8 +378,8 @@ function createDraftPr(
   issueShortId: string,
   event: SanitizedEvent,
   validation: string,
-): void {
-  if (DRY_RUN || !REPO || !GITHUB_TOKEN) return;
+): boolean {
+  if (DRY_RUN || !REPO || !GITHUB_TOKEN) return false;
   const body = [
     `Automated draft PR generated from [Sentry issue ${issueId}](https://sentry.io/organizations/${ORG}/issues/${issueId}/).`,
     ``,
@@ -410,7 +410,11 @@ function createDraftPr(
     "--body",
     body,
   ]);
-  if (pr.code !== 0) warn(`gh pr create failed: ${pr.stderr.slice(0, 500)}`);
+  if (pr.code !== 0) {
+    warn(`gh pr create failed: ${pr.stderr.slice(0, 500)}`);
+    return false;
+  }
+  return true;
 }
 
 async function commentOnIssue(issueId: string, branch: string): Promise<void> {
@@ -612,7 +616,11 @@ async function remediateIssue(
 }
 
 function pushFixBranch(branch: string): boolean {
-  if (DRY_RUN || !REPO || !GITHUB_TOKEN) return true;
+  if (DRY_RUN) return true;
+  if (!REPO || !GITHUB_TOKEN) {
+    warn("GITHUB_TOKEN missing — cannot push fix branch");
+    return false;
+  }
   const push = exec(["git", "push", "origin", `HEAD:${branch}`]);
   if (push.code !== 0) {
     warn(`push of ${branch} failed: ${push.stderr.slice(0, 300)}`);
