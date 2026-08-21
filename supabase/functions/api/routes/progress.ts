@@ -184,7 +184,9 @@ progressRouter.openapi(updateProgressRoute, async (c) => {
     const rawBody = await c.req.json();
     body = ProgressPayloadSchema.parse(rawBody);
   } catch (e: unknown) {
-    const zodErrors = e instanceof Object && "errors" in e ? (e as { errors: unknown }).errors : null;
+    const zodErrors = e instanceof Object && "errors" in e
+      ? (e as { errors: unknown }).errors
+      : null;
     return c.json(
       { success: false, error: zodErrors || "Invalid payload" },
       400,
@@ -216,7 +218,9 @@ progressRouter.openapi(updateProgressBatchRoute, async (c) => {
     const rawBody = await c.req.json();
     items = BatchProgressPayloadSchema.parse(rawBody);
   } catch (e: unknown) {
-    const zodErrors = e instanceof Object && "errors" in e ? (e as { errors: unknown }).errors : null;
+    const zodErrors = e instanceof Object && "errors" in e
+      ? (e as { errors: unknown }).errors
+      : null;
     return c.json(
       { success: false, error: zodErrors || "Invalid payload" },
       400,

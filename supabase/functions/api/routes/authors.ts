@@ -482,7 +482,10 @@ async function handleSyncAuthors(c: Context<{ Variables: Variables }>) {
     let updatedCount = 0;
     for (const author of authors || []) {
       if (!author.name) continue;
-      const storagePath = await fetchAuthorAvatar(supabase, author as { id: string; name: string });
+      const storagePath = await fetchAuthorAvatar(
+        supabase,
+        author as { id: string; name: string },
+      );
       if (storagePath) {
         await supabase.from("authors").update({ image_path: storagePath }).eq(
           "id",

@@ -365,7 +365,9 @@ async function handleGenerateEmbedding(c: Context<{ Variables: Variables }>) {
       model: "embedding-2",
     }, 200);
   } catch (e: unknown) {
-    return c.json({ error: (e as Error).message || "Embedding generation failed" }, 500);
+    return c.json({
+      error: (e as Error).message || "Embedding generation failed",
+    }, 500);
   }
 }
 

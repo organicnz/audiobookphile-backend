@@ -250,7 +250,10 @@ const buildErrorFingerprint = (err: unknown): string | null => {
     .find((line) => /at\s+.+\.ts:\d+/.test(line));
   return frame ? `${name}:${frame}` : name;
 };
-const handleApiError = async (err: unknown, c: Context<{ Variables: Variables }>) => {
+const handleApiError = async (
+  err: unknown,
+  c: Context<{ Variables: Variables }>,
+) => {
   const apiErr = err as ApiError;
   if (apiErr?.statusCode) {
     return c.json(

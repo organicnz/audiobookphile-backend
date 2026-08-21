@@ -234,7 +234,9 @@ playbackRouter.openapi(playItemRoute, async (c) => {
     const rawBody = await c.req.json().catch(() => ({}));
     body = PlaySessionSchema.parse(rawBody);
   } catch (e: unknown) {
-    const zodErrors = e instanceof Object && "errors" in e ? (e as { errors: unknown }).errors : null;
+    const zodErrors = e instanceof Object && "errors" in e
+      ? (e as { errors: unknown }).errors
+      : null;
     return c.json(
       { success: false, error: zodErrors || "Invalid payload" },
       400,
@@ -282,7 +284,9 @@ playbackRouter.openapi(playItemEpisodeRoute, async (c) => {
     const rawBody = await c.req.json().catch(() => ({}));
     body = PlaySessionSchema.parse(rawBody);
   } catch (e: unknown) {
-    const zodErrors = e instanceof Object && "errors" in e ? (e as { errors: unknown }).errors : null;
+    const zodErrors = e instanceof Object && "errors" in e
+      ? (e as { errors: unknown }).errors
+      : null;
     return c.json(
       { success: false, error: zodErrors || "Invalid payload" },
       400,
@@ -329,7 +333,9 @@ playbackRouter.openapi(syncSessionRoute, async (c) => {
     const rawBody = await c.req.json();
     body = SyncPayloadSchema.parse(rawBody);
   } catch (e: unknown) {
-    const zodErrors = e instanceof Object && "errors" in e ? (e as { errors: unknown }).errors : null;
+    const zodErrors = e instanceof Object && "errors" in e
+      ? (e as { errors: unknown }).errors
+      : null;
     return c.json(
       { success: false, error: zodErrors || "Invalid payload" },
       400,
@@ -367,7 +373,9 @@ playbackRouter.openapi(bulkSyncRoute, async (c) => {
     const rawBody = await c.req.json();
     body = BulkSyncSchema.parse(rawBody);
   } catch (e: unknown) {
-    const zodErrors = e instanceof Object && "errors" in e ? (e as { errors: unknown }).errors : null;
+    const zodErrors = e instanceof Object && "errors" in e
+      ? (e as { errors: unknown }).errors
+      : null;
     return c.json(
       { success: false, error: zodErrors || "Invalid payload" },
       400,
@@ -399,7 +407,9 @@ playbackRouter.openapi(closeSessionRoute, async (c) => {
     const rawBody = await c.req.json().catch(() => ({}));
     body = CloseSessionSchema.parse(rawBody);
   } catch (e: unknown) {
-    const zodErrors = e instanceof Object && "errors" in e ? (e as { errors: unknown }).errors : null;
+    const zodErrors = e instanceof Object && "errors" in e
+      ? (e as { errors: unknown }).errors
+      : null;
     return c.json(
       { success: false, error: zodErrors || "Invalid payload" },
       400,

@@ -470,11 +470,12 @@ itemsRouter.openapi(similarItemsRoute, async (c) => {
   const { id: itemId } = c.req.valid("param");
 
   try {
-    const { data, error } = await (supabase as unknown as Record<string, any>).rpc("match_library_items", {
-      item_id: itemId,
-      match_threshold: SEARCH_MATCH_THRESHOLD,
-      match_count: SEARCH_MATCH_COUNT,
-    });
+    const { data, error } = await (supabase as unknown as Record<string, any>)
+      .rpc("match_library_items", {
+        item_id: itemId,
+        match_threshold: SEARCH_MATCH_THRESHOLD,
+        match_count: SEARCH_MATCH_COUNT,
+      });
 
     if (error) {
       console.error("[items] Failed to fetch similar items:", error);
@@ -544,7 +545,10 @@ itemsRouter.openapi(itemDetailRoute, async (c) => {
     .maybeSingle();
 
   return c.json(
-    mapBookForMobile(item as unknown as LibraryItemWithBooks, progressData) as any,
+    mapBookForMobile(
+      item as unknown as LibraryItemWithBooks,
+      progressData,
+    ) as any,
     200,
   );
 });
@@ -575,7 +579,9 @@ itemsRouter.openapi(itemCoverRoute, async (c): Promise<Response> => {
     const authorArray = Array.isArray(bookAuthors)
       ? bookAuthors
       : [bookAuthors];
-    const authorsObj = authorArray[0]?.authors as { name: string } | { name: string }[];
+    const authorsObj = authorArray[0]?.authors as { name: string } | {
+      name: string;
+    }[];
     const firstAuthorName = ((Array.isArray(authorsObj)
       ? authorsObj[0]?.name
       : authorsObj?.name) as string) || "";
@@ -789,7 +795,8 @@ itemsRouter.openapi(deleteAudioFileRoute, async (c): Promise<Response> => {
   ).eq("id", itemId).single();
   if (!item) return c.json({ error: "Not found" }, 404);
 
-  const audioFiles = (item?.audio_files as { ino: string; metadata: { path: string } }[]) || [];
+  const audioFiles =
+    (item?.audio_files as { ino: string; metadata: { path: string } }[]) || [];
   const fileToDelete = audioFiles.find((f) => f.ino === fileIno);
 
   if (fileToDelete?.metadata?.path) {
@@ -837,7 +844,10 @@ itemsRouter.openapi(batchItemsRoute, async (c) => {
   );
 
   const mappedItems = items.map((item) =>
-    mapBookForMobile(item as unknown as LibraryItemWithBooks, progressMap.get(item.id))
+    mapBookForMobile(
+      item as unknown as LibraryItemWithBooks,
+      progressMap.get(item.id),
+    )
   );
 
   c.header("Cache-Control", "private, max-age=30");

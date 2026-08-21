@@ -597,7 +597,8 @@ export class PlaybackService {
         console.error(`[PlaybackService] Failed to close session:`, e);
         return {
           success: false,
-          error: getErrorMessage(e) || "Failed to close session and update progress",
+          error: getErrorMessage(e) ||
+            "Failed to close session and update progress",
         };
       }
     }
