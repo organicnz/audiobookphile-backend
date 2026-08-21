@@ -365,6 +365,7 @@ export class PlaybackService {
 
       audioTracks: audioTracks,
       chapters: chapters,
+      manifestUrl: `/api/items/${libraryItemId}/manifest.m3u8`,
 
       currentTime: currentTime,
       playbackRate: 1.0,
@@ -604,5 +605,53 @@ export class PlaybackService {
     }
 
     return { success: true };
+  }
+
+  static async generateMasterManifest(
+    supabase: SupabaseClient<Database>,
+    userId: string,
+    libraryItemId: string,
+    episodeId?: string | null,
+  ): Promise<string> {
+    const session = await this.startSession(
+      supabase,
+      userId,
+      libraryItemId,
+      episodeId,
+    );
+
+    const tracks = (session.audioTracks || []) as Array<{
+      duration: number;
+      title: string;
+      contentUrl: string;
+    }>;
+
+    if (!tracks.length) {
+      throw new Error("No audio tracks available to construct manifest");
+    }
+
+    const maxDuration = Math.max(
+      ...tracks.map((t) => Math.ceil(Number(t.duration) || 10)),
+      10,
+    );
+
+    let m3u8 = "#EXTM3U\n";
+    m3u8 += "#EXT-X-VERSION:3\n";
+    m3u8 += `#EXT-X-TARGETDURATION:${maxDuration}\n`;
+    m3u8 += "#EXT-X-PLAYLIST-TYPE:VOD\n";
+    m3u8 += "#EXT-X-MEDIA-SEQUENCE:0\n";
+
+    for (let i = 0; i < tracks.length; i++) {
+      const track = tracks[i];
+      const dur = Number(track.duration) || 0;
+      if (i > 0) {
+        m3u8 += "#EXT-X-DISCONTINUITY\n";
+      }
+      m3u8 += `#EXTINF:${dur.toFixed(3)},${track.title || `Track ${i + 1}`}\n`;
+      m3u8 += `${track.contentUrl}\n`;
+    }
+
+    m3u8 += "#EXT-X-ENDLIST\n";
+    return m3u8;
   }
 }

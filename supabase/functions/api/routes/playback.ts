@@ -16,6 +16,7 @@ const SyncPayloadSchema = z.object({
   duration: z.number().min(0).optional(),
   progress: z.number().min(0).max(1).optional(),
   episodeId: z.string().optional(),
+  seekEpoch: z.number().optional(),
 });
 
 const BulkSyncSchema = z.array(
@@ -147,6 +148,25 @@ const closeSessionRoute = {
     200: {
       description: "Session closed",
       content: { "application/json": { schema: SyncResultSchema } },
+    },
+    400: {
+      description: "Invalid request",
+      content: { "application/json": { schema: ErrorSchema } },
+    },
+  },
+};
+
+const itemManifestRoute = {
+  method: "get" as const,
+  path: "/items/:id/manifest.m3u8",
+  tags: ["playback"],
+  request: {
+    params: z.object({ id: z.string() }),
+  },
+  responses: {
+    200: {
+      description: "HLS Master Playlist",
+      content: { "application/vnd.apple.mpegurl": { schema: z.string() } },
     },
     400: {
       description: "Invalid request",
@@ -536,4 +556,29 @@ playbackRouter.openapi(legacySessionCloseRoute, async (c) => {
     );
   }
   return c.json(result, 200);
+});
+
+playbackRouter.openapi(itemManifestRoute, async (c) => {
+  const supabase = c.get("supabase");
+  const user = c.get("user")!;
+  const { id: itemId } = c.req.valid("param");
+
+  try {
+    const manifest = await PlaybackService.generateMasterManifest(
+      supabase,
+      user.id,
+      itemId,
+      null,
+    );
+    return new Response(manifest, {
+      status: 200,
+      headers: {
+        "Content-Type": "application/vnd.apple.mpegurl",
+        "Cache-Control": "private, max-age=3600",
+      },
+    });
+  } catch (err: unknown) {
+    const e = err as Error;
+    return c.json({ success: false, error: { message: e.message } }, 400);
+  }
 });
