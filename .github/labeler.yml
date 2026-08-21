@@ -1,0 +1,8 @@
+'feature':
+  - head-branch: ['^feat/', '^feature/']
+'bug':
+  - head-branch: ['^fix/', '^bug/']
+'dependencies':
+  - head-branch: ['^renovate/', '^dependabot/']
+'chore':
+  - head-branch: ['^chore/']
