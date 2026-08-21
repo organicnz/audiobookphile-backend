@@ -1,6 +1,9 @@
 import { createOpenApiRouter, z } from "../_shared/openapi.ts";
 import { requireAdminRole } from "../_shared/auth.ts";
 import { enrichMetadataWithZAI } from "../../_shared/zai.ts";
+import { Context } from "hono";
+import { Variables } from "../_shared/types.ts";
+import { getErrorMessage } from "../_shared/errors.ts";
 
 export const metadataRouter = createOpenApiRouter();
 
@@ -401,7 +404,7 @@ metadataRouter.openapi(matchBookRoute, async (c) => {
   }
 });
 
-async function handleScrapeMetadata(c: any) {
+async function handleScrapeMetadata(c: Context<{ Variables: Variables }>) {
   if (!requireAdminRole(c.get("user"))) {
     return c.json({ error: "Forbidden: Admin access required" }, 403);
   }
@@ -452,8 +455,8 @@ async function handleScrapeMetadata(c: any) {
       { success: true, metadata: enriched || { title, author } },
       200,
     );
-  } catch (e: any) {
-    return c.json({ error: e.message || "Failed to scrape metadata" }, 500);
+  } catch (e: unknown) {
+    return c.json({ error: getErrorMessage(e) }, 500);
   }
 }
 

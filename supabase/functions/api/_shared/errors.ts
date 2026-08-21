@@ -4,7 +4,7 @@
 import { createClient } from "npm:@supabase/supabase-js@2.44.0";
 
 export class ApiError extends Error {
-  statusCode: any;
+  statusCode: number;
   code: string;
   field?: string;
   validationErrors?: unknown[];
@@ -51,3 +51,19 @@ export const serviceRoleMiddleware = async (
   c.set("supabase", supabase);
   await next();
 };
+
+/**
+ * Safe error message extraction for `catch (e: unknown)` blocks.
+ *
+ * TypeScript best practice is `catch (e: unknown)` instead of `catch (e: any)`.
+ * This utility safely extracts a human-readable message from any thrown value.
+ */
+export function getErrorMessage(e: unknown): string {
+  if (e instanceof Error) return e.message;
+  if (typeof e === "string") return e;
+  try {
+    return JSON.stringify(e);
+  } catch {
+    return "Unknown error";
+  }
+}

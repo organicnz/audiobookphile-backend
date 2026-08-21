@@ -554,13 +554,13 @@ authRouter.openapi(loginRoute, async (c) => {
       return c.json({
         error: message,
         code: authErrorHandlers.VALIDATION_ERROR().code,
-      }, authErrorHandlers.VALIDATION_ERROR().statusCode);
+      }, authErrorHandlers.VALIDATION_ERROR().statusCode as 400);
     }
     if (err instanceof Error && err.message === "Unauthorized") {
       return c.json({
         error: authErrorHandlers.UNAUTHORIZED().message,
         code: authErrorHandlers.UNAUTHORIZED().code,
-      }, authErrorHandlers.UNAUTHORIZED().statusCode);
+      }, authErrorHandlers.UNAUTHORIZED().statusCode as 401);
     }
     throw err;
   }
@@ -609,7 +609,7 @@ authRouter.openapi(logoutRoute, async (c) => {
       return c.json({
         error: authErrorHandlers.UNAUTHORIZED().message,
         code: authErrorHandlers.UNAUTHORIZED().code,
-      }, authErrorHandlers.UNAUTHORIZED().statusCode);
+      }, authErrorHandlers.UNAUTHORIZED().statusCode as 401);
     }
     throw err;
   }
@@ -686,7 +686,7 @@ authRouter.openapi(resetPasswordRoute, async (c) => {
       return c.json({
         error: authErrorHandlers.VALIDATION_ERROR().message,
         code: authErrorHandlers.VALIDATION_ERROR().code,
-      }, authErrorHandlers.VALIDATION_ERROR().statusCode);
+      }, authErrorHandlers.VALIDATION_ERROR().statusCode as 400);
     }
 
     const authHeaderToken = c.req.header("Authorization")?.replace(
@@ -702,7 +702,7 @@ authRouter.openapi(resetPasswordRoute, async (c) => {
         return c.json({
           error: authErrorHandlers.INVALID_TOKEN().message,
           code: authErrorHandlers.INVALID_TOKEN().code,
-        }, authErrorHandlers.INVALID_TOKEN().statusCode);
+        }, authErrorHandlers.INVALID_TOKEN().statusCode as 401);
       }
       const adminSupabase = createClient(
         c.get("supabaseUrl"),
@@ -716,7 +716,7 @@ authRouter.openapi(resetPasswordRoute, async (c) => {
         return c.json({
           error: authErrorHandlers.VALIDATION_ERROR().message,
           code: authErrorHandlers.VALIDATION_ERROR().code,
-        }, authErrorHandlers.VALIDATION_ERROR().statusCode);
+        }, authErrorHandlers.VALIDATION_ERROR().statusCode as 400);
       }
       return c.json({ success: true }, 200);
     }
@@ -727,7 +727,7 @@ authRouter.openapi(resetPasswordRoute, async (c) => {
       return c.json({
         error: authErrorHandlers.UNAUTHORIZED().message,
         code: authErrorHandlers.UNAUTHORIZED().code,
-      }, authErrorHandlers.UNAUTHORIZED().statusCode);
+      }, authErrorHandlers.UNAUTHORIZED().statusCode as 401);
     }
 
     return c.json({ success: true }, 200);
@@ -736,13 +736,13 @@ authRouter.openapi(resetPasswordRoute, async (c) => {
       return c.json({
         error: authErrorHandlers.VALIDATION_ERROR().message,
         code: authErrorHandlers.VALIDATION_ERROR().code,
-      }, authErrorHandlers.VALIDATION_ERROR().statusCode);
+      }, authErrorHandlers.VALIDATION_ERROR().statusCode as 400);
     }
     if (err instanceof Error && err.message === "Validation error") {
       return c.json({
         error: authErrorHandlers.VALIDATION_ERROR().message,
         code: authErrorHandlers.VALIDATION_ERROR().code,
-      }, authErrorHandlers.VALIDATION_ERROR().statusCode);
+      }, authErrorHandlers.VALIDATION_ERROR().statusCode as 400);
     }
     throw err;
   }
@@ -762,7 +762,7 @@ authRouter.openapi(changePasswordRoute, async (c) => {
       return c.json({
         error: authErrorHandlers.VALIDATION_ERROR().message,
         code: authErrorHandlers.VALIDATION_ERROR().code,
-      }, authErrorHandlers.VALIDATION_ERROR().statusCode);
+      }, authErrorHandlers.VALIDATION_ERROR().statusCode as 400);
     }
 
     const userId = c.get("userId");
@@ -778,7 +778,7 @@ authRouter.openapi(changePasswordRoute, async (c) => {
         return c.json({
           error: authErrorHandlers.VALIDATION_ERROR().message,
           code: authErrorHandlers.VALIDATION_ERROR().code,
-        }, authErrorHandlers.VALIDATION_ERROR().statusCode);
+        }, authErrorHandlers.VALIDATION_ERROR().statusCode as 400);
       }
       return c.json({ success: true }, 200);
     }
@@ -790,7 +790,7 @@ authRouter.openapi(changePasswordRoute, async (c) => {
       return c.json({
         error: authErrorHandlers.VALIDATION_ERROR().message,
         code: authErrorHandlers.VALIDATION_ERROR().code,
-      }, authErrorHandlers.VALIDATION_ERROR().statusCode);
+      }, authErrorHandlers.VALIDATION_ERROR().statusCode as 400);
     }
 
     return c.json({ success: true }, 200);
@@ -799,13 +799,13 @@ authRouter.openapi(changePasswordRoute, async (c) => {
       return c.json({
         error: authErrorHandlers.VALIDATION_ERROR().message,
         code: authErrorHandlers.VALIDATION_ERROR().code,
-      }, authErrorHandlers.VALIDATION_ERROR().statusCode);
+      }, authErrorHandlers.VALIDATION_ERROR().statusCode as 400);
     }
     if (err instanceof Error && err.message === "Validation error") {
       return c.json({
         error: authErrorHandlers.VALIDATION_ERROR().message,
         code: authErrorHandlers.VALIDATION_ERROR().code,
-      }, authErrorHandlers.VALIDATION_ERROR().statusCode);
+      }, authErrorHandlers.VALIDATION_ERROR().statusCode as 400);
     }
     throw err;
   }
@@ -885,7 +885,7 @@ authRouter.openapi(magicLinkRoute, async (c) => {
       return c.json({
         error: error.message || authErrorHandlers.VALIDATION_ERROR().message,
         code: error.code || authErrorHandlers.VALIDATION_ERROR().code,
-      }, authErrorHandlers.VALIDATION_ERROR().statusCode);
+      }, authErrorHandlers.VALIDATION_ERROR().statusCode as 400);
     }
 
     return c.json({ success: true, message: "Magic link sent to email" }, 200);
@@ -896,13 +896,13 @@ authRouter.openapi(magicLinkRoute, async (c) => {
       return c.json({
         error: message,
         code: authErrorHandlers.VALIDATION_ERROR().code,
-      }, authErrorHandlers.VALIDATION_ERROR().statusCode);
+      }, authErrorHandlers.VALIDATION_ERROR().statusCode as 400);
     }
     if (err instanceof Error && err.message === "Validation error") {
       return c.json({
         error: authErrorHandlers.VALIDATION_ERROR().message,
         code: authErrorHandlers.VALIDATION_ERROR().code,
-      }, authErrorHandlers.VALIDATION_ERROR().statusCode);
+      }, authErrorHandlers.VALIDATION_ERROR().statusCode as 400);
     }
     throw err;
   }
@@ -942,7 +942,7 @@ authRouter.openapi(verifyOtpRoute, async (c) => {
         error: verifyError?.message ||
           authErrorHandlers.INVALID_TOKEN().message,
         code: authErrorHandlers.INVALID_TOKEN().code,
-      }, authErrorHandlers.INVALID_TOKEN().statusCode);
+      }, authErrorHandlers.INVALID_TOKEN().statusCode as 401);
     }
 
     const adminSupabase = createClient(
@@ -968,13 +968,13 @@ authRouter.openapi(verifyOtpRoute, async (c) => {
       return c.json({
         error: authErrorHandlers.VALIDATION_ERROR().message,
         code: authErrorHandlers.VALIDATION_ERROR().code,
-      }, authErrorHandlers.VALIDATION_ERROR().statusCode);
+      }, authErrorHandlers.VALIDATION_ERROR().statusCode as 400);
     }
     if (err instanceof Error && err.message === "Validation error") {
       return c.json({
         error: authErrorHandlers.VALIDATION_ERROR().message,
         code: authErrorHandlers.VALIDATION_ERROR().code,
-      }, authErrorHandlers.VALIDATION_ERROR().statusCode);
+      }, authErrorHandlers.VALIDATION_ERROR().statusCode as 400);
     }
     throw err;
   }
@@ -1025,13 +1025,13 @@ authRouter.openapi(inviteRoute, async (c) => {
       return c.json({
         error: authErrorHandlers.VALIDATION_ERROR().message,
         code: authErrorHandlers.VALIDATION_ERROR().code,
-      }, authErrorHandlers.VALIDATION_ERROR().statusCode);
+      }, authErrorHandlers.VALIDATION_ERROR().statusCode as 400);
     }
     if (err instanceof Error && err.message === "Validation error") {
       return c.json({
         error: authErrorHandlers.VALIDATION_ERROR().message,
         code: authErrorHandlers.VALIDATION_ERROR().code,
-      }, authErrorHandlers.VALIDATION_ERROR().statusCode);
+      }, authErrorHandlers.VALIDATION_ERROR().statusCode as 400);
     }
     throw err;
   }
@@ -1055,7 +1055,7 @@ authRouter.openapi(refreshRoute, async (c) => {
       return c.json({
         error: authErrorHandlers.VALIDATION_ERROR().message,
         code: authErrorHandlers.VALIDATION_ERROR().code,
-      }, authErrorHandlers.VALIDATION_ERROR().statusCode);
+      }, authErrorHandlers.VALIDATION_ERROR().statusCode as 400);
     }
 
     const { data: sessionData, error: sessionError } = await supabase.auth
@@ -1070,13 +1070,13 @@ authRouter.openapi(refreshRoute, async (c) => {
         return c.json({
           error: authErrorHandlers.INVALID_TOKEN().message,
           code: authErrorHandlers.INVALID_TOKEN().code,
-        }, authErrorHandlers.INVALID_TOKEN().statusCode);
+        }, authErrorHandlers.INVALID_TOKEN().statusCode as 401);
       }
 
       return c.json({
         error: authErrorHandlers.TOKEN_EXPIRED().message,
         code: authErrorHandlers.TOKEN_EXPIRED().code,
-      }, authErrorHandlers.TOKEN_EXPIRED().statusCode);
+      }, authErrorHandlers.TOKEN_EXPIRED().statusCode as 401);
     }
 
     const adminSupabase = createClient(supabaseUrl, serviceRoleKey);
@@ -1088,7 +1088,7 @@ authRouter.openapi(refreshRoute, async (c) => {
       return c.json({
         error: authErrorHandlers.USER_NOT_FOUND().message,
         code: authErrorHandlers.USER_NOT_FOUND().code,
-      }, authErrorHandlers.USER_NOT_FOUND().statusCode);
+      }, authErrorHandlers.USER_NOT_FOUND().statusCode as any);
     }
 
     const userPayload = buildUserPayload(
@@ -1110,13 +1110,13 @@ authRouter.openapi(refreshRoute, async (c) => {
       return c.json({
         error: authErrorHandlers.VALIDATION_ERROR().message,
         code: authErrorHandlers.VALIDATION_ERROR().code,
-      }, authErrorHandlers.VALIDATION_ERROR().statusCode);
+      }, authErrorHandlers.VALIDATION_ERROR().statusCode as 400);
     }
     if (err instanceof Error && err.message === "Validation error") {
       return c.json({
         error: authErrorHandlers.VALIDATION_ERROR().message,
         code: authErrorHandlers.VALIDATION_ERROR().code,
-      }, authErrorHandlers.VALIDATION_ERROR().statusCode);
+      }, authErrorHandlers.VALIDATION_ERROR().statusCode as 400);
     }
     throw err;
   }
@@ -1151,7 +1151,7 @@ authRouter.openapi(authorizeRoute, async (c) => {
         return c.json({
           error: authErrorHandlers.INVALID_TOKEN().message,
           code: authErrorHandlers.INVALID_TOKEN().code,
-        }, authErrorHandlers.INVALID_TOKEN().statusCode);
+        }, authErrorHandlers.INVALID_TOKEN().statusCode as 401);
       }
 
       const userId = payload.sub;
@@ -1184,7 +1184,7 @@ authRouter.openapi(authorizeRoute, async (c) => {
           return c.json({
             error: authErrorHandlers.USER_NOT_FOUND().message,
             code: authErrorHandlers.USER_NOT_FOUND().code,
-          }, authErrorHandlers.USER_NOT_FOUND().statusCode);
+          }, authErrorHandlers.USER_NOT_FOUND().statusCode as any);
         }
       }
 
@@ -1233,7 +1233,7 @@ authRouter.openapi(authorizeRoute, async (c) => {
       return c.json({
         error: authErrorHandlers.UNAUTHORIZED().message,
         code: authErrorHandlers.UNAUTHORIZED().code,
-      }, authErrorHandlers.UNAUTHORIZED().statusCode);
+      }, authErrorHandlers.UNAUTHORIZED().statusCode as 401);
     }
 
     // Fetch final profile for payload (single fetch instead of redundant re-fetches)
@@ -1254,13 +1254,13 @@ authRouter.openapi(authorizeRoute, async (c) => {
       return c.json({
         error: authErrorHandlers.VALIDATION_ERROR().message,
         code: authErrorHandlers.VALIDATION_ERROR().code,
-      }, authErrorHandlers.VALIDATION_ERROR().statusCode);
+      }, authErrorHandlers.VALIDATION_ERROR().statusCode as 400);
     }
     if (err instanceof Error && err.message === "Validation error") {
       return c.json({
         error: authErrorHandlers.VALIDATION_ERROR().message,
         code: authErrorHandlers.VALIDATION_ERROR().code,
-      }, authErrorHandlers.VALIDATION_ERROR().statusCode);
+      }, authErrorHandlers.VALIDATION_ERROR().statusCode as 400);
     }
     throw err;
   }

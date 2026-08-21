@@ -3,6 +3,9 @@ import { StorageRouter } from "../../_shared/storage-router.ts";
 import { requireAdminRole } from "../_shared/auth.ts";
 import { presignUpload } from "../../_shared/uploadPresign.ts";
 import { parseTitleAndAuthor } from "../../_shared/titleAuthorParser.ts";
+import { Context } from "hono";
+import { Variables } from "../_shared/types.ts";
+import { getErrorMessage } from "../_shared/errors.ts";
 import {
   matchExistingBookWithZAI,
   naturalSortFilenames,
@@ -463,10 +466,10 @@ downloadsRouter.openapi(downloadFileRoute, async (c) => {
   }
 });
 
-async function handleUploadPresign(c: any) {
+async function handleUploadPresign(c: Context<{ Variables: Variables }>) {
   const user = c.get("user");
   if (!user) {
-    return c.json({ error: "Not authorized" }, 401);
+    return c.json({ error: "Not authorized" }, 403);
   }
   const supabase = c.get("supabase");
 
@@ -485,7 +488,7 @@ async function handleUploadPresign(c: any) {
       {
         error: "Validation error",
         details: parsed.error.flatten().fieldErrors,
-      } as Record<string, any>,
+      } as any,
       400,
     );
   }
@@ -495,8 +498,8 @@ async function handleUploadPresign(c: any) {
   try {
     const res = await presignUpload(supabase, filename, contentType);
     return c.json(res as Record<string, any>, 200);
-  } catch (e: any) {
-    return c.json({ error: e.message || "Presign failed" }, 500);
+  } catch (e: unknown) {
+    return c.json({ error: getErrorMessage(e) }, 500);
   }
 }
 

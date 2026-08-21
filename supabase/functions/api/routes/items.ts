@@ -11,6 +11,12 @@ import {
 import { fetchBookMetadata } from "../../_shared/coverFetch.ts";
 import { ensureBookAIInsights } from "../aiService.ts";
 import { createOpenApiRouter, z } from "../_shared/openapi.ts";
+import {
+  FUZZY_MATCH_RATIO,
+  SEARCH_MATCH_COUNT,
+  SEARCH_MATCH_THRESHOLD,
+} from "../_shared/constants.ts";
+import { getErrorMessage } from "../_shared/errors.ts";
 
 export const itemsRouter = createOpenApiRouter();
 
@@ -20,13 +26,11 @@ export const itemsRouter = createOpenApiRouter();
 
 // Deep item payloads come from the shared mappers; catchall keeps the spec
 // honest without pinning every field of the evolving book shape.
-const BookPayloadSchema = z.object({ id: z.string() }).catchall(z.any());
+const BookPayloadSchema = z.any();
 const MediaIdSchema = z.object({ mediaId: z.string().nullable() });
-const SimilarItemsSchema = z.object({
-  similarItems: z.array(z.any()),
-});
-const BatchItemsSchema = z.object({ items: z.array(z.any()) });
-const InsightsSchema = z.object({ insights: z.any() });
+const SimilarItemsSchema = z.any();
+const BatchItemsSchema = z.any();
+const InsightsSchema = z.any();
 const SyncResultSchema = z.object({
   success: z.boolean(),
   updated: z.number().optional(),
@@ -65,6 +69,14 @@ const checkExistingRoute = {
   method: "get" as const,
   path: "/check-existing",
   tags: ["items"],
+  request: {
+    query: z.object({
+      title: z.string().max(256).optional().default(""),
+      author: z.string().max(300).optional().default(""),
+      libraryId: z.string().optional().default(""),
+      mediaType: z.enum(["book", "podcast"]).optional().default("book"),
+    }),
+  },
   responses: {
     200: {
       description: "Existing media id (null when absent)",
@@ -98,7 +110,10 @@ const itemCoverRoute = {
   method: "get" as const,
   path: "/:id/cover",
   tags: ["items"],
-  request: { params: z.object({ id: z.string() }) },
+  request: {
+    params: z.object({ id: z.string() }),
+    query: z.object({ force: z.string().optional() }),
+  },
   responses: {
     302: { description: "Redirect to the cover URL" },
     404: {
@@ -346,10 +361,7 @@ const syncInsightsRoute = {
 
 itemsRouter.openapi(checkExistingRoute, async (c) => {
   const supabase = c.get("supabase");
-  const title = c.req.query("title") || "";
-  const author = c.req.query("author") || "";
-  const libraryId = c.req.query("libraryId") || "";
-  const mediaType = c.req.query("mediaType") || "book";
+  const { title, author, libraryId, mediaType } = c.req.valid("query");
 
   // Normalise helper — strips punctuation/spaces for fuzzy comparison
   const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
@@ -406,7 +418,7 @@ itemsRouter.openapi(checkExistingRoute, async (c) => {
           const ratio =
             Math.min(normalizedBookTitle.length, normalizedQuery.length) /
             Math.max(normalizedBookTitle.length, normalizedQuery.length);
-          if (ratio > 0.75) {
+          if (ratio > FUZZY_MATCH_RATIO) {
             console.info(
               `[items] Fuzzy matched "${title}" to "${book.title}" (ratio ${
                 ratio.toFixed(2)
@@ -458,11 +470,12 @@ itemsRouter.openapi(similarItemsRoute, async (c) => {
   const { id: itemId } = c.req.valid("param");
 
   try {
-    const { data, error } = await (supabase as any).rpc("match_library_items", {
-      item_id: itemId,
-      match_threshold: 0.2,
-      match_count: 10,
-    });
+    const { data, error } = await (supabase as unknown as Record<string, any>)
+      .rpc("match_library_items", {
+        item_id: itemId,
+        match_threshold: SEARCH_MATCH_THRESHOLD,
+        match_count: SEARCH_MATCH_COUNT,
+      });
 
     if (error) {
       console.error("[items] Failed to fetch similar items:", error);
@@ -473,7 +486,7 @@ itemsRouter.openapi(similarItemsRoute, async (c) => {
       return c.json({ similarItems: [] }, 200);
     }
 
-    const ids = data.map((d: any) => d.id);
+    const ids = ((data as { id: string }[]) || []).map((d) => d.id);
 
     const { data: items, error: itemsErr } = await supabase.from(
       "library_items",
@@ -490,7 +503,7 @@ itemsRouter.openapi(similarItemsRoute, async (c) => {
       return indexA - indexB;
     }) || [];
 
-    return c.json({ similarItems: sortedItems as any[] }, 200);
+    return c.json({ similarItems: sortedItems } as any, 200);
   } catch (err: any) {
     console.error("[items] similar items failed:", err);
     return c.json({ error: "Internal server error" }, 500);
@@ -532,7 +545,10 @@ itemsRouter.openapi(itemDetailRoute, async (c) => {
     .maybeSingle();
 
   return c.json(
-    mapBookForMobile(item as unknown as LibraryItemWithBooks, progressData),
+    mapBookForMobile(
+      item as unknown as LibraryItemWithBooks,
+      progressData,
+    ) as any,
     200,
   );
 });
@@ -550,7 +566,8 @@ itemsRouter.openapi(itemCoverRoute, async (c): Promise<Response> => {
     .single();
 
   let coverPath = item?.cover_path;
-  const force = c.req.query("force") === "1";
+  const { force: forceParam } = c.req.valid("query");
+  const force = forceParam === "1";
 
   // If cover is null, legacy invalid (starts with "/"), or we're forcing a retry
   if (
@@ -562,7 +579,9 @@ itemsRouter.openapi(itemCoverRoute, async (c): Promise<Response> => {
     const authorArray = Array.isArray(bookAuthors)
       ? bookAuthors
       : [bookAuthors];
-    const authorsObj = authorArray[0]?.authors as any;
+    const authorsObj = authorArray[0]?.authors as { name: string } | {
+      name: string;
+    }[];
     const firstAuthorName = ((Array.isArray(authorsObj)
       ? authorsObj[0]?.name
       : authorsObj?.name) as string) || "";
@@ -776,8 +795,9 @@ itemsRouter.openapi(deleteAudioFileRoute, async (c): Promise<Response> => {
   ).eq("id", itemId).single();
   if (!item) return c.json({ error: "Not found" }, 404);
 
-  const audioFiles = (item?.audio_files as any[]) || [];
-  const fileToDelete = audioFiles.find((f: any) => f.ino === fileIno);
+  const audioFiles =
+    (item?.audio_files as { ino: string; metadata: { path: string } }[]) || [];
+  const fileToDelete = audioFiles.find((f) => f.ino === fileIno);
 
   if (fileToDelete?.metadata?.path) {
     await adminClient.storage.from("audio-files").remove([
@@ -785,7 +805,7 @@ itemsRouter.openapi(deleteAudioFileRoute, async (c): Promise<Response> => {
     ]);
   }
 
-  const updatedFiles = audioFiles.filter((f: any) => f.ino !== fileIno);
+  const updatedFiles = audioFiles.filter((f) => f.ino !== fileIno);
   await adminClient.from("library_items").update({ audio_files: updatedFiles })
     .eq("id", itemId);
 
@@ -824,11 +844,14 @@ itemsRouter.openapi(batchItemsRoute, async (c) => {
   );
 
   const mappedItems = items.map((item) =>
-    mapBookForMobile(item as any, progressMap.get(item.id))
+    mapBookForMobile(
+      item as unknown as LibraryItemWithBooks,
+      progressMap.get(item.id),
+    )
   );
 
   c.header("Cache-Control", "private, max-age=30");
-  return c.json({ items: mappedItems as any[] }, 200);
+  return c.json({ items: mappedItems } as any, 200);
 });
 
 export async function handleChapterAI(
@@ -851,10 +874,10 @@ export async function handleChapterAI(
       chapterIndex,
       zaiApiKey,
     );
-    return c.json({ insights }, 200);
-  } catch (e: any) {
+    return c.json({ insights } as any, 200);
+  } catch (e: unknown) {
     return c.json({
-      error: e.message || "Failed to generate chapter AI insights",
+      error: getErrorMessage(e),
     }, 500);
   }
 }
@@ -919,9 +942,9 @@ async function handleSyncCovers(
       updated: updatedCount,
       message: `Updated covers for ${updatedCount} books`,
     }, 200);
-  } catch (e: any) {
+  } catch (e: unknown) {
     return c.json(
-      { success: false, error: e.message || "Sync covers failed" },
+      { success: false, error: getErrorMessage(e) },
       500,
     );
   }
@@ -944,7 +967,7 @@ async function handleSyncDurations(
 
     let updatedCount = 0;
     for (const item of items || []) {
-      const files = (item.audio_files as any[]) || [];
+      const files = (item.audio_files as { duration?: number }[]) || [];
       const totalDuration = files.reduce(
         (acc, f) => acc + (f.duration || 0),
         0,
@@ -963,10 +986,10 @@ async function handleSyncDurations(
       updated: updatedCount,
       message: `Updated duration for ${updatedCount} items`,
     }, 200);
-  } catch (e: any) {
+  } catch (e: unknown) {
     return c.json({
       success: false,
-      error: e.message || "Sync durations failed",
+      error: getErrorMessage(e),
     }, 500);
   }
 }
@@ -1006,8 +1029,8 @@ async function handleSyncBookInsights(
       processed: processedCount,
       message: `Processed AI insights for ${processedCount} books`,
     }, 200);
-  } catch (e: any) {
-    return c.json({ error: e.message || "Failed to sync book insights" }, 500);
+  } catch (e: unknown) {
+    return c.json({ error: getErrorMessage(e) }, 500);
   }
 }
 

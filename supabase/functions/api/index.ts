@@ -1,7 +1,8 @@
-import { Hono } from "hono";
+import { Context, Hono } from "hono";
 import { OpenAPIHono } from "@hono/zod-openapi";
 import { cors } from "hono/cors";
 import { compress } from "hono/compress";
+import { secureHeaders } from "hono/secure-headers";
 import { createClient } from "npm:@supabase/supabase-js@2.44.0";
 import { Sentry, trackRequestMetrics } from "../_shared/sentry.ts";
 
@@ -115,6 +116,9 @@ app.use(
 // wire. Must run after CORS so preflight responses stay uncompressed.
 app.use("*", compress());
 
+// 2.5 Security Headers (CSP, HSTS, X-Frame-Options)
+app.use("*", secureHeaders());
+
 // 3. Alias deprecation log (P2.1): the canonical paths are the runtime-stripped
 // ones (Supabase Edge Runtime removes /functions/v1/api). Log once per
 // /api-prefixed alias path so migration off the legacy prefix is observable.
@@ -148,7 +152,7 @@ const healthDoc = {
     },
   },
 };
-const healthHandler = async (c: any) => {
+const healthHandler = async (c: Context<{ Variables: Variables }>) => {
   const zaiConfigured = Boolean(
     Deno.env.get("ZAI_API_KEY") || Deno.env.get("ZHIPU_API_KEY"),
   );
@@ -197,7 +201,7 @@ const healthHandler = async (c: any) => {
 
   return c.json(payload);
 };
-app.openapi(healthDoc, healthHandler);
+app.openapi(healthDoc, healthHandler as any);
 
 // 4. Structured Logging Middleware
 app.use(async (c, next) => {
@@ -246,7 +250,10 @@ const buildErrorFingerprint = (err: unknown): string | null => {
     .find((line) => /at\s+.+\.ts:\d+/.test(line));
   return frame ? `${name}:${frame}` : name;
 };
-const handleApiError = async (err: unknown, c: any) => {
+const handleApiError = async (
+  err: unknown,
+  c: Context<{ Variables: Variables }>,
+) => {
   const apiErr = err as ApiError;
   if (apiErr?.statusCode) {
     return c.json(
@@ -262,7 +269,7 @@ const handleApiError = async (err: unknown, c: any) => {
         requestId: c.get("requestId"),
         timestamp: new Date().toISOString(),
       },
-      apiErr.statusCode,
+      apiErr.statusCode as any,
     );
   } else if (err instanceof Response && err.status >= 500) {
     return err;
