@@ -348,48 +348,26 @@ metadataRouter.openapi(matchBookRoute, async (c) => {
         Deno.env.get("ZHIPU_API_KEY") ?? "";
       if (zaiApiKey) {
         try {
-          const aiRes = await fetch(
-            "https://open.bigmodel.cn/api/paas/v4/chat/completions",
-            {
-              method: "POST",
-              headers: {
-                Authorization: `Bearer ${zaiApiKey}`,
-                "Content-Type": "application/json",
-              },
-              body: JSON.stringify({
-                model: "glm-4-flash",
-                messages: [
-                  {
-                    role: "user",
-                    content:
-                      `Provide accurate metadata for the audiobook "${title}" by "${
-                        author || "Unknown"
-                      }". Return ONLY a JSON object: {"title": "...", "author": "...", "description": "...", "genres": ["..."], "publishedYear": "YYYY"}`,
-                  },
-                ],
-                temperature: 0.1,
-              }),
-            },
+          const enriched = await enrichMetadataWithZAI(
+            title,
+            author,
+            zaiApiKey,
           );
-          if (aiRes.ok) {
-            const aiData = await aiRes.json();
-            const text = aiData.choices?.[0]?.message?.content || "";
-            const match = text.match(/\{[\s\S]*\}/);
-            if (match) {
-              const parsed = JSON.parse(match[0]);
-              results.push({
-                title: parsed.title || title,
-                author: parsed.author || author || "",
-                description: parsed.description || "",
-                cover: undefined,
-                series: [],
-                genres: parsed.genres || [],
-                tags: [],
-                publishedYear: parsed.publishedYear || undefined,
-                explicit: false,
-                abridged: false,
-              });
-            }
+          if (enriched) {
+            results.push({
+              title: enriched.title || title,
+              subtitle: enriched.subtitle || undefined,
+              author: enriched.author || author || "",
+              description: enriched.description || "",
+              cover: undefined,
+              series: enriched.series ? [enriched.series] : [],
+              genres: enriched.genres || [],
+              tags: [],
+              publishedYear: enriched.publishedYear || undefined,
+              narrator: enriched.narrator || undefined,
+              explicit: false,
+              abridged: false,
+            });
           }
         } catch (_e) {
           // Ignore

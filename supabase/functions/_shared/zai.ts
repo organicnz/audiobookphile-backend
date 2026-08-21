@@ -58,7 +58,7 @@ export async function sortFilesWithZAI(
   const cacheKey = `sort_files_${filenames.join("||")}`;
   const cached = getCachedResult<string[]>(cacheKey);
   if (cached) {
-    console.log(
+    console.info(
       `[z.ai] Cache hit for ${filenames.length} track sequence sorting.`,
     );
     return cached;
@@ -105,7 +105,7 @@ Return ONLY a valid JSON array of strings containing every exact filename in chr
         new Set(sortedList).size === filenames.length &&
         filenames.every((f) => sortedList.includes(f))
       ) {
-        console.log(
+        console.info(
           `[z.ai] Successfully optimized chapter sequence sorting for ${filenames.length} tracks.`,
         );
         setCachedResult(cacheKey, sortedList);
@@ -157,15 +157,20 @@ export async function matchExistingBookWithZAI(
     }));
 
     const prompt =
-      `An audiobook is being uploaded with Title: "${uploadTitle}" and Author: "${
-        uploadAuthor || "Unknown"
-      }".
-Compare it against this list of existing books in the library:
+      `You are an authoritative digital librarian and metadata auditor.
+An audiobook file is being uploaded with:
+- Upload Title: "${uploadTitle}"
+- Upload Author: "${uploadAuthor || "Unknown"}"
+
+Compare it against the existing books in the library:
 ${JSON.stringify(candidates)}
 
-Determine if the uploading book is the same book as any candidate in the list (considering subtitle variations, edition names, narrator tags, or minor formatting differences).
-If it matches an existing book, return ONLY a JSON object with the matching ID: {"matchedId": "ID"}.
-If it is a completely new/different book, return: {"matchedId": null}`;
+CRITICAL RULES:
+1. Different books by the same author (e.g. "Sapiens" vs "Homo Deus" vs "21 Lessons for the 21st Century" by Yuval Noah Harari, or "The Hobbit" vs "The Fellowship of the Ring" by J.R.R. Tolkien) are DISTINCT INDEPENDENT WORKS and MUST NEVER MATCH.
+2. Different volumes in a series (e.g., Book 1 vs Book 2) MUST NEVER MATCH.
+3. ONLY match if the candidate represents the EXACT SAME book title (allowing for minor subtitle differences like "Sapiens" vs "Sapiens: A Brief History of Humankind", narrator tags, or punctuation differences).
+4. If it matches an existing book, return ONLY a JSON object: {"matchedId": "matching-candidate-id"}.
+5. If it is a distinct or new book, return ONLY: {"matchedId": null}`;
 
     const res = await fetch(
       "https://open.bigmodel.cn/api/paas/v4/chat/completions",
@@ -178,7 +183,7 @@ If it is a completely new/different book, return: {"matchedId": null}`;
         body: JSON.stringify({
           model: "glm-4-flash",
           messages: [{ role: "user", content: prompt }],
-          temperature: 0.1,
+          temperature: 0.0,
         }),
         signal: AbortSignal.timeout(10_000),
       },
@@ -198,7 +203,7 @@ If it is a completely new/different book, return: {"matchedId": null}`;
           result.matchedId &&
           existingBooks.some((b) => b.id === result.matchedId)
         ) {
-          console.log(
+          console.info(
             `[z.ai] Matched uploading book "${uploadTitle}" to existing record ID: ${result.matchedId}`,
           );
           setCachedResult(cacheKey, result.matchedId);
@@ -240,7 +245,7 @@ export async function smartSortLibraryItems(
   }`;
   const cachedSort = getCachedResult<string[]>(cacheKey);
   if (cachedSort) {
-    console.log(`[z.ai] Cache hit for smart sort by criteria: "${criteria}"`);
+    console.info(`[z.ai] Cache hit for smart sort by criteria: "${criteria}"`);
     return cachedSort;
   }
 
@@ -299,14 +304,23 @@ Return ONLY a valid JSON array of string IDs representing the sorted order: ["id
 }
 
 /**
- * Enriches audiobook metadata (description, genres, published year) using Z.AI (GLM-4).
+ * Enriches audiobook metadata (canonical title, subtitle, description, genres, published year, narrator, series) using Z.AI (GLM-4).
  */
 export async function enrichMetadataWithZAI(
   title: string,
   author: string,
   zaiApiKey: string,
 ): Promise<
-  { description?: string; genres?: string[]; publishedYear?: string } | null
+  {
+    title?: string;
+    author?: string;
+    subtitle?: string;
+    description?: string;
+    genres?: string[];
+    publishedYear?: string;
+    series?: string;
+    narrator?: string;
+  } | null
 > {
   if (!title || !zaiApiKey) return null;
 
@@ -314,7 +328,16 @@ export async function enrichMetadataWithZAI(
     (author || "").toLowerCase().trim()
   }`;
   const cachedMeta = getCachedResult<
-    { description?: string; genres?: string[]; publishedYear?: string }
+    {
+      title?: string;
+      author?: string;
+      subtitle?: string;
+      description?: string;
+      genres?: string[];
+      publishedYear?: string;
+      series?: string;
+      narrator?: string;
+    }
   >(cacheKey);
   if (cachedMeta) return cachedMeta;
 
@@ -333,12 +356,25 @@ export async function enrichMetadataWithZAI(
             {
               role: "user",
               content:
-                `Provide accurate executive summary (description), top 3 genres/tags, and published year for the audiobook "${title}" by "${
+                `Provide accurate executive metadata for the specific audiobook "${title}" by author "${
                   author || "Unknown"
-                }". Return ONLY a JSON object: {"description": "...", "genres": ["..."], "publishedYear": "YYYY"}`,
+                }".
+Ensure you distinguish accurately between different works by the same author (e.g., Sapiens vs Homo Deus vs 21 Lessons for the 21st Century).
+
+Return ONLY a JSON object with:
+{
+  "title": "Exact Main Book Title",
+  "subtitle": "Subtitle or empty string",
+  "author": "Author Full Name",
+  "description": "2-3 paragraph compelling summary",
+  "genres": ["Genre1", "Genre2", "Genre3"],
+  "publishedYear": "YYYY",
+  "series": "Series Name (or empty string)",
+  "narrator": "Narrator Name (if known, or empty string)"
+}`,
             },
           ],
-          temperature: 0.2,
+          temperature: 0.1,
         }),
       },
     );
@@ -346,7 +382,11 @@ export async function enrichMetadataWithZAI(
     if (res.ok) {
       const aiData = await res.json();
       const text = aiData.choices?.[0]?.message?.content || "";
-      const match = text.match(/\{[\s\S]*\}/);
+      const cleaned = text
+        .replace(/```json\s*/gi, "")
+        .replace(/```\s*/g, "")
+        .trim();
+      const match = cleaned.match(/\{[\s\S]*\}/);
       if (match) {
         const result = JSON.parse(match[0]);
         setCachedResult(cacheKey, result);

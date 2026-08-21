@@ -1096,6 +1096,7 @@ async function checkDuplicateBook(
         }
         if (
           normItemTitle && normTitle &&
+          normItemTitle.length >= 6 && normTitle.length >= 6 &&
           (normItemTitle.startsWith(normTitle) ||
             normTitle.startsWith(normItemTitle))
         ) {
@@ -1106,9 +1107,10 @@ async function checkDuplicateBook(
             "",
           );
           if (
-            !itemAuthor || !uploadAuthor ||
-            itemAuthor.includes(uploadAuthor) ||
-            uploadAuthor.includes(itemAuthor)
+            itemAuthor && uploadAuthor &&
+            (itemAuthor === uploadAuthor ||
+              itemAuthor.includes(uploadAuthor) ||
+              uploadAuthor.includes(itemAuthor))
           ) {
             matchedId = item.id;
             break;
