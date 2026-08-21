@@ -1,5 +1,8 @@
 import { createOpenApiRouter, z } from "../_shared/openapi.ts";
 import { requireAdminRole } from "../_shared/auth.ts";
+import { Context } from "hono";
+import { Variables } from "../_shared/types.ts";
+import { getErrorMessage } from "../_shared/errors.ts";
 
 export const settingsRouter = createOpenApiRouter();
 
@@ -255,7 +258,7 @@ const backupDatabaseRoute = {
 
 // --- HANDLERS ---
 
-function adminCheck(c: any) {
+function adminCheck(c: Context<{ Variables: Variables }>) {
   return requireAdminRole(c.get("user"));
 }
 
@@ -442,12 +445,13 @@ settingsRouter.openapi(deleteGenreRoute, async (c) => {
   return c.json({ numItemsUpdated }, 200);
 });
 
-const handlePutGenre = async (c: any) => {
+const handlePutGenre = async (c: Context<{ Variables: Variables }>) => {
   if (!adminCheck(c)) {
     return c.json({ error: "Forbidden: Admin access required" }, 403);
   }
   const supabase = c.get("supabase");
-  const { genre } = c.req.valid("param");
+  const genre = c.req.param("genre");
+  if (!genre) return c.json({ error: "Missing genre param" }, 400);
 
   let body;
   try {
@@ -517,12 +521,13 @@ settingsRouter.openapi(deleteTagRoute, async (c) => {
   return c.json({ numItemsUpdated }, 200);
 });
 
-const handlePutTag = async (c: any) => {
+const handlePutTag = async (c: Context<{ Variables: Variables }>) => {
   if (!adminCheck(c)) {
     return c.json({ error: "Forbidden: Admin access required" }, 403);
   }
   const supabase = c.get("supabase");
-  const { tag } = c.req.valid("param");
+  const tag = c.req.param("tag");
+  if (!tag) return c.json({ error: "Missing tag param" }, 400);
 
   let body;
   try {
@@ -564,7 +569,7 @@ const handlePutTag = async (c: any) => {
 settingsRouter.openapi(putTagRoute, handlePutTag);
 settingsRouter.openapi(patchTagRoute, handlePutTag);
 
-async function handleStorageSync(c: any) {
+async function handleStorageSync(c: Context<{ Variables: Variables }>) {
   if (!adminCheck(c)) {
     return c.json({ error: "Forbidden: Admin access required" }, 403);
   }
@@ -608,10 +613,10 @@ async function handleStorageSync(c: any) {
       orphans,
       totalAudioFiles: files.length,
     }, 200);
-  } catch (e: any) {
+  } catch (e: unknown) {
     return c.json({
       synced: false,
-      error: e.message || "Storage sync failed",
+      error: getErrorMessage(e),
       orphans: [],
       totalAudioFiles: 0,
     }, 500);
@@ -653,10 +658,10 @@ settingsRouter.openapi(backupDatabaseRoute, async (c) => {
       message: "Backup created",
       filename,
     }, 200);
-  } catch (e: any) {
+  } catch (e: unknown) {
     return c.json({
       success: false,
-      error: e.message || "Backup failed",
+      error: getErrorMessage(e),
     }, 500);
   }
 });

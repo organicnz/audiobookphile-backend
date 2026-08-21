@@ -1,5 +1,7 @@
 import { upsertMediaProgress } from "../../_shared/progress.ts";
 import { createOpenApiRouter, z } from "../_shared/openapi.ts";
+import { Context } from "hono";
+import { Variables } from "../_shared/types.ts";
 
 export const progressRouter = createOpenApiRouter();
 
@@ -181,9 +183,10 @@ progressRouter.openapi(updateProgressRoute, async (c) => {
   try {
     const rawBody = await c.req.json();
     body = ProgressPayloadSchema.parse(rawBody);
-  } catch (e: any) {
+  } catch (e: unknown) {
+    const zodErrors = e instanceof Object && "errors" in e ? (e as { errors: unknown }).errors : null;
     return c.json(
-      { success: false, error: e.errors || "Invalid payload" },
+      { success: false, error: zodErrors || "Invalid payload" },
       400,
     );
   }
@@ -212,9 +215,10 @@ progressRouter.openapi(updateProgressBatchRoute, async (c) => {
   try {
     const rawBody = await c.req.json();
     items = BatchProgressPayloadSchema.parse(rawBody);
-  } catch (e: any) {
+  } catch (e: unknown) {
+    const zodErrors = e instanceof Object && "errors" in e ? (e as { errors: unknown }).errors : null;
     return c.json(
-      { success: false, error: e.errors || "Invalid payload" },
+      { success: false, error: zodErrors || "Invalid payload" },
       400,
     );
   }
@@ -260,7 +264,7 @@ progressRouter.openapi(deleteProgressRoute, async (c) => {
   return c.json({ success: true }, 200);
 });
 
-const legacyProgressHandler = async (c: any) => {
+const legacyProgressHandler = async (c: Context<{ Variables: Variables }>) => {
   const supabase = c.get("supabase");
   const user = c.get("user")!;
   let body;

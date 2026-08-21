@@ -70,7 +70,7 @@ interface SanitizedEvent {
 }
 
 function log(...args: unknown[]): void {
-  console.log("[remediate]", ...args);
+  console.info("[remediate]", ...args);
 }
 
 function warn(...args: unknown[]): void {
@@ -335,8 +335,8 @@ function validateFix(): { output: string; ok: boolean } {
   return { output, ok: check.code === 0 && test.code === 0 };
 }
 
-function hasOpenPrFor(issueId: string): boolean {
-  if (DRY_RUN || !REPO || !GITHUB_TOKEN) return false;
+async function hasOpenPrFor(_issueId: string, shortId: string): Promise<boolean> {
+  if (DRY_RUN || !REPO) return false;
   const list = exec([
     "gh",
     "pr",
@@ -346,7 +346,7 @@ function hasOpenPrFor(issueId: string): boolean {
     "--state",
     "open",
     "--search",
-    `sentry-${issueId}`,
+    `"${shortId}" in:title`,
     "--json",
     "number",
   ]);
@@ -662,13 +662,14 @@ async function main(): Promise<void> {
   for (const issue of issues) {
     if (prsOpened >= MAX_PRS) break;
     const id = String(issue.id ?? "");
+    const shortId = String(issue.shortId ?? id);
     if (checkpoint.processedIssueIds.includes(id)) continue;
     const lastSeen = String(issue.lastSeen ?? "");
     if (
       checkpoint.lastProcessedAt && lastSeen &&
       lastSeen <= checkpoint.lastProcessedAt
     ) continue;
-    if (await hasOpenPrFor(id)) {
+    if (await hasOpenPrFor(id, shortId)) {
       checkpoint.processedIssueIds.push(id);
       continue;
     }

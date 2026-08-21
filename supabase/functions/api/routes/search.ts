@@ -1,5 +1,7 @@
 import { createOpenApiRouter, z } from "../_shared/openapi.ts";
 import { LibraryItemWithBooks, mapBookForMobile } from "../../api/mappers.ts";
+import { Context } from "hono";
+import { Variables } from "../_shared/types.ts";
 
 export const searchRouter = createOpenApiRouter();
 
@@ -16,7 +18,7 @@ const GenerateEmbeddingBodySchema = z.object({
 
 const ServerErrorSchema = z.object({ error: z.string() });
 const HistoryResultSchema = z.array(z.record(z.string(), z.any()));
-const HistoryCreateSchema = z.object({ query: z.string() });
+const HistoryCreateSchema = z.object({ query: z.string().max(256) });
 const SuccessSchema = z.object({ success: z.boolean() });
 const SmartSearchResultSchema = z.object({
   results: z.array(z.record(z.string(), z.any())),
@@ -168,21 +170,23 @@ searchRouter.openapi(createHistoryRoute, async (c) => {
     return c.json({ error: "Invalid JSON" }, 400);
   }
 
-  if (!body.query || typeof body.query !== "string") {
-    return c.json({ error: "query is required" }, 400);
+  const parsed = HistoryCreateSchema.safeParse(body);
+  if (!parsed.success) {
+    return c.json({ error: parsed.error.flatten().fieldErrors }, 400);
   }
+  const query = parsed.data.query;
 
   // Delete any existing exact same query to avoid duplicates and move it to top
   await supabase.from("search_history").delete().eq("user_id", user.id).eq(
     "query",
-    body.query,
+    query,
   );
 
   const { data: newHistory, error } = await supabase
     .from("search_history")
     .insert({
       user_id: user.id,
-      query: body.query,
+      query: query,
     })
     .select()
     .single();
@@ -210,7 +214,14 @@ searchRouter.openapi(deleteHistoryRoute, async (c) => {
   return c.json({ success: true }, 200);
 });
 
-async function handleSmartSearch(c: any) {
+/**
+ * Handles smart search requests using AI embeddings and database matching.
+ * Validates the query and generates/searches embeddings to return matched library items.
+ *
+ * @param c - The Hono Context object containing environment variables and the Supabase client.
+ * @returns A JSON response with the search results or an error object.
+ */
+async function handleSmartSearch(c: Context<{ Variables: Variables }>) {
   const supabase = c.get("supabase");
 
   let body;
@@ -286,7 +297,7 @@ async function handleSmartSearch(c: any) {
   const { data: results, error } = await dbQuery.limit(50);
   if (error) return c.json({ error: error.message }, 500);
 
-  const formattedResults = (results || []).map((item: any) =>
+  const formattedResults = (results || []).map((item) =>
     mapBookForMobile(item as unknown as LibraryItemWithBooks)
   );
 
@@ -300,7 +311,14 @@ searchRouter.openapi(
   handleSmartSearch,
 );
 
-async function handleGenerateEmbedding(c: any) {
+/**
+ * Handles requests to generate an embedding for a given text using the Zhipu AI / ZAI model.
+ * Note: Only for debugging or internal admin usage.
+ *
+ * @param c - The Hono Context object containing environment variables.
+ * @returns A JSON response with the generated embedding or an error object.
+ */
+async function handleGenerateEmbedding(c: Context<{ Variables: Variables }>) {
   let body;
   try {
     body = await c.req.json();
@@ -346,8 +364,8 @@ async function handleGenerateEmbedding(c: any) {
       embedding: aiData.data?.[0]?.embedding || [],
       model: "embedding-2",
     }, 200);
-  } catch (e: any) {
-    return c.json({ error: e.message || "Embedding generation failed" }, 500);
+  } catch (e: unknown) {
+    return c.json({ error: (e as Error).message || "Embedding generation failed" }, 500);
   }
 }
 

@@ -5,6 +5,7 @@ import {
   bulkUpsertMediaProgress,
   upsertMediaProgress,
 } from "../_shared/progress.ts";
+import { getErrorMessage } from "./_shared/errors.ts";
 
 export class PlaybackService {
   static async startSession(
@@ -397,11 +398,11 @@ export class PlaybackService {
           progress,
         },
       );
-    } catch (e: any) {
+    } catch (e: unknown) {
       console.error(`[PlaybackService] Failed to sync session:`, e);
       return {
         success: false,
-        error: e.message || "Failed to upsert media progress",
+        error: getErrorMessage(e) || "Failed to upsert media progress",
       };
     }
 
@@ -459,7 +460,7 @@ export class PlaybackService {
         for (const item of progressItems) {
           syncedSessionIds.push(item.sessionId);
         }
-      } catch (e: any) {
+      } catch (e: unknown) {
         console.warn(
           `[PlaybackService] Bulk progress upsert failed, falling back to individual:`,
           e,
@@ -537,7 +538,7 @@ export class PlaybackService {
                   updated_at: new Date().toISOString(),
                 })
                 .eq("id", sessionUuid);
-            } catch (sessionErr: any) {
+            } catch (sessionErr: unknown) {
               console.error(
                 `[PlaybackService] Failed to update playback_session ${sessionUuid}:`,
                 sessionErr,
@@ -550,14 +551,14 @@ export class PlaybackService {
         );
 
         await Promise.all(updatePromises);
-      } catch (e: any) {
+      } catch (e: unknown) {
         console.error(
           `[PlaybackService] Failed to fetch or bulk update playback_sessions:`,
           e,
         );
         return {
           success: false,
-          error: e.message || "Failed to update playback sessions",
+          error: getErrorMessage(e) || "Failed to update playback sessions",
           syncedSessionIds: [],
         };
       }
@@ -592,11 +593,11 @@ export class PlaybackService {
             progress,
           },
         );
-      } catch (e: any) {
+      } catch (e: unknown) {
         console.error(`[PlaybackService] Failed to close session:`, e);
         return {
           success: false,
-          error: e.message || "Failed to close session and update progress",
+          error: getErrorMessage(e) || "Failed to close session and update progress",
         };
       }
     }

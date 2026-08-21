@@ -2,6 +2,9 @@ import { createOpenApiRouter, z } from "../_shared/openapi.ts";
 import { createClient } from "npm:@supabase/supabase-js@2.44.0";
 import { requireAdminRole } from "../_shared/auth.ts";
 import { fetchAuthorAvatar } from "../../_shared/avatarFetcher.ts";
+import { Context } from "hono";
+import { Variables } from "../_shared/types.ts";
+import { getErrorMessage } from "../_shared/errors.ts";
 
 export const authorsRouter = createOpenApiRouter();
 
@@ -447,7 +450,7 @@ authorsRouter.openapi(getAuthorImageRoute, async (c) => {
   return c.redirect(data.publicUrl);
 });
 
-async function handleSyncAuthors(c: any) {
+async function handleSyncAuthors(c: Context<{ Variables: Variables }>) {
   if (!requireAdminRole(c.get("user"))) {
     return c.json({ error: "Forbidden: Admin access required" }, 403);
   }
@@ -478,7 +481,8 @@ async function handleSyncAuthors(c: any) {
 
     let updatedCount = 0;
     for (const author of authors || []) {
-      const storagePath = await fetchAuthorAvatar(supabase, author);
+      if (!author.name) continue;
+      const storagePath = await fetchAuthorAvatar(supabase, author as { id: string; name: string });
       if (storagePath) {
         await supabase.from("authors").update({ image_path: storagePath }).eq(
           "id",
@@ -493,9 +497,9 @@ async function handleSyncAuthors(c: any) {
       updatedCount,
       totalChecked: (authors || []).length,
     }, 200);
-  } catch (e: any) {
+  } catch (e: unknown) {
     return c.json(
-      { success: false, error: e.message || "Author sync failed" },
+      { success: false, error: getErrorMessage(e) },
       500,
     );
   }
