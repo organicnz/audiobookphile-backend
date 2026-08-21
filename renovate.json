@@ -6,11 +6,20 @@
     ":dependencyDashboard",
     "schedule:weekly"
   ],
+  "commitMessagePrefix": "chore(deps):",
+  "lockFileMaintenance": {
+    "enabled": true,
+    "automerge": true
+  },
   "packageRules": [
     {
       "matchUpdateTypes": ["minor", "patch"],
       "matchCurrentVersion": "!/^0/",
       "automerge": true
+    },
+    {
+      "matchPackageNames": ["supabase", "@supabase/**"],
+      "groupName": "supabase packages"
     }
   ]
 }
