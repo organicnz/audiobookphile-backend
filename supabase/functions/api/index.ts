@@ -116,8 +116,16 @@ app.use(
 // wire. Must run after CORS so preflight responses stay uncompressed.
 app.use("*", compress());
 
-// 2.5 Security Headers (CSP, HSTS, X-Frame-Options)
-app.use("*", secureHeaders());
+// 2.5 Security Headers (HSTS, X-Frame-Options, Cross-Origin-Resource-Policy)
+// Configure CORP to cross-origin so cover images, audio streams and API responses
+// can be loaded cross-origin by the web client without ERR_BLOCKED_BY_RESPONSE.NotSameOrigin.
+app.use(
+  "*",
+  secureHeaders({
+    crossOriginResourcePolicy: "cross-origin",
+    crossOriginOpenerPolicy: false,
+  }),
+);
 
 // 3. Alias deprecation log (P2.1): the canonical paths are the runtime-stripped
 // ones (Supabase Edge Runtime removes /functions/v1/api). Log once per

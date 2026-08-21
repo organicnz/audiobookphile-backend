@@ -272,8 +272,21 @@ downloadsRouter.openapi(downloadItemRoute, async (c) => {
       ".aac",
       ".flac",
       ".ogg",
+      ".oga",
+      ".ogv",
       ".opus",
+      ".wav",
+      ".webm",
+      ".webma",
       ".wma",
+      ".aiff",
+      ".aif",
+      ".caf",
+      ".awb",
+      ".mka",
+      ".mkv",
+      ".mp4",
+      ".m4v",
     ];
     audioFilesList = libraryFiles
       .filter((lf) => {
@@ -288,14 +301,121 @@ downloadsRouter.openapi(downloadItemRoute, async (c) => {
       })
       .map((lf, idx) => {
         const metadata = (lf.metadata as Record<string, unknown>) || {};
+        const ext = String(metadata.ext || "").toLowerCase().replace(/^\./, "");
+        let mimeType = String(metadata.mimeType || "");
+        if (
+          !mimeType || mimeType === "audio/mpeg" ||
+          mimeType === "application/octet-stream"
+        ) {
+          switch (ext) {
+            case "m4b":
+            case "m4a":
+            case "mp4":
+            case "m4v":
+              mimeType = "audio/mp4";
+              break;
+            case "mp3":
+            case "mpeg":
+            case "mpg":
+              mimeType = "audio/mpeg";
+              break;
+            case "flac":
+              mimeType = "audio/flac";
+              break;
+            case "opus":
+              mimeType = "audio/opus";
+              break;
+            case "ogg":
+            case "oga":
+            case "ogv":
+              mimeType = "audio/ogg";
+              break;
+            case "aac":
+              mimeType = "audio/aac";
+              break;
+            case "wav":
+              mimeType = "audio/wav";
+              break;
+            case "webm":
+            case "webma":
+              mimeType = "audio/webm";
+              break;
+            case "wma":
+            case "wmv":
+            case "asf":
+              mimeType = "audio/x-ms-wma";
+              break;
+            case "aiff":
+            case "aif":
+              mimeType = "audio/aiff";
+              break;
+            case "caf":
+              mimeType = "audio/x-caf";
+              break;
+            case "awb":
+            case "3gp":
+              mimeType = "audio/amr-wb";
+              break;
+            case "mka":
+            case "mkv":
+              mimeType = "audio/x-matroska";
+              break;
+            default:
+              mimeType = metadata.mimeType
+                ? String(metadata.mimeType)
+                : "audio/mpeg";
+          }
+        }
+
+        let codec = String(metadata.codec || "");
+        if (!codec || codec === "mp3") {
+          switch (ext) {
+            case "m4b":
+            case "m4a":
+            case "mp4":
+            case "m4v":
+            case "aac":
+            case "caf":
+              codec = "aac";
+              break;
+            case "flac":
+              codec = "flac";
+              break;
+            case "opus":
+              codec = "opus";
+              break;
+            case "ogg":
+            case "oga":
+            case "ogv":
+              codec = "vorbis";
+              break;
+            case "wav":
+            case "aiff":
+            case "aif":
+              codec = "pcm";
+              break;
+            case "wma":
+            case "wmv":
+            case "asf":
+              codec = "wma";
+              break;
+            case "awb":
+            case "3gp":
+              codec = "amr-wb";
+              break;
+            default:
+              codec = metadata.codec ? String(metadata.codec) : "mp3";
+          }
+        }
+
         return {
           ino: lf.ino,
           index: idx,
           track_index: idx,
           duration: Number(lf.duration) || Number(metadata.duration) || 0,
           size: Number(lf.size) || Number(metadata.size) || 0,
-          mimeType: String(metadata.mimeType || "audio/mpeg"),
-          codec: String(metadata.codec || "mp3"),
+          mimeType,
+          codec,
           metadata: metadata,
         };
       });
@@ -686,25 +806,131 @@ export async function executeFinalize(
     currentDuration = existingItem.duration || 0;
   }
 
-  const audioFilesJson = validFiles.map((file: any, i: number) => ({
-    index: baseIndex + i + 1,
-    ino: crypto.randomUUID(),
-    duration: 0,
-    metadata: {
-      filename: file.name,
-      ext: "." + (file.name.split(".").pop()?.toLowerCase() ?? ""),
-      path: file.storagePath,
-      relPath: file.name,
-      size: file.size,
+  const audioFilesJson = validFiles.map((file: any, i: number) => {
+    const extRaw = file.name.split(".").pop()?.toLowerCase() ?? "";
+    const ext = "." + extRaw;
+    let mimeType = file.type;
+    if (!mimeType || mimeType === "application/octet-stream") {
+      switch (extRaw) {
+        case "m4b":
+        case "m4a":
+        case "mp4":
+        case "m4v":
+          mimeType = "audio/mp4";
+          break;
+        case "mp3":
+        case "mpeg":
+        case "mpg":
+          mimeType = "audio/mpeg";
+          break;
+        case "flac":
+          mimeType = "audio/flac";
+          break;
+        case "opus":
+          mimeType = "audio/opus";
+          break;
+        case "ogg":
+        case "oga":
+        case "ogv":
+          mimeType = "audio/ogg";
+          break;
+        case "aac":
+          mimeType = "audio/aac";
+          break;
+        case "wav":
+          mimeType = "audio/wav";
+          break;
+        case "webm":
+        case "webma":
+          mimeType = "audio/webm";
+          break;
+        case "wma":
+        case "wmv":
+        case "asf":
+          mimeType = "audio/x-ms-wma";
+          break;
+        case "aiff":
+        case "aif":
+          mimeType = "audio/aiff";
+          break;
+        case "caf":
+          mimeType = "audio/x-caf";
+          break;
+        case "awb":
+        case "3gp":
+          mimeType = "audio/amr-wb";
+          break;
+        case "mka":
+        case "mkv":
+          mimeType = "audio/x-matroska";
+          break;
+        default:
+          mimeType = file.type || "audio/mpeg";
+      }
+    }
+
+    let codec = "mp3";
+    switch (extRaw) {
+      case "m4b":
+      case "m4a":
+      case "mp4":
+      case "m4v":
+      case "aac":
+      case "caf":
+        codec = "aac";
+        break;
+      case "flac":
+        codec = "flac";
+        break;
+      case "opus":
+        codec = "opus";
+        break;
+      case "ogg":
+      case "oga":
+      case "ogv":
+        codec = "vorbis";
+        break;
+      case "wav":
+      case "aiff":
+      case "aif":
+        codec = "pcm";
+        break;
+      case "wma":
+      case "wmv":
+      case "asf":
+        codec = "wma";
+        break;
+      case "awb":
+      case "3gp":
+        codec = "amr-wb";
+        break;
+      default:
+        codec = "mp3";
+    }
+
+    return {
+      index: baseIndex + i + 1,
+      ino: crypto.randomUUID(),
       duration: 0,
-      mtimeMs: Date.now(),
-      ctimeMs: Date.now(),
-      birthtimeMs: Date.now(),
-    },
-    addedAt: Date.now(),
-    updatedAt: Date.now(),
-    mimeType: file.type || "audio/mpeg",
-  }));
+      codec,
+      metadata: {
+        filename: file.name,
+        ext,
+        path: file.storagePath,
+        relPath: file.name,
+        size: file.size,
+        duration: 0,
+        codec,
+        mtimeMs: Date.now(),
+        ctimeMs: Date.now(),
+        birthtimeMs: Date.now(),
+        mimeType,
+      },
+      addedAt: Date.now(),
+      updatedAt: Date.now(),
+      mimeType,
+    };
+  });
 
   finalAudioFiles = [...finalAudioFiles, ...audioFilesJson];
 

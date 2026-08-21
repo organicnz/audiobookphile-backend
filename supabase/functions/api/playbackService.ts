@@ -83,8 +83,21 @@ export class PlaybackService {
         ".aac",
         ".flac",
         ".ogg",
+        ".oga",
+        ".ogv",
         ".opus",
+        ".wav",
+        ".webm",
+        ".webma",
         ".wma",
+        ".aiff",
+        ".aif",
+        ".caf",
+        ".awb",
+        ".mka",
+        ".mkv",
+        ".mp4",
+        ".m4v",
       ];
       const extracted = libraryFiles
         .filter((lf) => {
@@ -97,14 +110,124 @@ export class PlaybackService {
         })
         .map((lf, idx) => {
           const metadata = (lf.metadata as Record<string, unknown>) || {};
+          const ext = String(metadata.ext || "").toLowerCase().replace(
+            /^\./,
+            "",
+          );
+          let mimeType = String(metadata.mimeType || "");
+          if (
+            !mimeType || mimeType === "audio/mpeg" ||
+            mimeType === "application/octet-stream"
+          ) {
+            switch (ext) {
+              case "m4b":
+              case "m4a":
+              case "mp4":
+              case "m4v":
+                mimeType = "audio/mp4";
+                break;
+              case "mp3":
+              case "mpeg":
+              case "mpg":
+                mimeType = "audio/mpeg";
+                break;
+              case "flac":
+                mimeType = "audio/flac";
+                break;
+              case "opus":
+                mimeType = "audio/opus";
+                break;
+              case "ogg":
+              case "oga":
+              case "ogv":
+                mimeType = "audio/ogg";
+                break;
+              case "aac":
+                mimeType = "audio/aac";
+                break;
+              case "wav":
+                mimeType = "audio/wav";
+                break;
+              case "webm":
+              case "webma":
+                mimeType = "audio/webm";
+                break;
+              case "wma":
+              case "wmv":
+              case "asf":
+                mimeType = "audio/x-ms-wma";
+                break;
+              case "aiff":
+              case "aif":
+                mimeType = "audio/aiff";
+                break;
+              case "caf":
+                mimeType = "audio/x-caf";
+                break;
+              case "awb":
+              case "3gp":
+                mimeType = "audio/amr-wb";
+                break;
+              case "mka":
+              case "mkv":
+                mimeType = "audio/x-matroska";
+                break;
+              default:
+                mimeType = metadata.mimeType
+                  ? String(metadata.mimeType)
+                  : "audio/mpeg";
+            }
+          }
+
+          let codec = String(metadata.codec || "");
+          if (!codec || codec === "mp3") {
+            switch (ext) {
+              case "m4b":
+              case "m4a":
+              case "mp4":
+              case "m4v":
+              case "aac":
+              case "caf":
+                codec = "aac";
+                break;
+              case "flac":
+                codec = "flac";
+                break;
+              case "opus":
+                codec = "opus";
+                break;
+              case "ogg":
+              case "oga":
+              case "ogv":
+                codec = "vorbis";
+                break;
+              case "wav":
+              case "aiff":
+              case "aif":
+                codec = "pcm";
+                break;
+              case "wma":
+              case "wmv":
+              case "asf":
+                codec = "wma";
+                break;
+              case "awb":
+              case "3gp":
+                codec = "amr-wb";
+                break;
+              default:
+                codec = metadata.codec ? String(metadata.codec) : "mp3";
+            }
+          }
+
           return {
             index: idx,
             ino: lf.ino,
             metadata: metadata,
             size: Number(lf.size) || Number(metadata.size) || 0,
             duration: Number(lf.duration) || Number(metadata.duration) || 0,
-            mime_type: String(metadata.mimeType || "audio/mpeg"),
-            codec: String(metadata.codec || "mp3"),
+            mime_type: mimeType,
+            codec: codec,
             filename: String(
               metadata.filename || metadata.relPath || `Track ${idx + 1}`,
             ),
@@ -135,8 +258,118 @@ export class PlaybackService {
       .map((af, idx) => {
         const metadata = ((af as any).metadata as Record<string, unknown>) ||
           {};
+        const ext = String(
+          metadata.ext || (af as any).filename?.split(".").pop() || "",
+        ).toLowerCase().replace(/^\./, "");
         const size = Number(af.size) || Number(metadata.size) || 0;
         totalFilesSize += size;
+
+        let mimeType = String(
+          af.mime_type || af.mimeType || metadata.mimeType || "",
+        );
+        if (
+          !mimeType || mimeType === "audio/mpeg" ||
+          mimeType === "application/octet-stream"
+        ) {
+          switch (ext) {
+            case "m4b":
+            case "m4a":
+            case "mp4":
+            case "m4v":
+              mimeType = "audio/mp4";
+              break;
+            case "mp3":
+            case "mpeg":
+            case "mpg":
+              mimeType = "audio/mpeg";
+              break;
+            case "flac":
+              mimeType = "audio/flac";
+              break;
+            case "opus":
+              mimeType = "audio/opus";
+              break;
+            case "ogg":
+            case "oga":
+            case "ogv":
+              mimeType = "audio/ogg";
+              break;
+            case "aac":
+              mimeType = "audio/aac";
+              break;
+            case "wav":
+              mimeType = "audio/wav";
+              break;
+            case "webm":
+            case "webma":
+              mimeType = "audio/webm";
+              break;
+            case "wma":
+            case "wmv":
+            case "asf":
+              mimeType = "audio/x-ms-wma";
+              break;
+            case "aiff":
+            case "aif":
+              mimeType = "audio/aiff";
+              break;
+            case "caf":
+              mimeType = "audio/x-caf";
+              break;
+            case "awb":
+            case "3gp":
+              mimeType = "audio/amr-wb";
+              break;
+            case "mka":
+            case "mkv":
+              mimeType = "audio/x-matroska";
+              break;
+            default:
+              mimeType = af.mime_type ? String(af.mime_type) : "audio/mpeg";
+          }
+        }
+
+        let codec = String(af.codec || metadata.codec || "");
+        if (!codec || codec === "mp3") {
+          switch (ext) {
+            case "m4b":
+            case "m4a":
+            case "mp4":
+            case "m4v":
+            case "aac":
+            case "caf":
+              codec = "aac";
+              break;
+            case "flac":
+              codec = "flac";
+              break;
+            case "opus":
+              codec = "opus";
+              break;
+            case "ogg":
+            case "oga":
+            case "ogv":
+              codec = "vorbis";
+              break;
+            case "wav":
+            case "aiff":
+            case "aif":
+              codec = "pcm";
+              break;
+            case "wma":
+            case "wmv":
+            case "asf":
+              codec = "wma";
+              break;
+            case "awb":
+            case "3gp":
+              codec = "amr-wb";
+              break;
+            default:
+              codec = af.codec ? String(af.codec) : "mp3";
+          }
+        }
+
         return {
           ...af,
           index: af.track_index !== undefined
@@ -146,8 +379,8 @@ export class PlaybackService {
             : idx,
           duration: Number(af.duration) || Number(metadata.duration) || 0,
           size: size,
-          mime_type: String(af.mime_type || af.mimeType || "audio/mpeg"),
-          codec: String(af.codec || "mp3"),
+          mime_type: mimeType,
+          codec: codec,
         };
       })
       .sort((a, b) => a.index - b.index);

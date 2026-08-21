@@ -671,6 +671,8 @@ itemsRouter.openapi(itemCoverRoute, async (c): Promise<Response> => {
   }
 
   c.header("Cache-Control", "public, max-age=31536000, immutable");
+  c.header("Cross-Origin-Resource-Policy", "cross-origin");
+  c.header("Access-Control-Allow-Origin", "*");
   return c.redirect(publicUrl, 302);
 });
 
