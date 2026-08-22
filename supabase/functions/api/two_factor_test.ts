@@ -121,7 +121,14 @@ Deno.test("TOTP - challenge token rejects tampering and malformed shapes", async
   const secret = "test-signing-secret";
   const token = await generate2FAChallengeToken(userId, "nonce-1", secret);
 
-  const tamperedSignature = token.slice(0, token.length - 2) + "00";
+  // Flip each of the last two chars (A<->B / anything->A) so the tampered
+  // suffix is guaranteed to differ from the original — appending a fixed
+  // "00" left a 1/4096 chance the signature already ended in "00", making
+  // the "tampered" token identical and this assertion fail spuriously.
+  const flippedSuffix = token.slice(-2).split("").map((c) =>
+    c === "A" ? "B" : "A"
+  ).join("");
+  const tamperedSignature = token.slice(0, -2) + flippedSuffix;
   const tamperedToken = await verify2FAChallengeToken(
     tamperedSignature,
     userId,
