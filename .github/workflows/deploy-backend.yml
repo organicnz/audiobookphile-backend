@@ -257,6 +257,51 @@ jobs:
             echo "NODE_ENV already set"
           fi
 
+      - name: Ensure Maestro E2E Credential Secrets
+        id: maestro
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
+          MAESTRO_TEST_EMAIL: ${{ secrets.MAESTRO_TEST_EMAIL }}
+          MAESTRO_TEST_PASSWORD: ${{ secrets.MAESTRO_TEST_PASSWORD }}
+        run: |
+          . .github/scripts/step-tree.sh
+          step_tree "Deploy to Supabase Production" maestro \
+            "checkout:Checkout Repository|cli:Setup Supabase CLI|repair:Repair Migration History|migrations:Push Database Migrations|config:Apply Auth & Email Configuration|email:Ensure Email Provider Enabled|signing:Ensure 2FA Challenge Signing Key Secret|vault:Provision Sentry Vault Secret|secrets:Ensure Edge Function Secrets|maestro:Ensure Maestro E2E Credential Secrets|deploy:Deploy Unified Edge API Function" \
+            "checkout=${{ steps.checkout.outcome }};cli=${{ steps.cli.outcome }};repair=${{ steps.repair.outcome }};migrations=${{ steps.migrations.outcome }};config=${{ steps.config.outcome }};email=${{ steps.email.outcome }};signing=${{ steps.signing.outcome }};vault=${{ steps.vault.outcome }};secrets=${{ steps.secrets.outcome }}"
+          # Maestro e2e credentials are project config, not repo files: keep
+          # them in Edge Function secrets (Deno.env) and Supabase Vault
+          # (vault.create_secret, read via public.read_secret()) — both
+          # idempotent, values never rotated here.
+          if [ -z "$MAESTRO_TEST_EMAIL" ] || [ -z "$MAESTRO_TEST_PASSWORD" ]; then
+            echo "MAESTRO_TEST_EMAIL / MAESTRO_TEST_PASSWORD GitHub secrets not set — skipping"
+            exit 0
+          fi
+          # 1. Edge Function secrets
+          EMAIL_JSON=$(python3 -c 'import json,sys; print(json.dumps(sys.argv[1]))' "$MAESTRO_TEST_EMAIL")
+          PASS_JSON=$(python3 -c 'import json,sys; print(json.dumps(sys.argv[1]))' "$MAESTRO_TEST_PASSWORD")
+          curl -sS -f -X POST -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
+            -H "Content-Type: application/json" \
+            "https://api.supabase.com/v1/projects/$SUPABASE_PROJECT_ID/secrets" \
+            -d "[{\"name\":\"MAESTRO_TEST_EMAIL\",\"value\":$EMAIL_JSON},{\"name\":\"MAESTRO_TEST_PASSWORD\",\"value\":$PASS_JSON}]"
+          echo "MAESTRO_TEST_EMAIL / MAESTRO_TEST_PASSWORD ensured as Edge Function secrets"
+          # 2. Supabase Vault entries
+          EMAIL_SQL=$(printf '%s' "$MAESTRO_TEST_EMAIL" | sed "s/'/''/g")
+          PASS_SQL=$(printf '%s' "$MAESTRO_TEST_PASSWORD" | sed "s/'/''/g")
+          SQL="SELECT vault.create_secret('${EMAIL_SQL}', 'MAESTRO_TEST_EMAIL') WHERE NOT EXISTS (SELECT 1 FROM vault.decrypted_secrets WHERE name = 'MAESTRO_TEST_EMAIL'); SELECT vault.create_secret('${PASS_SQL}', 'MAESTRO_TEST_PASSWORD') WHERE NOT EXISTS (SELECT 1 FROM vault.decrypted_secrets WHERE name = 'MAESTRO_TEST_PASSWORD');"
+          PAYLOAD=$(python3 -c 'import json,sys; print(json.dumps({"query": sys.argv[1]}))' "$SQL")
+          HTTP_CODE=$(curl -sS -o /tmp/maestro_vault_resp.json -w "%{http_code}" \
+            -X POST -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
+            -H "Content-Type: application/json" \
+            "https://api.supabase.com/v1/projects/$SUPABASE_PROJECT_ID/database/query" \
+            -d "$PAYLOAD")
+          cat /tmp/maestro_vault_resp.json; echo ""
+          if [ "$HTTP_CODE" -ge 400 ]; then
+            echo "Maestro Vault provisioning failed (HTTP $HTTP_CODE)"
+            exit 1
+          fi
+          echo "MAESTRO_TEST_EMAIL / MAESTRO_TEST_PASSWORD ensured in Vault"
+
       - name: Deploy Unified Edge API Function
         id: deploy
         env:
