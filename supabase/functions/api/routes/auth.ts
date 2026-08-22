@@ -1267,3 +1267,117 @@ authRouter.openapi(authorizeRoute, async (c) => {
 });
 
 // decodeJWT is imported from _shared/auth.ts — single source of truth
+
+// =========================
+// E2E Test Account Provisioning
+// =========================
+
+/**
+ * Idempotently ensures the Maestro e2e test account exists (email confirmed,
+ * known password, profile row) so CI smoke tests and UI e2e suites can sign
+ * in without a dashboard-fetched service key: this function runs with the
+ * platform-injected SUPABASE_SERVICE_ROLE_KEY.
+ *
+ * Guarded by the X-E2E-Secret header (E2E_PROVISIONING_SECRET edge secret).
+ * The account identity comes from MAESTRO_TEST_EMAIL / MAESTRO_TEST_PASSWORD
+ * edge secrets — nothing is taken from the request body.
+ */
+const e2eProvisionRoute = {
+  method: "post" as const,
+  path: "/e2e/provision",
+  tags: ["auth"],
+  summary: "Ensure the e2e test account exists (secret-guarded)",
+  request: {
+    headers: z.object({
+      "x-e2e-secret": z.string().min(1),
+    }),
+  },
+  responses: {
+    200: {
+      description: "Account ensured",
+      content: {
+        "application/json": { schema: SuccessSchema },
+      },
+    },
+    403: {
+      description: "Missing or wrong provisioning secret",
+      content: {
+        "application/json": { schema: FlatErrorSchema },
+      },
+    },
+    502: {
+      description: "Account creation failed",
+      content: {
+        "application/json": { schema: FlatErrorSchema },
+      },
+    },
+    503: {
+      description: "E2E account not configured",
+      content: {
+        "application/json": { schema: FlatErrorSchema },
+      },
+    },
+  },
+};
+
+authRouter.openapi(e2eProvisionRoute, async (c) => {
+  const expected = Deno.env.get("E2E_PROVISIONING_SECRET") ?? "";
+  const provided = c.req.header("X-E2E-Secret") ?? "";
+  if (expected.length === 0 || provided !== expected) {
+    return c.json({ error: "Forbidden", code: "FORBIDDEN" }, 403);
+  }
+
+  const email = Deno.env.get("MAESTRO_TEST_EMAIL") ?? "";
+  const password = Deno.env.get("MAESTRO_TEST_PASSWORD") ?? "";
+  if (!email || !password) {
+    return c.json({
+      error: "E2E account not configured (MAESTRO_TEST_* secrets missing)",
+      code: "NOT_CONFIGURED",
+    }, 503);
+  }
+
+  const supabaseUrl = c.get("supabaseUrl");
+  const serviceRoleKey = c.get("serviceRoleKey");
+  const adminSupabase = createClient(supabaseUrl, serviceRoleKey);
+
+  const { data: existing } = await adminSupabase.auth.admin.listUsers({
+    page: 1,
+    perPage: 1000,
+  });
+  const user = (existing?.users ?? []).find((u) => u.email === email);
+
+  let userId: string;
+  if (user) {
+    await adminSupabase.auth.admin.updateUserById(user.id, {
+      password,
+      email_confirm: true,
+    });
+    userId = user.id;
+  } else {
+    const { data: created, error: createError } = await adminSupabase.auth.admin
+      .createUser({
+        email,
+        password,
+        email_confirm: true,
+        user_metadata: { username: email },
+      });
+    if (createError || !created?.user) {
+      return c.json({
+        error: createError?.message ?? "Failed to create e2e account",
+        code: "PROVISION_FAILED",
+      }, 502);
+    }
+    userId = created.user.id;
+  }
+
+  await adminSupabase.from("profiles").upsert({
+    id: userId,
+    username: email,
+    user_type: "user",
+  }, { onConflict: "id" });
+
+  return c.json({
+    success: true,
+    message: `e2e account ensured (${email}, ${userId.slice(0, 8)})`,
+  }, 200);
+});

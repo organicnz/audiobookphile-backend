@@ -264,6 +264,7 @@ jobs:
           SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
           MAESTRO_TEST_EMAIL: ${{ secrets.MAESTRO_TEST_EMAIL }}
           MAESTRO_TEST_PASSWORD: ${{ secrets.MAESTRO_TEST_PASSWORD }}
+          E2E_PROVISIONING_SECRET: ${{ secrets.E2E_PROVISIONING_SECRET }}
         run: |
           . .github/scripts/step-tree.sh
           step_tree "Deploy to Supabase Production" maestro \
@@ -276,6 +277,15 @@ jobs:
           if [ -z "$MAESTRO_TEST_EMAIL" ] || [ -z "$MAESTRO_TEST_PASSWORD" ]; then
             echo "MAESTRO_TEST_EMAIL / MAESTRO_TEST_PASSWORD GitHub secrets not set — skipping"
             exit 0
+          fi
+          # Guard secret for the /api/auth/e2e/provision endpoint.
+          if [ -n "$E2E_PROVISIONING_SECRET" ]; then
+            PROV_JSON=$(python3 -c 'import json,sys; print(json.dumps(sys.argv[1]))' "$E2E_PROVISIONING_SECRET")
+            curl -sS -f -X POST -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
+              -H "Content-Type: application/json" \
+              "https://api.supabase.com/v1/projects/$SUPABASE_PROJECT_ID/secrets" \
+              -d "[{\"name\":\"E2E_PROVISIONING_SECRET\",\"value\":$PROV_JSON}]"
+            echo "E2E_PROVISIONING_SECRET ensured as Edge Function secret"
           fi
           # 1. Edge Function secrets
           EMAIL_JSON=$(python3 -c 'import json,sys; print(json.dumps(sys.argv[1]))' "$MAESTRO_TEST_EMAIL")
