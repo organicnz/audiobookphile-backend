@@ -4,7 +4,11 @@ import {
   MobileBookModel as MobileBook,
   MobileLibraryModel as MobileLibrary,
 } from "../../../src/types/schemas.ts";
-import { parseTitleAndAuthor } from "../_shared/titleAuthorParser.ts";
+import {
+  parseTitleAndAuthor,
+  prettifyFilenameTitle,
+  sanitizeDisplayTitle,
+} from "../_shared/titleAuthorParser.ts";
 
 type LibraryRow = Database["public"]["Tables"]["libraries"]["Row"];
 type LibraryFolderRow = Database["public"]["Tables"]["library_folders"]["Row"];
@@ -190,6 +194,10 @@ export function mapBookForMobile(
     }
   }
 
+  // Scraped titles carry redundant suffix tags ("[96] Unabridged", "(1517)")
+  // that duplicate the separate subtitle/series/year metadata fields.
+  finalTitle = sanitizeDisplayTitle(finalTitle);
+
   const authorNameLF =
     authors.map((a) => String(a.last_first || a.name)).join(", ") || authorName;
 
@@ -326,10 +334,9 @@ export function mapBookForMobile(
       currentStart += dur;
       const meta = af.metadata || {};
       const rawName = af.filename || meta.filename || `Track ${idx + 1}`;
-      const cleanTitle = rawName
-        .split("/")
-        .pop()
-        ?.replace(/\.[^/.]+$/, "") || rawName;
+      const cleanTitle = prettifyFilenameTitle(
+        rawName.split("/").pop()?.replace(/\.[^/.]+$/, "") || rawName,
+      );
       return {
         id: idx + 1,
         title: cleanTitle,

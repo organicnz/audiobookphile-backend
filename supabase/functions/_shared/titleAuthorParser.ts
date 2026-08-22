@@ -102,3 +102,49 @@ export function parseTitleAndAuthor(
 
   return { cleanTitle: title, cleanAuthor: author };
 }
+
+/**
+ * Strips junk suffixes that scraped/provider data leaves on book titles
+ * ("Mortality [96] Unabridged", "Discourses on Livy (1517)"). Subtitle,
+ * series, and year are separate metadata fields, so trailing tokens like
+ * `[<digits>]`, a standalone Unabridged/Abridged word, or a parenthesized
+ * group of at most two words (genre/year/format tags) are redundant noise.
+ * Longer parenthesized subtitles are kept. Mirrored in
+ * audiobookphile-web/src/shared/utils/titleAuthorParser.ts.
+ */
+export function sanitizeDisplayTitle(title: string): string {
+  let result = title.trim();
+  let changed = true;
+  while (changed) {
+    changed = false;
+    const bracket = /\s*\[\d+\]\s*$/.exec(result);
+    if (bracket) {
+      result = result.slice(0, bracket.index).trim();
+      changed = true;
+    }
+    const word = /\s+(?:unabridged|abridged)\s*$/i.exec(result);
+    if (word) {
+      result = result.slice(0, word.index).trim();
+      changed = true;
+    }
+    const paren = /\s*\(\s*[^\s()]+(?:\s+[^\s()]+)?\s*\)\s*$/.exec(result);
+    if (paren) {
+      result = result.slice(0, paren.index).trim();
+      changed = true;
+    }
+  }
+  return result || title;
+}
+
+/**
+ * Turns filename-derived titles into readable words:
+ * "33TheThreeBodyProblemChapter33" → "33 The Three Body Problem Chapter 33".
+ * Mirrored in audiobookphile-web/src/shared/utils/titleAuthorParser.ts.
+ */
+export function prettifyFilenameTitle(raw: string): string {
+  return raw
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/([A-Za-z])(\d)/g, "$1 $2")
+    .replace(/\s+/g, " ")
+    .trim();
+}
