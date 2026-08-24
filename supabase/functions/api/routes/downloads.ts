@@ -3,6 +3,7 @@ import { StorageRouter } from "../../_shared/storage-router.ts";
 import { requireAdminRole } from "../_shared/auth.ts";
 import { presignUpload } from "../../_shared/uploadPresign.ts";
 import { parseTitleAndAuthor } from "../../_shared/titleAuthorParser.ts";
+import { titlesLikelySameWork } from "../../_shared/titleMatch.ts";
 import { Context } from "hono";
 import { Variables } from "../_shared/types.ts";
 import { getErrorMessage } from "../_shared/errors.ts";
@@ -1244,8 +1245,24 @@ async function resolveTitleAndAuthor(
         const match = content.match(/\{[\s\S]*\}/);
         if (match) {
           const parsed = JSON.parse(match[0]);
+          // Gate: the extraction must plausibly describe THIS file. A
+          // hallucinated different-work title here would feed the duplicate
+          // checker and create/merge the wrong book.
+          const extractedTitle = typeof parsed.title === "string"
+            ? parsed.title.trim()
+            : "";
+          if (
+            extractedTitle &&
+            !titlesLikelySameWork(rawTitle, extractedTitle)
+          ) {
+            console.warn(
+              `[upload-fallback] REJECTED extracted title "${extractedTitle}" for "${rawTitle}": titles are dissimilar`,
+            );
+            parsed.title = undefined;
+            parsed.author = undefined;
+          }
           if (parsed.title) title = parsed.title;
-          if (parsed.author) author = parsed.author;
+          if (parsed.author && parsed.author !== author) author = parsed.author;
         }
       }
     } catch (e: unknown) {

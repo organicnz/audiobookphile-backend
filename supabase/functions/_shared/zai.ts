@@ -1,5 +1,7 @@
 // Shared Z.AI (GLM-4) AI integration module for sorting, matching, metadata enrichment, and chapter insights
 
+import { titlesLikelySameWork } from "./titleMatch.ts";
+
 const cacheMap = new Map<string, { result: any; expiresAt: number }>();
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minute in-memory TTL
 
@@ -203,6 +205,22 @@ CRITICAL RULES:
           result.matchedId &&
           existingBooks.some((b) => b.id === result.matchedId)
         ) {
+          // Deterministic gate: glm-4-flash sometimes matches distinct works by
+          // the same author (e.g. "Sapiens" → "Homo Deus") despite instructions.
+          // Never trust an LLM identity claim without title corroboration — a
+          // false merge corrupts the target book's metadata and playback state.
+          const matchedBook = existingBooks.find((b) =>
+            b.id === result.matchedId
+          );
+          if (
+            matchedBook?.title &&
+            !titlesLikelySameWork(uploadTitle, matchedBook.title)
+          ) {
+            console.warn(
+              `[z.ai] REJECTED LLM match "${uploadTitle}" → "${matchedBook.title}" (${result.matchedId}): titles are dissimilar`,
+            );
+            return null;
+          }
           console.info(
             `[z.ai] Matched uploading book "${uploadTitle}" to existing record ID: ${result.matchedId}`,
           );
@@ -389,6 +407,21 @@ Return ONLY a JSON object with:
       const match = cleaned.match(/\{[\s\S]*\}/);
       if (match) {
         const result = JSON.parse(match[0]);
+
+        // Deterministic gate: if the model returned a title for a DIFFERENT
+        // work, discard its identity fields and keep the caller's inputs —
+        // enrichment may describe, but must never re-identify the book.
+        const enrichedTitle = typeof result.title === "string"
+          ? result.title.trim()
+          : "";
+        if (enrichedTitle && !titlesLikelySameWork(title, enrichedTitle)) {
+          console.warn(
+            `[z.ai] REJECTED enrichment title "${enrichedTitle}" for "${title}": titles are dissimilar`,
+          );
+          delete result.title;
+          delete result.author;
+        }
+
         setCachedResult(cacheKey, result);
         return result;
       }
