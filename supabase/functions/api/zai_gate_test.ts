@@ -71,7 +71,7 @@ Deno.test("zai gate: accepts legitimate subtitle-variant match", async () => {
 
 Deno.test("zai gate: enrichment returning a different work cannot rename the book", async () => {
   stubZai(
-    `{"title": "Homo Deus", "author": "Yuval Noah Harari", "description": "wrong book", "genres": ["History"]}`,
+    `{"title": "Homo Deus", "author": "Yuval Noah Harari", "description": "A story about the future of mankind, AI and the challenges ahead", "genres": ["History"]}`,
   );
   try {
     const enriched = await enrichMetadataWithZAI(
@@ -79,9 +79,13 @@ Deno.test("zai gate: enrichment returning a different work cannot rename the boo
       "Yuval Noah Harari",
       FAKE_KEY,
     );
+    // When the model describes a DIFFERENT work, the whole enrichment is
+    // discarded: its description/genres were written about that wrong book,
+    // not ours. Nothing from a mis-identified payload may leak through.
     assertEquals(enriched?.title, undefined);
     assertEquals(enriched?.author, undefined);
-    assertEquals(enriched?.description, "wrong book"); // descriptive fields pass through
+    assertEquals(enriched?.description, undefined);
+    assertEquals(enriched?.genres, undefined);
   } finally {
     resetFetch();
   }

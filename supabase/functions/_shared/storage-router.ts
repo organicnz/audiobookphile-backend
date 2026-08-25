@@ -165,8 +165,38 @@ export class StorageRouter {
   ): Promise<ResolvedStoragePath> {
     // Extract just the filename from the legacy path
     const filename = legacyPath.split("/").pop()!;
-    const key = `${itemId}/${filename}`;
+    return await this.probeKey(`${itemId}/${filename}`, expiresIn);
+  }
 
+  /**
+   * Signs the first key that actually exists, probing each candidate across
+   * all backends in tier order. Returns null when no candidate exists anywhere.
+   *
+   * Used by playback self-heal: presigned URLs for recorded paths are minted
+   * without contacting storage, so a stale/mis-recorded path produces a URL
+   * that 404s at fetch time (the "black screen" book failure mode). When the
+   * recorded path is dead, the file often lives under a sibling prefix
+   * (client upload bookId ≠ library item id) or in a different tier.
+   */
+  async signFirstExisting(
+    keys: string[],
+    expiresIn: number,
+  ): Promise<ResolvedStoragePath | null> {
+    for (const key of keys) {
+      try {
+        return await this.probeKey(key, expiresIn);
+      } catch {
+        // not in any backend under this key — try the next candidate
+      }
+    }
+    return null;
+  }
+
+  /** HEAD-probes one canonical key across every backend, signing on first hit. */
+  private async probeKey(
+    key: string,
+    expiresIn: number,
+  ): Promise<ResolvedStoragePath> {
     // 1. Try b2-tertiary (only when configured; unset envs must not throw)
     if (b2TertiaryConfigured()) {
       try {
@@ -233,13 +263,14 @@ export class StorageRouter {
     }
 
     // 4. Try Supabase Storage
-    const folder = itemId;
+    const folder = key.split("/").slice(0, -1).join("/");
+    const filename = key.split("/").pop()!;
     const { data: listed } = await this.supabase.storage
       .from("audio-files")
       .list(folder, { search: filename });
 
     if (listed && listed.some((f: any) => f.name === filename)) {
-      const supabasePath = `${folder}/${filename}`;
+      const supabasePath = key;
       const { data, error } = await this.supabase.storage
         .from("audio-files")
         .createSignedUrl(supabasePath, expiresIn);
@@ -253,7 +284,7 @@ export class StorageRouter {
     }
 
     throw new Error(
-      `File not found in any storage backend for item "${itemId}", filename "${filename}" (legacy path: ${legacyPath})`,
+      `File not found in any storage backend for key "${key}"`,
     );
   }
 

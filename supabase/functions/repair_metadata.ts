@@ -15,6 +15,13 @@
 //   deno run --allow-all --env-file .env.local repair_metadata.ts           # dry run
 //   deno run --allow-all --env-file .env.local repair_metadata.ts --apply   # write
 //   deno run --allow-all repair_metadata.ts --apply --id <uuid>             # single item
+//   deno run --allow-all repair_metadata.ts --apply --covers-only --ids <uuid,uuid>
+//
+// --covers-only: skip title repair entirely and refetch covers for the
+//   selected items (or ALL items when no --id/--ids given). Use when the
+//   stored cover art is for the wrong book (e.g. "The Prince" art on an
+//   "Art of War" item) — fetchBookMetadata identity-gates every provider
+//   result, so a refetch can only store art for a plausibly-same work.
 
 import { createClient } from "npm:@supabase/supabase-js@2.44.0";
 import {
@@ -36,6 +43,19 @@ const args = Deno.args;
 const apply = args.includes("--apply");
 const idIdx = args.indexOf("--id");
 const onlyId = idIdx >= 0 ? args[idIdx + 1] : null;
+const idsIdx = args.indexOf("--ids");
+const onlyIds = idsIdx >= 0
+  ? new Set(
+    args[idsIdx + 1].split(",").map((s) => s.trim()).filter(Boolean),
+  )
+  : null;
+const coversOnly = args.includes("--covers-only");
+
+function isSelected(id: string): boolean {
+  if (onlyId) return id === onlyId;
+  if (onlyIds) return onlyIds.has(id);
+  return true;
+}
 
 const AUDIO_EXT = /\.(mp3|m4b|m4a|aac|ogg|oga|flac|wav|webm)$/i;
 
@@ -191,7 +211,7 @@ async function main() {
   console.log(
     `🛠  repair_metadata (${apply ? "APPLY" : "DRY RUN"}) — zai:${
       zaiApiKey ? "on" : "off"
-    }`,
+    }${coversOnly ? " — COVERS ONLY" : ""}`,
   );
 
   const { data: items, error } = await supabase.from("library_items")
@@ -206,7 +226,7 @@ async function main() {
   const repairs: Repair[] = [];
 
   for (const item of items ?? []) {
-    if (onlyId && item.id !== onlyId) continue;
+    if (!isSelected(item.id)) continue;
     const title = String(item.title ?? "").trim();
     const entries: unknown[] = [
       ...((item.audio_files as unknown[]) ?? []),
@@ -221,6 +241,15 @@ async function main() {
     // themselves the strongest cluster signal ("Steve Jobs - 01..08").
     const stripped = audioNames.map(stripTrackNumbering).filter(Boolean);
     const author = String(item.author_names_first_last ?? "").trim();
+
+    // Cover-only mode: refetch art for the item's CURRENT identity, no
+    // title/cluster logic. The identity gate inside fetchBookMetadata makes
+    // this safe to run against every item in the library.
+    if (coversOnly) {
+      console.log(`🎨 [${item.id}] "${title}" — cover refetch`);
+      if (apply) await repairCover(item.id, title, author);
+      continue;
+    }
 
     // Zero-duration stowaways: unreadable-metadata files (often whole other
     // audiobooks uploaded alongside, e.g. a Homo Deus .m4b inside Sapiens).
@@ -240,9 +269,10 @@ async function main() {
     const stowaways = entries.filter((e) => entryDuration(e) === null);
     // Only a SMALL minority may be detached — items whose metadata largely
     // lacks durations are a different (unknown-shape) problem, not stowaways.
+    const targeted = Boolean(onlyId || onlyIds);
     const minority = stowaways.length > 0 &&
       stowaways.length <= Math.ceil(entries.length * 0.2);
-    if (withDurations.length >= 5 && minority && !onlyId) {
+    if (withDurations.length >= 5 && minority && !targeted) {
       console.log(
         `⚠️  [${item.id}] "${title}": detaching ${stowaways.length} zero-duration file(s)`,
       );

@@ -409,17 +409,46 @@ Return ONLY a JSON object with:
         const result = JSON.parse(match[0]);
 
         // Deterministic gate: if the model returned a title for a DIFFERENT
-        // work, discard its identity fields and keep the caller's inputs —
-        // enrichment may describe, but must never re-identify the book.
+        // work, discard the ENTIRE enrichment. Everything else in the payload
+        // (description, genres, year, narrator) was written about that wrong
+        // book — passing it through is how a Homo Deus description ends up on
+        // a Sapiens record. Enrichment may describe, but must never
+        // re-identify (or mis-describe) the book.
         const enrichedTitle = typeof result.title === "string"
           ? result.title.trim()
           : "";
         if (enrichedTitle && !titlesLikelySameWork(title, enrichedTitle)) {
           console.warn(
-            `[z.ai] REJECTED enrichment title "${enrichedTitle}" for "${title}": titles are dissimilar`,
+            `[z.ai] REJECTED enrichment for "${title}": model described a different work "${enrichedTitle}"`,
           );
-          delete result.title;
-          delete result.author;
+          setCachedResult(cacheKey, {});
+          return {};
+        }
+
+        // Field sanity: the model occasionally emits malformed values that
+        // would render as broken UI (a "year" of "recent", a one-word
+        // "description", non-string genres). Drop them — callers keep their
+        // previous values rather than persisting junk.
+        if (
+          typeof result.publishedYear === "string" &&
+          !/^\d{4}$/.test(result.publishedYear.trim())
+        ) {
+          delete result.publishedYear;
+        }
+        if (typeof result.description === "string") {
+          const trimmed = result.description.trim();
+          if (trimmed.length < 40 || trimmed.length > 5000) {
+            delete result.description;
+          }
+        }
+        if (Array.isArray(result.genres)) {
+          result.genres = result.genres
+            .filter((g: unknown) =>
+              typeof g === "string" && g.length > 0 && g.length <= 60
+            )
+            .slice(0, 6);
+        } else if (result.genres !== undefined) {
+          delete result.genres;
         }
 
         setCachedResult(cacheKey, result);

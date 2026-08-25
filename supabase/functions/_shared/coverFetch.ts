@@ -6,8 +6,16 @@
  *   2. Open Library (free, no key)
  *   3. Google Books (free, no key for basic search)
  *
+ * Every provider result passes a deterministic identity gate
+ * (titlesLikelySameWork) before it is accepted: search APIs rank by
+ * relevance, not identity, and have served covers for a DIFFERENT work by
+ * the same author (e.g. Machiavelli's "The Prince" for "Art of War").
+ * A rejected result falls through to the next provider/strategy.
+ *
  * Returns the cover image data and metadata, or null if not found.
  */
+
+import { titlesLikelySameWork } from "./titleMatch.ts";
 
 export interface FetchedCover {
   buffer: ArrayBuffer;
@@ -128,7 +136,22 @@ export async function fetchBookMetadata(
     for (const provider of providers) {
       try {
         const result = await provider(strategy.title, strategy.author);
-        if (result && (result.cover || result.metadata)) return result;
+        if (result && (result.cover || result.metadata)) {
+          // Identity gate: the provider's idea of the book must plausibly be
+          // the requested work. Gated against the ORIGINAL title (not the
+          // truncated strategy title) so a "first 4 words" query can't accept
+          // a different book that merely shares its opening words.
+          const providerTitle = result.metadata?.title;
+          if (
+            providerTitle && !titlesLikelySameWork(title, providerTitle)
+          ) {
+            console.warn(
+              `[coverFetch] REJECTED "${providerTitle}" for "${title}": titles are dissimilar`,
+            );
+            continue;
+          }
+          return result;
+        }
       } catch (err) {
         console.warn(
           `[coverFetch] Provider failed for "${strategy.title}":`,

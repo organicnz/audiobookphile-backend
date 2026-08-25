@@ -1,0 +1,41 @@
+name: Repair Item Covers
+
+# Targeted cover refetch for library items whose stored art is for the wrong
+# book (provider search ranked a different work by the same author first —
+# e.g. "The Prince" art on an "Art of War" item). fetchBookMetadata
+# identity-gates every provider result, so a refetch can only store art for a
+# plausibly-same work. Runs on demand with explicit item ids; never automatic.
+
+on:
+  workflow_dispatch:
+    inputs:
+      item_ids:
+        description: "Comma-separated library_item ids to refetch covers for"
+        required: true
+        type: string
+
+concurrency:
+  group: repair-covers
+  cancel-in-progress: false
+
+jobs:
+  repair:
+    name: Refetch Covers (gated)
+    runs-on: [self-hosted, macOS]
+    timeout-minutes: 15
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v7
+
+      - name: Setup Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Refetch Covers
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          cd supabase/functions
+          deno run --allow-all repair_metadata.ts --apply --covers-only --ids "${{ inputs.item_ids }}"

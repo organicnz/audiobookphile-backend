@@ -468,6 +468,60 @@ export class PlaybackService {
     const audioTracks: Record<string, unknown>[] = [];
     const missingTracks: string[] = [];
 
+    // --- Self-heal: verify the first scheme'd track actually exists ---
+    // Presigning is a purely local computation — it never contacts storage —
+    // so a stale or mis-recorded path yields URLs that 404 only when the
+    // player fetches them (the "black screen" book failure mode: the session
+    // succeeds, every track fails, and the client retries silently).
+    // Legacy paths were already HEAD-verified inside resolveAndSign; scheme'd
+    // paths were not. Probe the first live scheme'd track, and on a miss
+    // re-resolve every track across all tiers and candidate prefixes
+    // ({itemId}/{filename} plus the recorded path's own prefix — uploads are
+    // keyed by a client-generated bookId that can differ from the item id),
+    // then patch the DB with wherever the files actually live.
+    const firstLive = signedTrackResults.find((r) =>
+      !r.isMissing && r.finalSignedUrl
+    );
+    const firstLiveWasVerified = !!firstLive?.resolvedCanonicalPath;
+    if (firstLive && !firstLiveWasVerified) {
+      const exists = await storage.fileExists(firstLive.storagePath).catch(
+        () => false,
+      );
+      if (!exists) {
+        console.warn(
+          `[PlaybackService] Recorded path for first track no longer exists: "${firstLive.storagePath}" — probing alternate tiers/prefixes for ${libraryItemId}`,
+        );
+        for (const res of signedTrackResults) {
+          if (res.isMissing) continue;
+          const filename = res.storagePath.split("/").pop()!;
+          const recordedPrefix = res.storagePath.includes("://")
+            ? res.storagePath.replace(/^[a-z0-9-]+:\/\//i, "").split("/")
+              .slice(0, -1).join("/")
+            : "";
+          const candidates = [`${libraryItemId}/${filename}`];
+          if (recordedPrefix && recordedPrefix !== libraryItemId) {
+            candidates.push(`${recordedPrefix}/${filename}`);
+          }
+          const resolved = await storage.signFirstExisting(candidates, 604800);
+          if (resolved) {
+            console.info(
+              `[PlaybackService] Self-healed track "${filename}": ${res.storagePath} → ${resolved.canonicalPath}`,
+            );
+            res.finalSignedUrl = resolved.signedUrl;
+            res.resolvedCanonicalPath = resolved.canonicalPath;
+          } else {
+            console.warn(
+              `[PlaybackService] Track "${filename}" not found in any backend under ${
+                candidates.join(", ")
+              }`,
+            );
+            res.isMissing = true;
+            res.finalSignedUrl = "";
+          }
+        }
+      }
+    }
+
     for (const res of signedTrackResults) {
       if (res.isMissing) {
         missingTracks.push(res.storagePath);
@@ -599,6 +653,11 @@ export class PlaybackService {
       audioTracks: audioTracks,
       chapters: chapters,
       manifestUrl: `/api/items/${libraryItemId}/manifest.m3u8`,
+
+      // Clients surface this so partial books are visible instead of silently
+      // skipping content ("why does chapter 4 narrate chapter 9?" class of bug
+      // reports). 0 when every track resolved.
+      missingTrackCount: missingTracks.length,
 
       currentTime: currentTime,
       playbackRate: 1.0,
