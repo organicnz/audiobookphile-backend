@@ -47,8 +47,10 @@ jobs:
         id: l1
         run: |
           cd supabase/functions
+          # deno test exits non-zero on failure; piping through tee would eat
+          # the exit code, so pipefail guards it instead of grepping prose.
+          set -o pipefail
           deno test --allow-all --no-check=remote api/ 2>&1 | tee /tmp/l1.log
-          grep -q "0 failed" /tmp/l1.log
 
       # ------------------------------------------------------------------ L2
       - name: L2 SQL Merge-Safety Harness
@@ -67,9 +69,10 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: |
+          # playwright exits non-zero on failure; pipefail keeps that signal
+          # through tee (no prose-grepping).
+          set -o pipefail
           bunx playwright test tests/e2e-api --reporter=list 2>&1 | tee /tmp/l3.log
-          grep -qE "[1-9][0-9]* passed" /tmp/l3.log
-          ! grep -qE "[1-9][0-9]* failed" /tmp/l3.log
 
       # ----------------------------------------------------------------- AI
       - name: AI Adversarial Probe (Groq -> z.ai fallback)
@@ -82,6 +85,14 @@ jobs:
           ZAI_API_KEY: ${{ secrets.ZAI_API_KEY }}
         run: |
           deno run --allow-all scripts/ai_probe.ts
+
+      - name: AI Backend Review of Latest Changes
+        id: aireview
+        env:
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          ZAI_API_KEY: ${{ secrets.ZAI_API_KEY }}
+        run: |
+          deno run --allow-all scripts/ai_review.ts --range HEAD~15..HEAD
 
       - name: Upload Reports
         if: always()
@@ -104,4 +115,5 @@ jobs:
             echo "| L2 SQL merge-safety | ${{ steps.l2.outcome }} |"
             echo "| L3 Playwright API e2e | ${{ steps.l3.outcome }} |"
             echo "| AI adversarial probe | ${{ steps.ai.outcome }} |"
+            echo "| AI backend review | ${{ steps.aireview.outcome }} |"
           } >> "$GITHUB_STEP_SUMMARY"

@@ -479,6 +479,10 @@ export class PlaybackService {
     // ({itemId}/{filename} plus the recorded path's own prefix — uploads are
     // keyed by a client-generated bookId that can differ from the item id),
     // then patch the DB with wherever the files actually live.
+    // Bound the worst case: a 100-track book with every path dead must not
+    // issue hundreds of HEAD probes inside one request (latency + rate limits).
+    const MAX_SELF_HEAL_TRACKS = 40;
+    let selfHealedCount = 0;
     const firstLive = signedTrackResults.find((r) =>
       !r.isMissing && r.finalSignedUrl
     );
@@ -493,6 +497,14 @@ export class PlaybackService {
         );
         for (const res of signedTrackResults) {
           if (res.isMissing) continue;
+          if (selfHealedCount >= MAX_SELF_HEAL_TRACKS) {
+            console.warn(
+              `[PlaybackService] Self-heal budget (${MAX_SELF_HEAL_TRACKS}) exhausted for ${libraryItemId}; remaining tracks marked missing`,
+            );
+            res.isMissing = true;
+            res.finalSignedUrl = "";
+            continue;
+          }
           const filename = res.storagePath.split("/").pop()!;
           const recordedPrefix = res.storagePath.includes("://")
             ? res.storagePath.replace(/^[a-z0-9-]+:\/\//i, "").split("/")
@@ -507,6 +519,7 @@ export class PlaybackService {
             console.info(
               `[PlaybackService] Self-healed track "${filename}": ${res.storagePath} → ${resolved.canonicalPath}`,
             );
+            selfHealedCount++;
             res.finalSignedUrl = resolved.signedUrl;
             res.resolvedCanonicalPath = resolved.canonicalPath;
           } else {

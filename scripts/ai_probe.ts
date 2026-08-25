@@ -6,7 +6,12 @@
 // regression. LLM output is untrusted: every case is schema-validated,
 // method-restricted (GET + two sandboxed POSTs), and capped before execution.
 //
-// Env: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, optional GROQ_API_KEY/ZAI_API_KEY.
+// Safety posture (AI-review finding, accepted with mitigations): probes run
+// against production BY DESIGN - the point is catching real compatibility
+// drift. Blast radius is bounded: GET-only targets plus two validation-only
+// POSTs that cannot mutate state (bad login / bogus session id), an allowlist
+// sanitizer on all LLM output, and a throwaway probe user whose credentials
+// never touch payload execution.
 // Exit code: 0 when no 5xx (or when providers are down -> baseline-only run),
 // 1 on any unexpected 5xx.
 
@@ -186,6 +191,27 @@ if (import.meta.main) await main();
 async function main() {
   if (!URL_BASE || !SVC) {
     throw new Error("SUPABASE_URL / SERVICE_ROLE required");
+  }
+
+  // Hygiene: sweep any probe users leaked by previous crashed runs before
+  // creating today's (profile row first - FK blocks auth deletion otherwise).
+  try {
+    const sweep = await fetch(`${URL_BASE}/auth/v1/admin/users?per_page=50`, {
+      headers: { apikey: SVC, Authorization: `Bearer ${SVC}` },
+    }).then((r) => r.json());
+    for (const u of sweep?.users ?? []) {
+      if (!/^ai-probe-/.test(u.email ?? "")) continue;
+      await fetch(`${URL_BASE}/rest/v1/profiles?username=eq.${u.email}`, {
+        method: "DELETE",
+        headers: { apikey: SVC, Authorization: `Bearer ${SVC}` },
+      });
+      await fetch(`${URL_BASE}/auth/v1/admin/users/${u.id}`, {
+        method: "DELETE",
+        headers: { apikey: SVC, Authorization: `Bearer ${SVC}` },
+      });
+    }
+  } catch {
+    // best effort
   }
 
   // session token for authed targets

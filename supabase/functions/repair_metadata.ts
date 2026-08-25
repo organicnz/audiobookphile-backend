@@ -269,6 +269,9 @@ async function main() {
     const stowaways = entries.filter((e) => entryDuration(e) === null);
     // Only a SMALL minority may be detached — items whose metadata largely
     // lacks durations are a different (unknown-shape) problem, not stowaways.
+    // Targeted runs skip detachment ON PURPOSE: --id/--ids are for title and
+    // cover repairs; bulk stowaway detachment stays the auto-detach cron's
+    // job so a spot fix can never amputate a whole-book file by accident.
     const targeted = Boolean(onlyId || onlyIds);
     const minority = stowaways.length > 0 &&
       stowaways.length <= Math.ceil(entries.length * 0.2);

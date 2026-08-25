@@ -269,6 +269,7 @@ async function handleSmartSearch(c: Context<{ Variables: Variables }>) {
           },
           body: JSON.stringify({
             model: ZAI_CHAT_MODEL,
+            thinking: { type: "disabled" },
             messages: [
               {
                 role: "user",

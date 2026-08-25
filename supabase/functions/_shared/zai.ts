@@ -97,6 +97,7 @@ Return ONLY a valid JSON array of strings containing every exact filename in chr
         },
         body: JSON.stringify({
           model: ZAI_CHAT_MODEL,
+          thinking: { type: "disabled" },
           messages: [{ role: "user", content: prompt }],
           temperature: 0.0,
         }),
@@ -191,6 +192,7 @@ CRITICAL RULES:
         },
         body: JSON.stringify({
           model: ZAI_CHAT_MODEL,
+          thinking: { type: "disabled" },
           messages: [{ role: "user", content: prompt }],
           temperature: 0.0,
         }),
@@ -298,6 +300,7 @@ Return ONLY a valid JSON array of string IDs representing the sorted order: ["id
         },
         body: JSON.stringify({
           model: ZAI_CHAT_MODEL,
+          thinking: { type: "disabled" },
           messages: [{ role: "user", content: prompt }],
           temperature: 0.1,
         }),
@@ -377,6 +380,7 @@ export async function enrichMetadataWithZAI(
         },
         body: JSON.stringify({
           model: ZAI_CHAT_MODEL,
+          thinking: { type: "disabled" },
           messages: [
             {
               role: "user",
@@ -428,7 +432,9 @@ Return ONLY a JSON object with:
           console.warn(
             `[z.ai] REJECTED enrichment for "${title}": model described a different work "${enrichedTitle}"`,
           );
-          setCachedResult(cacheKey, {});
+          // Deliberately NOT cached: a rejected attempt means the model
+          // misidentified the work; a retry may succeed. Caching the rejection
+          // would poison the 5-minute window against recovery.
           return {};
         }
 
@@ -515,6 +521,7 @@ Format response in valid JSON with key "summary" (2-3 sentences), "keyTakeaways"
         },
         body: JSON.stringify({
           model: ZAI_CHAT_MODEL,
+          thinking: { type: "disabled" },
           messages: [
             {
               role: "system",
@@ -623,6 +630,7 @@ Format response strictly in valid JSON with keys: "summary", "keyTakeaways", "mo
         },
         body: JSON.stringify({
           model: ZAI_CHAT_MODEL,
+          thinking: { type: "disabled" },
           messages: [
             {
               role: "system",
