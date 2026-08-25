@@ -3,10 +3,15 @@ name: Deploy Supabase Backend (Migrations & Edge API)
 on:
   push:
     branches: [main]
+    paths:
+      - 'supabase/**'
+      - '.github/workflows/deploy-backend.yml'
   pull_request:
     branches: [main]
+    paths:
+      - 'supabase/**'
+      - '.github/workflows/deploy-backend.yml'
   workflow_dispatch:
-
 concurrency:
   group: deploy-backend-${{ github.ref }}
   cancel-in-progress: false
