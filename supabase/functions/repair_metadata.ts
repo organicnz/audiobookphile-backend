@@ -49,9 +49,25 @@ function entryFilename(entry: unknown): string {
   return raw.split("/").pop() ?? raw;
 }
 
+/** Split glued CamelCase/digit compounds ("33TheThreeBodyProblemChapter33"). */
+function splitGlued(name: string): string {
+  return name
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2")
+    .replace(/(\d)([A-Za-z])/g, "$1 $2")
+    .replace(/([A-Za-z])(\d)/g, "$1 $2");
+}
+
+/** Human-name heuristic: 2-3 capitalized words ("Eugenia Cheng"). */
+function looksLikePersonName(s: string): boolean {
+  const parts = s.trim().split(/\s+/);
+  if (parts.length < 2 || parts.length > 3) return false;
+  return parts.every((w) => /^[A-Z][a-z'’-]+$/.test(w));
+}
+
 /** Remove numbering/disc markers so clustered filenames become comparable. */
 function stripTrackNumbering(name: string): string {
-  let s = name.replace(AUDIO_EXT, "").trim();
+  let s = splitGlued(name.replace(AUDIO_EXT, "").trim());
   s = s.replace(/^\[?\d{1,3}(-\d{1,3})?\]?[\s._-]+/, ""); // [01-22] name | 001 name
   s = s.replace(
     /^(cd|disc|disk|part|pt|track|ch(apter)?)\s*\d+\s*[-_.]?\s*/i,
@@ -217,14 +233,21 @@ async function main() {
       const curTokens = significantTokens(title);
       const clusterTokens = cluster.split(" ");
       const curIsGarbage = looksLikeGarbage(title);
-      const authorAsTitle = author.length > 0 &&
-        titlesLikelySameWork(title, author);
+      const authorAsTitle =
+        (author.length > 0 && titlesLikelySameWork(title, author)) ||
+        looksLikePersonName(title);
       const addsInfo = curTokens.length > 0 &&
         curTokens.every((t) => clusterTokens.includes(t)) &&
         clusterTokens.length > curTokens.length;
+      // Glued compounds ("33TheThreeBodyProblemChapter33"): the cluster,
+      // squashed, appears inside the current title — same work, unreadable.
+      const squashedTitle = title.toLowerCase().replace(/[^a-z]/g, "");
+      const squashedCluster = cluster.replace(/\s+/g, "").toLowerCase();
+      const gluedMatch = squashedCluster.length >= 6 &&
+        squashedTitle.includes(squashedCluster);
       if (
         !titlesLikelySameWork(title, cluster) &&
-        (curIsGarbage || authorAsTitle || addsInfo)
+        (curIsGarbage || authorAsTitle || addsInfo || gluedMatch)
       ) {
         newTitle = smartTitleCase(prettifyFilenameTitle(cluster));
         reason = `track-cluster "${cluster}" (${

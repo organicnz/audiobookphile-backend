@@ -57,6 +57,24 @@ function normalizeTitleForMatchLite(s: string): string {
   ).trim();
 }
 
+/** Initials of raw title words: "When The Body Says No" → WTBSN. */
+function titleInitials(title: string): string {
+  const words = title.split(/[^\p{L}]+/u).filter((w) => w.length > 0);
+  if (words.length < 2) return "";
+  return words.map((w) => w[0].toUpperCase()).join("");
+}
+
+/** Tracks named with the title's acronym (WTBSN) are verified, not suspect. */
+function matchesTitleAcronym(title: string, names: string[]): boolean {
+  const initials = titleInitials(title);
+  if (initials.length < 3) return false;
+  return names.some((n) =>
+    (n.match(/\b[A-Z]{2,}\b/g) ?? []).some(
+      (c) => c.length >= 3 && initials.startsWith(c),
+    )
+  );
+}
+
 interface Finding {
   itemId: string;
   title: string;
@@ -148,7 +166,10 @@ async function main() {
     const sharingAnyToken = identityNames.some((n) =>
       significantTokens(n).some((t) => titleTokens.has(t))
     );
-    if (matching.length === 0 && !sharingAnyToken) {
+    if (
+      matching.length === 0 && !sharingAnyToken &&
+      !matchesTitleAcronym(title, identityNames)
+    ) {
       findings.push({
         itemId: item.id,
         title,
