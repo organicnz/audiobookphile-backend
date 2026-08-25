@@ -1,5 +1,14 @@
 [
   {
+    "id": "e7d226b6-6f87-4581-b645-ec929df94b5d",
+    "title": "101 Essays That Will Change the Way You Think",
+    "author": "Brianna Wiest",
+    "path": "/audiobooks/Brianna Wiest - 2018 - 101 Essays That Will Change the Way You Think (Health)",
+    "tracks": 102,
+    "durationMinutes": 647,
+    "hasCover": true
+  },
+  {
     "id": "934360c4-3341-41b1-b02d-bc0bde6df779",
     "title": "1984",
     "author": "George Orwell",
@@ -36,15 +45,6 @@
     "hasCover": true
   },
   {
-    "id": "0ea6141b-0a22-450b-a080-59d4d59dac6d",
-    "title": "Afua Hirsch",
-    "author": "Afua Hirsch",
-    "path": "/audiobooks/Afua Hirsch - 2020 - We Need to Talk About the British Empire (History)",
-    "tracks": 6,
-    "durationMinutes": 227,
-    "hasCover": true
-  },
-  {
     "id": "bfabe9c0-d41c-472f-a177-64c86a2b57f4",
     "title": "Amit Goswami Quantum Physics Consciousness Creativity Healing",
     "author": "Amit Goswami",
@@ -69,15 +69,6 @@
     "path": "/audiobooks/Christopher HItchens - And Yet",
     "tracks": 1,
     "durationMinutes": 693,
-    "hasCover": true
-  },
-  {
-    "id": "c8c6d809-3d03-424f-8661-da2cd0170370",
-    "title": "Andy Weir",
-    "author": "Andy Weir",
-    "path": "/audiobooks/Andy Weir - Project Hail Mary",
-    "tracks": 30,
-    "durationMinutes": 971,
     "hasCover": true
   },
   {
@@ -135,24 +126,6 @@
     "hasCover": true
   },
   {
-    "id": "e55ed8a6-a794-4838-8563-2fabe95b612e",
-    "title": "Brian Greene",
-    "author": "",
-    "path": "/audiobooks/Brian Greene - The Hidden Reality_ Parallel Universes and the Deep Laws of the Cosmos",
-    "tracks": 12,
-    "durationMinutes": 829,
-    "hasCover": true
-  },
-  {
-    "id": "e7d226b6-6f87-4581-b645-ec929df94b5d",
-    "title": "Brianna Wiest",
-    "author": "Brianna Wiest",
-    "path": "/audiobooks/Brianna Wiest - 2018 - 101 Essays That Will Change the Way You Think (Health)",
-    "tracks": 102,
-    "durationMinutes": 647,
-    "hasCover": true
-  },
-  {
     "id": "6c361ca9-7d83-4340-ae8e-62abd08c5f72",
     "title": "Brief Candle in the Dark - Part 01",
     "author": "Richard Dawkins/Richard Dawkins",
@@ -199,7 +172,7 @@
   },
   {
     "id": "37bb18c5-4b2e-4880-8df3-56f7df5ce121",
-    "title": "Decoding Reality",
+    "title": "Decoding Reality: The Universe as Quantum Information",
     "author": "Vlatko Vedral",
     "path": "/audiobooks/Vlatko Vedral - Decoding Reality; The Universe as Quantum Information",
     "tracks": 2,
@@ -270,8 +243,17 @@
     "hasCover": true
   },
   {
+    "id": "76d6d510-ea19-405d-86bf-ce5a36cd633c",
+    "title": "Everything I Know",
+    "author": "Buckminster Fuller",
+    "path": "/audiobooks/R. Buckminster Fuller - Everything I Know",
+    "tracks": 12,
+    "durationMinutes": 2495,
+    "hasCover": true
+  },
+  {
     "id": "a1ee7c4e-fbfd-4fb0-999e-03552415c04d",
-    "title": "Experiencing Needs as Gifts",
+    "title": "Experiencing Needs as a Gift",
     "author": "Marshall Rosenberg",
     "path": "/audiobooks/Marshall Rosenberg/Experiencing Needs as Gifts",
     "tracks": 18,
@@ -280,20 +262,11 @@
   },
   {
     "id": "4b572889-c1c3-46d6-bc09-8b90fb103fc2",
-    "title": "Fear",
+    "title": "Fear: Trump in the White House",
     "author": "Bob Woodward",
     "path": "/audiobooks/Fear, Trump in the White House by Bob Woodward (Audiobook)",
     "tracks": 11,
     "durationMinutes": 740,
-    "hasCover": true
-  },
-  {
-    "id": "f40ffad2-c1c5-4f73-8ae8-7160fe56bc0f",
-    "title": "Feynman",
-    "author": "Richard Phillips Feynman, Robert B. Leighton, Matthew L. Sands",
-    "path": "/audiobooks/Feynman/The Feynman Lectures on Physics Vol.2",
-    "tracks": 12,
-    "durationMinutes": 1093,
     "hasCover": true
   },
   {
@@ -312,15 +285,6 @@
     "path": "/audiobooks/Christopher Hitchens - God Is Not Great",
     "tracks": 40,
     "durationMinutes": 527,
-    "hasCover": true
-  },
-  {
-    "id": "2300554d-bd4e-47f6-88f6-36b025fab8ee",
-    "title": "How Self-Control Works, Why It Matters, and What You Can Do To Get More Of It",
-    "author": "Kelly McGonigal Ph.D./Walter Dixon",
-    "path": "/audiobooks/The Willpower Instinct",
-    "tracks": 9,
-    "durationMinutes": 501,
     "hasCover": true
   },
   {
@@ -366,7 +330,7 @@
     "path": "/audiobooks/Christopher Hitchens - Mortality",
     "tracks": 27,
     "durationMinutes": 131,
-    "hasCover": false
+    "hasCover": true
   },
   {
     "id": "dba068f8-8a7f-4c83-965f-8b3ed8e7df97",
@@ -441,6 +405,15 @@
     "hasCover": true
   },
   {
+    "id": "c8c6d809-3d03-424f-8661-da2cd0170370",
+    "title": "Project Hail Mary",
+    "author": "Andy Weir",
+    "path": "/audiobooks/Andy Weir - Project Hail Mary",
+    "tracks": 30,
+    "durationMinutes": 971,
+    "hasCover": true
+  },
+  {
     "id": "d622f192-8b2d-47aa-b46a-0c08717de8ae",
     "title": "Quantum",
     "author": "Manjit Kumar",
@@ -451,20 +424,29 @@
   },
   {
     "id": "18e0df2b-8899-42f8-b9e6-f710408580c4",
-    "title": "Quantum Gravity",
+    "title": "Quantum Gravity #1: Keeping It Real",
     "author": "Justina Robson",
     "path": "/audiobooks/Quantum Gravity/01 - Keeping It Real",
-    "tracks": 400,
+    "tracks": 81,
     "durationMinutes": 2402,
     "hasCover": true
   },
   {
-    "id": "76d6d510-ea19-405d-86bf-ce5a36cd633c",
-    "title": "R. Buckminster Fuller",
-    "author": "Buckminster Fuller",
-    "path": "/audiobooks/R. Buckminster Fuller - Everything I Know",
-    "tracks": 12,
-    "durationMinutes": 2495,
+    "id": "41f6bab0-2f1b-4844-aa04-f478b0e131d9",
+    "title": "Quantum Gravity #2: Selling Out",
+    "author": "Justina Robson",
+    "path": "",
+    "tracks": 163,
+    "durationMinutes": 0,
+    "hasCover": true
+  },
+  {
+    "id": "aa23effa-64c9-4717-bcfe-09c5693096cb",
+    "title": "Quantum Gravity #3: Going Under",
+    "author": "Justina Robson",
+    "path": "",
+    "tracks": 156,
+    "durationMinutes": 0,
     "hasCover": true
   },
   {
@@ -585,6 +567,15 @@
     "hasCover": true
   },
   {
+    "id": "f40ffad2-c1c5-4f73-8ae8-7160fe56bc0f",
+    "title": "The Feynman Lectures on Physics, Vol. 2",
+    "author": "Richard P. Feynman",
+    "path": "/audiobooks/Feynman/The Feynman Lectures on Physics Vol.2",
+    "tracks": 12,
+    "durationMinutes": 1093,
+    "hasCover": true
+  },
+  {
     "id": "ada4a255-57fe-46c2-ae33-b36c947ad973",
     "title": "The Field: The Quest for the Secret Force of the Universe",
     "author": "Lynne McTaggart",
@@ -609,6 +600,15 @@
     "path": "/audiobooks/The Hard Thing About Hard Things Audiobook",
     "tracks": 1,
     "durationMinutes": 460,
+    "hasCover": true
+  },
+  {
+    "id": "e55ed8a6-a794-4838-8563-2fabe95b612e",
+    "title": "The Hidden Reality: Parallel Universes and the Deep Laws of the Cosmos",
+    "author": "Brian Greene",
+    "path": "/audiobooks/Brian Greene - The Hidden Reality_ Parallel Universes and the Deep Laws of the Cosmos",
+    "tracks": 12,
+    "durationMinutes": 829,
     "hasCover": true
   },
   {
@@ -684,6 +684,15 @@
     "hasCover": true
   },
   {
+    "id": "2300554d-bd4e-47f6-88f6-36b025fab8ee",
+    "title": "The Willpower Instinct: How Self-Control Works, Why It Matters, and What You Can Do To Get More Of It",
+    "author": "Kelly McGonigal",
+    "path": "/audiobooks/The Willpower Instinct",
+    "tracks": 9,
+    "durationMinutes": 501,
+    "hasCover": true
+  },
+  {
     "id": "86a58e60-19fe-4352-a61d-52c43c4bb7f7",
     "title": "Ulysses",
     "author": "James Joyce",
@@ -694,7 +703,7 @@
   },
   {
     "id": "c48d35ae-1ea9-414d-8db0-ccb0942dbb39",
-    "title": "Uncertainty",
+    "title": "Uncertainty: Einstein, Heisenberg, Bohr, and the Struggle for the Soul of Science",
     "author": "David Lindley",
     "path": "/audiobooks/David Lindley - Uncertainty; Einstein, Heisenberg, Bohr, and the Struggle for the Soul of Science",
     "tracks": 1,
@@ -717,6 +726,15 @@
     "path": "/audiobooks/Michio Kaku - Visions",
     "tracks": 11,
     "durationMinutes": 941,
+    "hasCover": true
+  },
+  {
+    "id": "0ea6141b-0a22-450b-a080-59d4d59dac6d",
+    "title": "We Need to Talk About the British Empire",
+    "author": "Afua Hirsch",
+    "path": "/audiobooks/Afua Hirsch - 2020 - We Need to Talk About the British Empire (History)",
+    "tracks": 6,
+    "durationMinutes": 227,
     "hasCover": true
   },
   {
