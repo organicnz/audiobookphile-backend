@@ -26,6 +26,8 @@ jobs:
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # AI review needs multi-commit history
 
       - name: Setup Deno
         uses: denoland/setup-deno@v2

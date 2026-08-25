@@ -129,16 +129,27 @@ function parseFindings(raw: string): Finding[] {
   }
 }
 
+/** Resolve a reviewable diff even on shallow checkouts (CI fetch-depth: 1). */
+function resolveDiffArgs(range: string): string[] {
+  for (const candidate of [range, "HEAD~3..HEAD", "HEAD~1..HEAD"]) {
+    const probe = new Deno.Command("git", {
+      args: ["diff", "--stat", candidate],
+    }).outputSync();
+    if (probe.success) return ["diff", candidate];
+  }
+  // depth-1 clone: review just the tip commit against the empty tree
+  console.warn("[ai-review] shallow checkout - reviewing HEAD only");
+  return ["show", "--stat", "HEAD"];
+}
+
 async function main() {
-  const stat = new Deno.Command("git", {
-    args: ["diff", "--stat", range],
-  }).outputSync();
+  const diffArgs = resolveDiffArgs(range);
+  const stat = new Deno.Command("git", { args: diffArgs }).outputSync();
   if (!stat.success) throw new Error("git diff failed - is the range valid?");
   console.log(new TextDecoder().decode(stat.stdout));
 
-  const full = new Deno.Command("git", {
-    args: ["diff", range, "--", "*.ts", "*.sql", "*.yml", "*.yaml"],
-  }).outputSync();
+  const fileArgs = [...diffArgs, "--", "*.ts", "*.sql", "*.yml", "*.yaml"];
+  const full = new Deno.Command("git", { args: fileArgs }).outputSync();
   let diff = new TextDecoder().decode(full.stdout);
   if (!diff.trim()) {
     console.log("No reviewable diff in range.");
