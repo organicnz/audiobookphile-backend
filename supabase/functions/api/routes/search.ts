@@ -1,4 +1,13 @@
 import { createOpenApiRouter, z } from "../_shared/openapi.ts";
+import { ZAI_CHAT_MODEL } from "../../_shared/zai.ts";
+
+/**
+ * Embedding model for semantic search. z.ai retired embedding-2/embedding-3
+ * (API error 1211); until a valid model name is configured via
+ * ZAI_EMBEDDING_MODEL, this endpoint returns its documented 5xx error shape.
+ */
+const ZAI_EMBEDDING_MODEL = Deno.env.get("ZAI_EMBEDDING_MODEL") ??
+  "embedding-3";
 import { LibraryItemWithBooks, mapBookForMobile } from "../../api/mappers.ts";
 import { Context } from "hono";
 import { Variables } from "../_shared/types.ts";
@@ -259,7 +268,7 @@ async function handleSmartSearch(c: Context<{ Variables: Variables }>) {
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
-            model: "glm-4-flash",
+            model: ZAI_CHAT_MODEL,
             messages: [
               {
                 role: "user",
@@ -351,7 +360,7 @@ async function handleGenerateEmbedding(c: Context<{ Variables: Variables }>) {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          model: "embedding-2",
+          model: ZAI_EMBEDDING_MODEL,
           input: text,
         }),
       },
@@ -362,7 +371,7 @@ async function handleGenerateEmbedding(c: Context<{ Variables: Variables }>) {
     const aiData = await aiRes.json();
     return c.json({
       embedding: aiData.data?.[0]?.embedding || [],
-      model: "embedding-2",
+      model: ZAI_EMBEDDING_MODEL,
     }, 200);
   } catch (e: unknown) {
     return c.json({

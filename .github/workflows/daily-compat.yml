@@ -1,0 +1,107 @@
+name: Daily Compatibility & E2E Suite
+
+# Every layer, every day, against PRODUCTION:
+#   L1  Deno unit tests (gates, invariants, self-heal logic)
+#   L2  SQL merge-safety harness (hermetic rollback transaction)
+#   L3  Playwright API e2e (real storage: live/dead/partial playback, covers, auth)
+#   AI  LLM-generated adversarial probes (Groq primary, z.ai fallback) - zero 5xx
+#
+# A failure here means production drifted or a dependency (model names,
+# storage tiers, contracts) broke - surface it before users do.
+
+on:
+  schedule:
+    - cron: "15 4 * * *" # 04:15 UTC daily
+  workflow_dispatch: {}
+
+concurrency:
+  group: daily-compat
+  cancel-in-progress: false
+
+jobs:
+  compat:
+    name: Full Compatibility Matrix
+    runs-on: [self-hosted, macOS]
+    timeout-minutes: 45
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v7
+
+      - name: Setup Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install Dependencies
+        run: |
+          bun install --frozen-lockfile || bun install
+          bunx playwright install chromium
+
+      # ------------------------------------------------------------------ L1
+      - name: L1 Deno Unit Tests
+        id: l1
+        run: |
+          cd supabase/functions
+          deno test --allow-all --no-check=remote api/ 2>&1 | tee /tmp/l1.log
+          grep -q "0 failed" /tmp/l1.log
+
+      # ------------------------------------------------------------------ L2
+      - name: L2 SQL Merge-Safety Harness
+        id: l2
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
+        run: |
+          cd supabase/functions
+          deno test --allow-all api/db_merge_safety_test.ts
+
+      # ------------------------------------------------------------------ L3
+      - name: L3 Playwright API E2E
+        id: l3
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          bunx playwright test tests/e2e-api --reporter=list 2>&1 | tee /tmp/l3.log
+          grep -qE "[1-9][0-9]* passed" /tmp/l3.log
+          ! grep -qE "[1-9][0-9]* failed" /tmp/l3.log
+
+      # ----------------------------------------------------------------- AI
+      - name: AI Adversarial Probe (Groq -> z.ai fallback)
+        id: ai
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          ZAI_API_KEY: ${{ secrets.ZAI_API_KEY }}
+        run: |
+          deno run --allow-all scripts/ai_probe.ts
+
+      - name: Upload Reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: daily-compat-reports-${{ github.run_id }}
+          path: reports/
+          if-no-files-found: ignore
+          retention-days: 30
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "## Daily compatibility run"
+            echo ""
+            echo "| Layer | Result |"
+            echo "|---|---|"
+            echo "| L1 Deno unit | ${{ steps.l1.outcome }} |"
+            echo "| L2 SQL merge-safety | ${{ steps.l2.outcome }} |"
+            echo "| L3 Playwright API e2e | ${{ steps.l3.outcome }} |"
+            echo "| AI adversarial probe | ${{ steps.ai.outcome }} |"
+          } >> "$GITHUB_STEP_SUMMARY"

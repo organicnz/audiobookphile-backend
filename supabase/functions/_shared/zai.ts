@@ -2,6 +2,13 @@
 
 import { titlesLikelySameWork } from "./titleMatch.ts";
 
+/**
+ * Chat model for all z.ai calls. glm-4-flash was retired upstream (API now
+ * returns error 1211 "model not found"), which silently degraded every AI
+ * feature to its heuristic fallback. Overridable via ZAI_MODEL edge secret.
+ */
+export const ZAI_CHAT_MODEL = Deno.env.get("ZAI_MODEL") ?? "glm-4.5-air";
+
 const cacheMap = new Map<string, { result: any; expiresAt: number }>();
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minute in-memory TTL
 
@@ -89,7 +96,7 @@ Return ONLY a valid JSON array of strings containing every exact filename in chr
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          model: "glm-4-flash",
+          model: ZAI_CHAT_MODEL,
           messages: [{ role: "user", content: prompt }],
           temperature: 0.0,
         }),
@@ -183,7 +190,7 @@ CRITICAL RULES:
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          model: "glm-4-flash",
+          model: ZAI_CHAT_MODEL,
           messages: [{ role: "user", content: prompt }],
           temperature: 0.0,
         }),
@@ -290,7 +297,7 @@ Return ONLY a valid JSON array of string IDs representing the sorted order: ["id
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          model: "glm-4-flash",
+          model: ZAI_CHAT_MODEL,
           messages: [{ role: "user", content: prompt }],
           temperature: 0.1,
         }),
@@ -369,7 +376,7 @@ export async function enrichMetadataWithZAI(
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          model: "glm-4-flash",
+          model: ZAI_CHAT_MODEL,
           messages: [
             {
               role: "user",
@@ -507,7 +514,7 @@ Format response in valid JSON with key "summary" (2-3 sentences), "keyTakeaways"
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          model: "glm-4-flash",
+          model: ZAI_CHAT_MODEL,
           messages: [
             {
               role: "system",
@@ -615,7 +622,7 @@ Format response strictly in valid JSON with keys: "summary", "keyTakeaways", "mo
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          model: "glm-4-flash",
+          model: ZAI_CHAT_MODEL,
           messages: [
             {
               role: "system",

@@ -11,6 +11,7 @@ import { getErrorMessage } from "../_shared/errors.ts";
 import {
   matchExistingBookWithZAI,
   naturalSortFilenames,
+  ZAI_CHAT_MODEL,
 } from "../../_shared/zai.ts";
 
 // ===== Zod schemas for /upload/finalize =====
@@ -1244,7 +1245,7 @@ async function resolveTitleAndAuthor(
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
-            model: "glm-4-flash",
+            model: ZAI_CHAT_MODEL,
             messages: [
               {
                 role: "user",

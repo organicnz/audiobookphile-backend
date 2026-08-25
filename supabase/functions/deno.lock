@@ -5,6 +5,7 @@
     "jsr:@std/internal@^1.0.12": "1.0.14",
     "jsr:@supabase/functions-js@2": "2.110.2",
     "npm:@aws-sdk/client-s3@3.1085.0": "3.1085.0",
+    "npm:@aws-sdk/client-s3@^3.1085.0": "3.1085.0",
     "npm:@aws-sdk/client-s3@^3.693.0": "3.1085.0",
     "npm:@aws-sdk/s3-request-presigner@3.1085.0": "3.1085.0",
     "npm:@aws-sdk/s3-request-presigner@^3.693.0": "3.1085.0",

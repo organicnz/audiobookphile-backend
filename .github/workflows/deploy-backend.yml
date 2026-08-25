@@ -406,3 +406,17 @@ jobs:
           cd supabase/functions/api
           deno install
           API_BASE_URL="https://${SUPABASE_PROJECT_ID}.supabase.co/functions/v1/api" deno test --allow-env --allow-net smoke/e2e_smoke_test.ts
+
+      - name: Playwright API E2E
+        id: pw_e2e
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          . .github/scripts/step-tree.sh
+          step_tree "Post-Deploy Verification (Smoke & Schemathesis)" pw_e2e \
+            "checkout:Checkout Repository|deno:Setup Deno|hurl:Setup Hurl|python:Setup Python|schemathesis:Install Schemathesis|hurl_gate:Hurl Gate (/health)|schema:Schemathesis (GET only)|smoke:Deno Smoke Test|pw_e2e:Playwright API E2E" \
+            "checkout=${{ steps.checkout.outcome }};deno=${{ steps.deno.outcome }};hurl=${{ steps.hurl.outcome }};python=${{ steps.python.outcome }};schemathesis=${{ steps.schemathesis.outcome }};hurl_gate=${{ steps.hurl_gate.outcome }};schema=${{ steps.schema.outcome }};smoke=${{ steps.smoke.outcome }}"
+          bun install --frozen-lockfile || bun install
+          bunx playwright install chromium
+          bunx playwright test tests/e2e-api --reporter=list

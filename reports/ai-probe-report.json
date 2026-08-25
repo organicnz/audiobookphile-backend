@@ -1,0 +1,10 @@
+{
+  "provider": "groq",
+  "executed": 26,
+  "byStatus": {
+    "4xx": 12,
+    "2xx": 12,
+    "3xx": 2
+  },
+  "serverErrors": []
+}
