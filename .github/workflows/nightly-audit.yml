@@ -1,0 +1,50 @@
+name: Nightly Library Integrity Audit
+
+# Continuous assurance for the Sapiens/Homo Deus class of corruption:
+# every night the detector scans production library_items and uploads a
+# full report. The job never blocks deploys — it exists to surface drift.
+
+on:
+  schedule:
+    - cron: "0 3 * * *" # 03:00 UTC daily
+  workflow_dispatch: {}
+
+concurrency:
+  group: nightly-audit
+  cancel-in-progress: false
+
+jobs:
+  audit:
+    name: Detect Corrupted Library Items
+    runs-on: [self-hosted, macOS]
+    timeout-minutes: 20
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v7
+
+      - name: Setup Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Run Detector
+        id: detect
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          cd supabase/functions
+          deno run --allow-all detect_merged_books.ts --json "$RUNNER_TEMP/audit_report.json" 2>&1 | tee audit_output.txt
+          SUSPECTS=$(grep -oE "SUSPECT_MERGED: [0-9]+" audit_output.txt | grep -oE "[0-9]+" || echo 0)
+          echo "suspect_count=$SUSPECTS" >> "$GITHUB_OUTPUT"
+          echo "Suspected merged items: $SUSPECTS"
+
+      - name: Upload Report Artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: library-integrity-report-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/audit_report.json
+          if-no-files-found: warn
+          retention-days: 30
