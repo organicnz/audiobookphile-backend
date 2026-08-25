@@ -359,14 +359,14 @@ jobs:
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           st --version || schemathesis --version
 
-      - name: Hurl Health Check
+      - name: Verify Schemathesis Install
         id: schemathesis
         run: |
           . .github/scripts/step-tree.sh
           step_tree "Post-Deploy Verification (Smoke & Schemathesis)" schemathesis \
-            "checkout:Checkout Repository|deno:Setup Deno|hurl:Setup Hurl|python:Setup Python|schemathesis:Install Schemathesis|hurl_gate:Hurl Gate (/health)|schema:Schemathesis (GET only)|smoke:Deno Smoke Test" \
-            "checkout=${{ steps.checkout.outcome }};deno=${{ steps.deno.outcome }};hurl=${{ steps.hurl.outcome }};python=${{ steps.python.outcome }}"
-          pip install schemathesis
+            "checkout:Checkout Repository|deno:Setup Deno|hurl:Setup Hurl|python:Setup Python|schemathesis:Verify Schemathesis Install|hurl_gate:Hurl Gate (/health)|schema:Schemathesis (GET only)|smoke:Deno Smoke Test" \
+            "checkout=${{ steps.checkout.outcome }};deno=${{ steps.deno.outcome }};hurl=${{ steps.hurl.outcome }};python=${{ steps.python.outcome }};schemathesis=${{ steps.schemathesis.outcome }}"
+          st --version
 
       - name: Hurl Gate (/health)
         id: hurl_gate
