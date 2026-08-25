@@ -348,13 +348,18 @@ jobs:
         id: hurl
         uses: gacts/install-hurl@v1
 
-      - name: Setup Python
+      - name: Install Schemathesis (system python)
         id: python
-        uses: actions/setup-python@v7
-        with:
-          python-version: "3.x"
+        run: |
+          # actions/setup-python hardcodes /Users/runner/hostedtoolcache on
+          # macOS — unwritable on self-hosted runners. Schemathesis is the
+          # only python dependency in this job; use the system interpreter.
+          python3 -m pip install --quiet --break-system-packages schemathesis
+          echo "$HOME/Library/Python/3.14/bin" >> "$GITHUB_PATH"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          st --version || schemathesis --version
 
-      - name: Install Schemathesis
+      - name: Hurl Health Check
         id: schemathesis
         run: |
           . .github/scripts/step-tree.sh
