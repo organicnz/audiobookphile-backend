@@ -222,6 +222,42 @@ async function main() {
     const stripped = audioNames.map(stripTrackNumbering).filter(Boolean);
     const author = String(item.author_names_first_last ?? "").trim();
 
+    // Zero-duration stowaways: unreadable-metadata files (often whole other
+    // audiobooks uploaded alongside, e.g. a Homo Deus .m4b inside Sapiens).
+    // When >=5 healthy siblings exist, entries without a parsable duration
+    // are detached from the item.
+    const entryDuration = (e: unknown): number | null => {
+      const m = ((e as Record<string, unknown>)?.metadata ??
+        {}) as Record<string, unknown>;
+      for (const k of ["duration", "durationSec", "length"]) {
+        const v = m[k] ?? (e as Record<string, unknown>)[k];
+        if (typeof v === "number" && v > 0) return v;
+        if (typeof v === "string" && Number(v) > 0) return Number(v);
+      }
+      return null;
+    };
+    const withDurations = entries.filter((e) => entryDuration(e) !== null);
+    const stowaways = entries.filter((e) => entryDuration(e) === null);
+    // Only a SMALL minority may be detached — items whose metadata largely
+    // lacks durations are a different (unknown-shape) problem, not stowaways.
+    const minority = stowaways.length > 0 &&
+      stowaways.length <= Math.ceil(entries.length * 0.2);
+    if (withDurations.length >= 5 && minority && !onlyId) {
+      console.log(
+        `⚠️  [${item.id}] "${title}": detaching ${stowaways.length} zero-duration file(s)`,
+      );
+      for (const e of stowaways) {
+        console.log(`      ✂️  ${entryFilename(e)}`);
+      }
+      if (apply) {
+        await supabase.from("library_items").update({
+          audio_files: withDurations,
+          library_files: withDurations,
+        }).eq("id", item.id);
+      }
+      continue;
+    }
+
     let newTitle: string | null = null;
     let reason = "";
 
