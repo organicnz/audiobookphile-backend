@@ -9,6 +9,7 @@ import {
   matchExistingBookWithZAI,
 } from "../../_shared/zai.ts";
 import { fetchBookMetadata } from "../../_shared/coverFetch.ts";
+import { analyzeItemWarnings } from "../../_shared/invariants.ts";
 import { ensureBookAIInsights } from "../aiService.ts";
 import { createOpenApiRouter, z } from "../_shared/openapi.ts";
 import {
@@ -968,6 +969,10 @@ async function handleSyncDurations(
     if (error) throw error;
 
     let updatedCount = 0;
+    const warningsByItem: Record<
+      string,
+      ReturnType<typeof analyzeItemWarnings>
+    > = {};
     for (const item of items || []) {
       const files = (item.audio_files as { duration?: number }[]) || [];
       const totalDuration = files.reduce(
@@ -980,12 +985,25 @@ async function handleSyncDurations(
           .update({ duration: Math.round(totalDuration) })
           .eq("id", item.id);
         updatedCount++;
+
+        const itemWarnings = analyzeItemWarnings(
+          files as Array<Record<string, unknown>>,
+        );
+        if (itemWarnings.length > 0) {
+          warningsByItem[item.id] = itemWarnings;
+          for (const w of itemWarnings) {
+            console.warn(
+              `[sync-durations] ${item.id}: ${w.code} — ${w.detail}`,
+            );
+          }
+        }
       }
     }
 
     return c.json({
       success: true,
       updated: updatedCount,
+      warnings: warningsByItem,
       message: `Updated duration for ${updatedCount} items`,
     }, 200);
   } catch (e: unknown) {

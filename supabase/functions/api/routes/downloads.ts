@@ -4,6 +4,7 @@ import { requireAdminRole } from "../_shared/auth.ts";
 import { presignUpload } from "../../_shared/uploadPresign.ts";
 import { parseTitleAndAuthor } from "../../_shared/titleAuthorParser.ts";
 import { titlesLikelySameWork } from "../../_shared/titleMatch.ts";
+import { analyzeItemWarnings } from "../../_shared/invariants.ts";
 import { Context } from "hono";
 import { Variables } from "../_shared/types.ts";
 import { getErrorMessage } from "../_shared/errors.ts";
@@ -1177,9 +1178,26 @@ export async function executeFinalize(
     }
   }
 
+  // Surface data-integrity warnings (stowaway/giant tracks) with the response
+  // so upload clients and admins see them instead of silent corruption.
+  const finalizeWarnings = analyzeItemWarnings(
+    deduplicatedFiles as Array<Record<string, unknown>>,
+  );
+  if (finalizeWarnings.length > 0) {
+    console.warn(
+      `[upload-finalize] warnings for ${libraryItemId}:`,
+      JSON.stringify(finalizeWarnings),
+    );
+  }
+
   return {
     status: 200,
-    json: { success: true, libraryItemId, bookId },
+    json: {
+      success: true,
+      libraryItemId,
+      bookId,
+      ...(finalizeWarnings.length > 0 ? { warnings: finalizeWarnings } : {}),
+    },
   };
 }
 
