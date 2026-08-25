@@ -1,14 +1,5 @@
 [
   {
-    "id": "7e6f1412-2c46-4ea5-b334-cc359c0a9440",
-    "title": "[Audiobook] Carl Sagan",
-    "author": "Carl Sagan",
-    "path": "/audiobooks/Carl Sagan The Demon-Haunted World - Science as a Candle in the Dark",
-    "tracks": 4,
-    "durationMinutes": 170,
-    "hasCover": true
-  },
-  {
     "id": "934360c4-3341-41b1-b02d-bc0bde6df779",
     "title": "1984",
     "author": "George Orwell",
@@ -42,15 +33,6 @@
     "path": "/audiobooks/Bill Bryson - A Short History of Nearly Everything",
     "tracks": 343,
     "durationMinutes": 1098,
-    "hasCover": true
-  },
-  {
-    "id": "b0f4a10a-4b0e-475f-bcf0-4390f890dbc8",
-    "title": "A Very Short Introduction",
-    "author": "Frank Close",
-    "path": "/audiobooks/Frank_Close - Particle_Physics_A_Very_Short_Introduction-Audiobook-EN-2004-PHC",
-    "tracks": 29,
-    "durationMinutes": 259,
     "hasCover": true
   },
   {
@@ -106,6 +88,15 @@
     "tracks": 1,
     "durationMinutes": 330,
     "hasCover": false
+  },
+  {
+    "id": "aca55602-1bc4-4bd6-9083-e0ae257cbfce",
+    "title": "Arguably: Essays",
+    "author": "Christopher Hitchens",
+    "path": "/audiobooks/Arguably Essays by Christopher Hitchens",
+    "tracks": 342,
+    "durationMinutes": 1704,
+    "hasCover": true
   },
   {
     "id": "03dbf0cb-c04f-45a4-b9c5-0dbcfb6ed02b",
@@ -253,7 +244,7 @@
   },
   {
     "id": "97cbb4fa-2a38-4b63-a1a1-0f1e420f09a7",
-    "title": "Eat and Run [bobpocket]",
+    "title": "Eat and Run",
     "author": "",
     "path": "/audiobooks/Eat and Run ",
     "tracks": 26,
@@ -276,15 +267,6 @@
     "path": "/audiobooks/Walter Isaacson - 2023 - Elon Musk (Biography)",
     "tracks": 1,
     "durationMinutes": 1227,
-    "hasCover": true
-  },
-  {
-    "id": "fa3b1553-b74e-4c3c-ac3a-3d0f396e8144",
-    "title": "Eric Silberstein",
-    "author": "Eric Silberstein",
-    "path": "/audiobooks/Eric Silberstein - 2021 - The Insecure Mind of Sergei Kraev (Sci-Fi)",
-    "tracks": 1,
-    "durationMinutes": 645,
     "hasCover": true
   },
   {
@@ -378,15 +360,6 @@
     "hasCover": true
   },
   {
-    "id": "ada4a255-57fe-46c2-ae33-b36c947ad973",
-    "title": "lynne mctaggart-the field (the quest for the secret force of the universe)",
-    "author": "",
-    "path": "/audiobooks/lynne mctaggart-the field (the quest for the secret force of the universe)",
-    "tracks": 4,
-    "durationMinutes": 139,
-    "hasCover": true
-  },
-  {
     "id": "e0767453-c792-4f8e-8d73-02a8e21b1a42",
     "title": "Mortality - Unabridged - [Disc 1]",
     "author": "Christopher Hitchens",
@@ -429,6 +402,15 @@
     "path": "/audiobooks/Particle Physics for Non-Physicists",
     "tracks": 24,
     "durationMinutes": 731,
+    "hasCover": true
+  },
+  {
+    "id": "b0f4a10a-4b0e-475f-bcf0-4390f890dbc8",
+    "title": "Particle Physics: A Very Short Introduction",
+    "author": "Frank Close",
+    "path": "/audiobooks/Frank_Close - Particle_Physics_A_Very_Short_Introduction-Audiobook-EN-2004-PHC",
+    "tracks": 29,
+    "durationMinutes": 259,
     "hasCover": true
   },
   {
@@ -603,6 +585,15 @@
     "hasCover": true
   },
   {
+    "id": "ada4a255-57fe-46c2-ae33-b36c947ad973",
+    "title": "The Field: The Quest for the Secret Force of the Universe",
+    "author": "Lynne McTaggart",
+    "path": "/audiobooks/lynne mctaggart-the field (the quest for the secret force of the universe)",
+    "tracks": 4,
+    "durationMinutes": 139,
+    "hasCover": true
+  },
+  {
     "id": "d4e853ef-93d6-4799-832d-8475266492dd",
     "title": "The God Delusion",
     "author": "Richard Dawkins",
@@ -627,6 +618,15 @@
     "path": "/audiobooks/THE HOUSE ON MANGO STREET - Sandra Cisneros",
     "tracks": 46,
     "durationMinutes": 138,
+    "hasCover": true
+  },
+  {
+    "id": "fa3b1553-b74e-4c3c-ac3a-3d0f396e8144",
+    "title": "The Insecure Mind of Sergei Kraev",
+    "author": "Eric Silberstein",
+    "path": "/audiobooks/Eric Silberstein - 2021 - The Insecure Mind of Sergei Kraev (Sci-Fi)",
+    "tracks": 1,
+    "durationMinutes": 645,
     "hasCover": true
   },
   {
@@ -681,15 +681,6 @@
     "path": "/audiobooks/The Theory Of Everything",
     "tracks": 44,
     "durationMinutes": 235,
-    "hasCover": true
-  },
-  {
-    "id": "aca55602-1bc4-4bd6-9083-e0ae257cbfce",
-    "title": "Track 015",
-    "author": "",
-    "path": "/audiobooks/Arguably Essays by Christopher Hitchens",
-    "tracks": 342,
-    "durationMinutes": 1704,
     "hasCover": true
   },
   {
@@ -748,7 +739,7 @@
   },
   {
     "id": "e8a031b7-59f8-47a0-a4e1-0b2e24b67af7",
-    "title": "Издательство: Политическая литература, Москва, 1990 г.",
+    "title": "Сумерки богов",
     "author": "Камю Альбер, Фромм Эрих, Ницше Фридрих, Сартр Жан-Поль - Сумерки богов, Фрейд Зигмунд",
     "path": "/audiobooks/Nicshe Fridrich - Sumerki bogov/01.Фридрих Ницше - Антихристианин",
     "tracks": 57,

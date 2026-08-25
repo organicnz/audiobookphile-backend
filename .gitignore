@@ -9,3 +9,6 @@ supabase/.temp
 
 # Node
 node_modules/
+
+# local data-repair snapshots
+reports/backups/
