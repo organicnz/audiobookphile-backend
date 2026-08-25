@@ -14,7 +14,7 @@ concurrency:
 jobs:
   verify:
     name: Verify Deno Edge Functions
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, macOS]
     defaults:
       run:
         working-directory: ./supabase/functions/api
@@ -75,7 +75,7 @@ jobs:
     name: Deploy to Supabase Production
     needs: verify
     if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, macOS]
     concurrency:
       group: deploy-backend-prod-${{ github.ref }}
       cancel-in-progress: false
@@ -327,7 +327,7 @@ jobs:
   post-deploy-verify:
     name: Post-Deploy Verification (Smoke & Schemathesis)
     needs: deploy
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, macOS]
     steps:
       - name: Checkout Repository
         id: checkout
