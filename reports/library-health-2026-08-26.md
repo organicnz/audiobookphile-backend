@@ -39,6 +39,23 @@ subtitle · Uncertainty: subtitle · Experiencing Needs as a Gift.
 - Erich Fromm Collection kept as one intentional collection item.
 - Улисс / Ulysses: different translations, legitimately separate.
 
+## Session 3 additions (2026-08-26)
+| Fix | Detail |
+|---|---|
+| Missing covers | **0 remaining** - Gulag Archipelago + Сумерки богов fetched via identity gate |
+| NULL authors | 9 → 1 via OpenLibrary evidence (Liu Cixin, Hawking, Dawkins, Huxley, Bodanis, Kurzweil, Fromm, Jurek); auto-link trigger created book_authors rows |
+| Gulag title | "Archipilago Gulag De Solzenytszyn" -> The Gulag Archipelago (Solzhenitsyn) |
+
+## Byte-recovery path for the 86 byte-less imports
+The original filesystem was located in **Mail.ru Cloud via Disk-O**
+(conflict-copy metadata at `~/Library/Containers/Mail.Ru.DiskO.as/...`;
+actual audio is cloud-side, not downloaded). Recovery options:
+1. Mount Disk-O / Mail.ru Cloud on this Mac, then run a bulk import that
+   uploads matching folders to `{library_item_id}/` keys in Supabase Storage
+   (script ready on request).
+2. Or re-upload through the app - it will match onto existing records.
+
 ## Remaining work for owner
-- **86 byte-less legacy imports** need re-upload: `reports/reupload-needed-2026-08-25.csv`
+- Mount Mail.ru cloud or re-upload the 84 byte-less imports
 - Rotate the Groq/z.ai API keys shared in chat (already stored in GH Secrets)
+- "Art Logic Illogical World" remains unidentified (honest NULL author/title)
