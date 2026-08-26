@@ -36,6 +36,18 @@ jobs:
         with:
           deno-version: v2.x
 
+      - name: Ensure Docker (self-hosted runner)
+        run: |
+          if ! docker info >/dev/null 2>&1; then
+            echo "Docker daemon not running - starting Docker Desktop..."
+            open -a Docker || true
+            for i in $(seq 1 40); do
+              docker info >/dev/null 2>&1 && break
+              sleep 3
+            done
+          fi
+          docker info >/dev/null
+
       - name: TruffleHog Secret Scanner
         id: trufflehog
         uses: trufflesecurity/trufflehog@main
