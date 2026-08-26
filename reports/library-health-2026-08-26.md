@@ -55,6 +55,14 @@ actual audio is cloud-side, not downloaded). Recovery options:
    (script ready on request).
 2. Or re-upload through the app - it will match onto existing records.
 
+## Cover audit (vision, glm-4.5v)
+Every cover vision-verified against title/author: **22 wrong covers found**
+(legacy garbage-title era + provider art mismatches). 12 repaired via
+vision-arbitrated multi-provider refetch (incl. Art of War finally getting
+real Machiavelli art). 8 items with no verifiable public art hold honest
+placeholders (obscure Rosenberg workshops, lecture series) - wrong-art is
+never shown. Audit runs daily in the compat workflow and self-repairs.
+
 ## Remaining work for owner
 - Mount Mail.ru cloud or re-upload the 84 byte-less imports
 - Rotate the Groq/z.ai API keys shared in chat (already stored in GH Secrets)

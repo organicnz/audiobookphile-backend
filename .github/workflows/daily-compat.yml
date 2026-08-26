@@ -88,6 +88,15 @@ jobs:
         run: |
           deno run --allow-all scripts/ai_probe.ts
 
+      - name: AI Cover Audit (vision-verified art)
+        id: coveraudit
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          ZAI_API_KEY: ${{ secrets.ZAI_API_KEY }}
+        run: |
+          deno run --allow-all scripts/cover_audit.ts
+
       - name: AI Backend Review of Latest Changes
         id: aireview
         env:
@@ -117,5 +126,6 @@ jobs:
             echo "| L2 SQL merge-safety | ${{ steps.l2.outcome }} |"
             echo "| L3 Playwright API e2e | ${{ steps.l3.outcome }} |"
             echo "| AI adversarial probe | ${{ steps.ai.outcome }} |"
+            echo "| AI cover audit | ${{ steps.coveraudit.outcome }} |"
             echo "| AI backend review | ${{ steps.aireview.outcome }} |"
           } >> "$GITHUB_STEP_SUMMARY"
