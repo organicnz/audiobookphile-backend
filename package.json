@@ -14,13 +14,13 @@
     "prepare": "lefthook install"
   },
   "dependencies": {
-    "@aws-sdk/client-s3": "^3.1085.0",
-    "@aws-sdk/s3-request-presigner": "^3.1085.0",
+    "@aws-sdk/client-s3": "^3.1118.0",
+    "@aws-sdk/s3-request-presigner": "^3.1118.0",
     "@supabase/supabase-js": "2.44.0"
   },
   "devDependencies": {
     "@evilmartians/lefthook": "^2.1.10",
     "@playwright/test": "^1.62.1",
-    "supabase": "^2.98.2"
+    "supabase": "^2.115.0"
   }
 }
