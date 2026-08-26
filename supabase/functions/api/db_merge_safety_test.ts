@@ -19,6 +19,10 @@ const MIG_2 = new URL(
   "../../migrations/20260825190000_merge_safety_redesign.sql",
   import.meta.url,
 );
+const MIG_3 = new URL(
+  "../../migrations/20260826120000_merge_overload_disambig.sql",
+  import.meta.url,
+);
 
 async function execSql(query: string): Promise<string> {
   const res = await fetch(
@@ -46,6 +50,7 @@ Deno.test({
   fn: async () => {
     const mig1 = await Deno.readTextFile(MIG_1);
     const mig2 = await Deno.readTextFile(MIG_2);
+    const mig3 = await Deno.readTextFile(MIG_3);
     const LIB = crypto.randomUUID();
     const OLD_ID = crypto.randomUUID();
     const NEW_ID = crypto.randomUUID();
@@ -55,6 +60,7 @@ Deno.test({
 BEGIN;
 ${mig1}
 ${mig2}
+${mig3}
 
 INSERT INTO public.libraries (id, name) VALUES ('${LIB}', 'merge-test-lib');
 INSERT INTO public.library_items (id, title, library_id, created_at, duration, audio_files, author_names_first_last)
