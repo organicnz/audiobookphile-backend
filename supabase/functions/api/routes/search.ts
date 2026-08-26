@@ -146,6 +146,15 @@ const createEmbeddingRoute = (path: string) => ({
         "application/json": { schema: z.record(z.string(), z.any()) },
       },
     },
+    503: {
+      description:
+        "Embedding provider unavailable (no live embedding model configured)",
+      content: {
+        "application/json": {
+          schema: z.object({ error: z.string(), code: z.string() }),
+        },
+      },
+    },
     500: {
       description: "Server error",
       content: { "application/json": { schema: ServerErrorSchema } },
@@ -367,7 +376,16 @@ async function handleGenerateEmbedding(c: Context<{ Variables: Variables }>) {
       },
     );
     if (!aiRes.ok) {
-      return c.json({ error: "Failed to generate embedding" }, 500);
+      // z.ai retired its embedding models (error 1211) - this endpoint cannot
+      // succeed until ZAI_EMBEDDING_MODEL names a live model. 503 tells
+      // clients the dependency is unavailable rather than "we failed".
+      console.error(
+        `[embeddings] provider rejected model "${ZAI_EMBEDDING_MODEL}" - configure ZAI_EMBEDDING_MODEL with a live model`,
+      );
+      return c.json({
+        error: "Embedding generation is temporarily unavailable",
+        code: "EMBEDDINGS_UNAVAILABLE",
+      }, 503);
     }
     const aiData = await aiRes.json();
     return c.json({
