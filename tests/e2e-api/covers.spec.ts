@@ -1,22 +1,50 @@
 import { expect, test } from "@playwright/test";
-import { KNOWN_GOOD } from "./fixtures";
+import { admin, deleteItem, type FixtureItem, seedItem } from "./fixtures";
 
 /**
- * Cover pipeline: dynamic fetcher uploads gated art to Storage and the items
- * route redirects (302) to it; unknown/cover-less items fail gracefully.
+ * Cover pipeline, fully fixture-isolated: seed an item whose cover object we
+ * upload ourselves, so assertions never depend on production data state.
  */
+let item: FixtureItem;
+const PNG_1PX = Uint8Array.from(
+  atob(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+  ),
+  (c) => c.charCodeAt(0),
+);
+
+test.beforeAll(async () => {
+  item = await seedItem({ title: "PW Cover Fixture", tracks: [] });
+  const up = await admin.storage.from("covers").upload(
+    `${item.id}/cover.png`,
+    PNG_1PX,
+    {
+      upsert: true,
+      contentType: "image/png",
+    },
+  );
+  if (up.error && !up.error.message.includes("exists")) {
+    throw new Error(up.error.message);
+  }
+  await admin.from("library_items").update({
+    cover_path: `${item.id}/cover.png`,
+  }).eq("id", item.id);
+});
+
+test.afterAll(async () => {
+  if (!item) return;
+  await admin.storage.from("covers").remove([`${item.id}/cover.png`]);
+  await deleteItem(item.id).catch(() => {});
+});
 
 test("item with stored cover redirects to a servable image", async ({ request }) => {
-  const res = await request.get(
-    `/functions/v1/api/items/${KNOWN_GOOD.itemId}/cover`,
-    { maxRedirects: 0 },
-  );
-  // Either a direct image or a 302 to signed storage URL - both acceptable.
+  const res = await request.get(`/functions/v1/api/items/${item.id}/cover`, {
+    maxRedirects: 0,
+  });
+  expect([200, 302]).toContain(res.status());
   if (res.status() === 302) {
-    const loc = res.headers()["location"] ?? "";
-    expect(loc.length).toBeGreaterThan(10);
+    expect((res.headers()["location"] ?? "").length).toBeGreaterThan(10);
   } else {
-    expect(res.status()).toBe(200);
     expect(res.headers()["content-type"] ?? "").toMatch(/image\//);
   }
 });
