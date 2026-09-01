@@ -1,128 +1,128 @@
 import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+import {
+  type BucketHealth,
+  bucketHealth,
+  type BucketTier,
+  getB2Client,
+  getBucketName,
+  healthCheckBuckets,
+  selectBucket,
+} from "./b2-bucket-pool.ts";
 
-let _b2PrimaryClient: S3Client | null = null;
-let _b2SecondaryClient: S3Client | null = null;
-let _b2TertiaryClient: S3Client | null = null;
-
-function getB2PrimaryClient(): S3Client {
-  if (!_b2PrimaryClient) {
-    _b2PrimaryClient = new S3Client({
-      endpoint: Deno.env.get("B2_ENDPOINT")!,
-      region: Deno.env.get("B2_REGION") || "us-west-004",
-      credentials: {
-        accessKeyId: Deno.env.get("B2_KEY_ID")!,
-        secretAccessKey: Deno.env.get("B2_APP_KEY")!,
-      },
-      forcePathStyle: true,
-      // @ts-ignore
-      requestChecksumCalculation: "WHEN_REQUIRED",
-      // @ts-ignore
-      responseChecksumValidation: "WHEN_REQUIRED",
-    });
-  }
-  return _b2PrimaryClient;
+/**
+ * Create an S3 client for a tier using the bucketConfigs from b2-bucket-pool.ts.
+ * This correctly maps tier names (B2_QUINTET) to env vars (B2_QUINTA_*) without
+ * trying to construct env var names dynamically from tier names.
+ */
+function getOrCreateClient(tier: BucketTier): S3Client {
+  return getB2Client(tier);
 }
 
-function getB2SecondaryClient(): S3Client {
-  if (!_b2SecondaryClient) {
-    _b2SecondaryClient = new S3Client({
-      endpoint: Deno.env.get("B2_SECONDARY_ENDPOINT")!,
-      region: Deno.env.get("B2_SECONDARY_REGION") || "us-west-004",
-      credentials: {
-        accessKeyId: Deno.env.get("B2_SECONDARY_KEY_ID")!,
-        secretAccessKey: Deno.env.get("B2_SECONDARY_APP_KEY")!,
-      },
-      forcePathStyle: true,
-      // @ts-ignore
-      requestChecksumCalculation: "WHEN_REQUIRED",
-      // @ts-ignore
-      responseChecksumValidation: "WHEN_REQUIRED",
-    });
-  }
-  return _b2SecondaryClient;
-}
-
-function getB2TertiaryClient(): S3Client {
-  if (!_b2TertiaryClient) {
-    _b2TertiaryClient = new S3Client({
-      endpoint: Deno.env.get("B2_TERTIARY_ENDPOINT")!,
-      region: Deno.env.get("B2_TERTIARY_REGION") || "us-west-004",
-      credentials: {
-        accessKeyId: Deno.env.get("B2_TERTIARY_KEY_ID")!,
-        secretAccessKey: Deno.env.get("B2_TERTIARY_APP_KEY")!,
-      },
-      forcePathStyle: true,
-      // @ts-ignore
-      requestChecksumCalculation: "WHEN_REQUIRED",
-      // @ts-ignore
-      responseChecksumValidation: "WHEN_REQUIRED",
-    });
-  }
-  return _b2TertiaryClient;
-}
-
+/**
+ * Presign an upload using the intelligent bucket pool selection.
+ * Automatically selects the best available bucket from the pool (primary → secondary → tertiary → quartet).
+ */
 export async function presignUpload(
-  supabase: any,
+  _supabase: any,
   filename: string,
   contentType?: string,
-): Promise<{ url: string; provider_prefix: string }> {
+): Promise<
+  {
+    url: string;
+    provider_prefix: string;
+    bucketTier: BucketTier;
+    bucketName: string;
+    health: BucketHealth;
+  }
+> {
   if (!filename) {
     throw new Error("Filename is required");
   }
 
-  const tier = Deno.env.get("ACTIVE_B2_TIER");
-  const activeTier = tier === "tertiary"
-    ? "tertiary"
-    : tier === "secondary"
-    ? "secondary"
-    : "primary";
+  // Run health check to update bucket statuses
+  await healthCheckBuckets();
 
-  if (
-    activeTier === "tertiary" && Deno.env.get("B2_TERTIARY_ENDPOINT") &&
-    Deno.env.get("B2_TERTIARY_BUCKET_NAME")
-  ) {
-    const command = new PutObjectCommand({
-      Bucket: Deno.env.get("B2_TERTIARY_BUCKET_NAME")!,
-      Key: filename,
-      ContentType: contentType || "application/octet-stream",
-    });
-    const url = await getSignedUrl(getB2TertiaryClient(), command, {
-      expiresIn: 3600,
-    });
-    return { url, provider_prefix: "b2-tertiary://" };
-  } else if (
-    activeTier === "secondary" && Deno.env.get("B2_SECONDARY_ENDPOINT") &&
-    Deno.env.get("B2_SECONDARY_BUCKET_NAME")
-  ) {
-    const command = new PutObjectCommand({
-      Bucket: Deno.env.get("B2_SECONDARY_BUCKET_NAME")!,
-      Key: filename,
-      ContentType: contentType || "application/octet-stream",
-    });
-    const url = await getSignedUrl(getB2SecondaryClient(), command, {
-      expiresIn: 3600,
-    });
-    return { url, provider_prefix: "b2-secondary://" };
-  } else if (Deno.env.get("B2_ENDPOINT") && Deno.env.get("B2_BUCKET_NAME")) {
-    const command = new PutObjectCommand({
-      Bucket: Deno.env.get("B2_BUCKET_NAME")!,
-      Key: filename,
-      ContentType: contentType || "application/octet-stream",
-    });
-    const url = await getSignedUrl(getB2PrimaryClient(), command, {
-      expiresIn: 3600,
-    });
-    return { url, provider_prefix: "b2://" };
-  } else {
-    const { data, error } = await supabase.storage
-      .from("audio-files")
-      .createSignedUploadUrl(filename, { upsert: true });
+  // Select the best bucket using the pool strategy
+  const { tier, config: _config, health } = selectBucket("B2");
+  const client = getOrCreateClient(tier);
+  const bucketName = getBucketName(tier);
 
-    if (error || !data?.signedUrl) {
-      throw new Error(`Supabase presign error: ${error?.message}`);
+  const command = new PutObjectCommand({
+    Bucket: bucketName,
+    Key: filename,
+    ContentType: contentType || "application/octet-stream",
+  });
+
+  try {
+    const url = await getSignedUrl(client, command, {
+      expiresIn: 3600,
+    });
+
+    return {
+      url,
+      provider_prefix: `${tier.toLowerCase()}://`,
+      bucketTier: tier,
+      bucketName,
+      health,
+    };
+  } catch (error) {
+    // If primary fails, try fallback buckets in chain
+    const fallbackChain = [
+      "B2_SECONDARY",
+      "B2_TERTIARY",
+      "B2_QUARTET",
+      "B2_QUINTET",
+    ];
+    let lastError: Error | string = error instanceof Error
+      ? error
+      : new Error(String(error));
+
+    for (const fallbackTier of fallbackChain) {
+      try {
+        const fallbackHealth = bucketHealth.getHealth(fallbackTier);
+        if (!fallbackHealth.isHealthy) continue;
+
+        const fallbackClient = getOrCreateClient(fallbackTier);
+        const fallbackBucketName = getBucketName(fallbackTier);
+
+        const command = new PutObjectCommand({
+          Bucket: fallbackBucketName,
+          Key: filename,
+          ContentType: contentType || "application/octet-stream",
+        });
+
+        const url = await getSignedUrl(fallbackClient, command, {
+          expiresIn: 3600,
+        });
+
+        // Record success on fallback bucket
+        bucketHealth.recordSuccess(fallbackTier, 0);
+
+        return {
+          url,
+          provider_prefix: `${fallbackTier.toLowerCase()}://`,
+          bucketTier: fallbackTier as BucketTier,
+          bucketName,
+          health: bucketHealth.getHealth(fallbackTier),
+        };
+      } catch (fallbackError) {
+        lastError = fallbackError instanceof Error
+          ? fallbackError
+          : new Error(String(fallbackError));
+        console.error(
+          `Upload fallback to ${fallbackTier} failed:`,
+          fallbackError,
+        );
+        continue;
+      }
     }
 
-    return { url: data.signedUrl, provider_prefix: "supabase://" };
+    // If all fallbacks failed, throw the last error
+    throw new Error(
+      `Failed to presign upload: ${
+        lastError instanceof Error ? lastError.message : String(lastError)
+      }`,
+    );
   }
 }

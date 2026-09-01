@@ -11,6 +11,7 @@ import { getSignedUrl } from "npm:@aws-sdk/s3-request-presigner@^3.693.0";
 let _b2PrimaryClient: S3Client | null = null;
 let _b2SecondaryClient: S3Client | null = null;
 let _b2TertiaryClient: S3Client | null = null;
+let _b2QuintaClient: S3Client | null = null;
 
 function getB2PrimaryClient(): S3Client {
   if (!_b2PrimaryClient) {
@@ -78,10 +79,38 @@ function getB2TertiaryClient(): S3Client {
   return _b2TertiaryClient;
 }
 
+/** True when the quinta B2 tier is fully configured (endpoint + bucket). */
+export function b2QuintaConfigured(): boolean {
+  return !!Deno.env.get("B2_QUINTA_ENDPOINT") &&
+    !!Deno.env.get("B2_QUINTA_BUCKET_NAME");
+}
+
 /** True when the tertiary B2 tier is fully configured (endpoint + bucket). */
 export function b2TertiaryConfigured(): boolean {
   return !!Deno.env.get("B2_TERTIARY_ENDPOINT") &&
     !!Deno.env.get("B2_TERTIARY_BUCKET_NAME");
+}
+
+/* Get the quinta B2 client (lazy-initialised). */
+function getB2QuintaClient(): S3Client {
+  if (!_b2QuintaClient) {
+    _b2QuintaClient = new S3Client({
+      endpoint: Deno.env.get("B2_QUINTA_ENDPOINT")!,
+      region: Deno.env.get("B2_QUINTA_REGION") || "us-west-004",
+      credentials: {
+        accessKeyId: Deno.env.get("B2_QUINTA_KEY_ID")!,
+        secretAccessKey: Deno.env.get("B2_QUINTA_APP_KEY")!,
+      },
+      forcePathStyle: true,
+      // See getB2PrimaryClient: required to keep GetObject presigned URLs
+      // B2-compatible on AWS SDK v3.693.0+ / v3.1085.0+.
+      // @ts-ignore — options recognised at runtime, not in older type defs
+      requestChecksumCalculation: "WHEN_REQUIRED",
+      // @ts-ignore
+      responseChecksumValidation: "WHEN_REQUIRED",
+    });
+  }
+  return _b2QuintaClient;
 }
 
 /**
@@ -128,6 +157,16 @@ export class StorageRouter {
       });
       // @ts-ignore: Deno npm specifier duplication causes S3Client type mismatch
       return await getSignedUrl(getB2SecondaryClient(), command, { expiresIn });
+    }
+
+    if (path.startsWith("b2-quinta://")) {
+      const actualPath = path.replace("b2-quinta://", "");
+      const command = new GetObjectCommand({
+        Bucket: Deno.env.get("B2_QUINTA_BUCKET_NAME")!,
+        Key: actualPath,
+      });
+      // @ts-ignore: Deno npm specifier duplication causes S3Client type mismatch
+      return await getSignedUrl(getB2QuintaClient(), command, { expiresIn });
     }
 
     if (
@@ -241,6 +280,29 @@ export class StorageRouter {
       // not in b2-secondary
     }
 
+    // 3. Try b2-quinta
+    if (b2QuintaConfigured()) {
+      try {
+        await getB2QuintaClient().send(
+          new HeadObjectCommand({
+            Bucket: Deno.env.get("B2_QUINTA_BUCKET_NAME")!,
+            Key: key,
+          }),
+        );
+        const command = new GetObjectCommand({
+          Bucket: Deno.env.get("B2_QUINTA_BUCKET_NAME")!,
+          Key: key,
+        });
+        // @ts-ignore: Deno npm specifier duplication causes S3Client type mismatch
+        const signedUrl = await getSignedUrl(getB2QuintaClient(), command, {
+          expiresIn,
+        });
+        return { signedUrl, canonicalPath: `b2-quinta://${key}` };
+      } catch {
+        // not in b2-quinta
+      }
+    }
+
     // 3. Try b2-primary
     try {
       await getB2PrimaryClient().send(
@@ -321,6 +383,21 @@ export class StorageRouter {
         await getB2SecondaryClient().send(
           new HeadObjectCommand({
             Bucket: Deno.env.get("B2_SECONDARY_BUCKET_NAME")!,
+            Key: actualPath,
+          }),
+        );
+        return true;
+      } catch {
+        return false;
+      }
+    }
+
+    if (path.startsWith("b2-quinta://")) {
+      const actualPath = path.replace("b2-quinta://", "");
+      try {
+        await getB2QuintaClient().send(
+          new HeadObjectCommand({
+            Bucket: Deno.env.get("B2_QUINTA_BUCKET_NAME")!,
             Key: actualPath,
           }),
         );

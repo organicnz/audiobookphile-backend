@@ -1,6 +1,6 @@
 /**
  * Manual one-off: applies CORS rules to every configured B2 bucket
- * (`audiobookphile-b2-tertiary`, `audiobookphile-b2-secondary`, primary) via
+ * (`audiobookphile-b2-tertiary`, `audiobookphile-b2-secondary`, `audiobookphile-b2-quartet`, `audiobookphile-b2-quinta`, primary) via
  * the S3-compatible API.
  *
  * This script is NOT wired into CI/CD or any package.json script. The bucket
@@ -11,9 +11,9 @@
  *
  * Usage:
  *   cd audiobookphile-backend
- *   deno run --allow-env --allow-net set_cors.ts
+ *   deno run --allow-env --allow-net --allow-sys set_cors.ts
  *
- * Requires the B2_* / B2_SECONDARY_* / B2_TERTIARY_* env vars (see .env).
+ * Requires the B2_* / B2_SECONDARY_* / B2_TERTIARY_* / B2_QUARTET_* / B2_QUINTA_* env vars (see .env).
  * A tier is skipped when its env vars are blank.
  *
  * For key rotation (a separate concern), see scripts/ROTATE_B2_KEYS.md.
@@ -61,7 +61,13 @@ function log(line: string) {
 }
 
 async function setCors() {
-  const tiers = ["B2_TERTIARY", "B2_SECONDARY", "B2"];
+  const tiers = [
+    "B2_QUINTA",
+    "B2_QUARTET",
+    "B2_TERTIARY",
+    "B2_SECONDARY",
+    "B2",
+  ];
   for (const prefix of tiers) {
     if (!tierConfigured(prefix)) {
       log(`Skipping ${prefix}: env vars not set.`);
