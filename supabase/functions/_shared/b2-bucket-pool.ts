@@ -212,6 +212,8 @@ export function getB2Client(tier: BucketTier): S3Client {
     forcePathStyle: true,
     /* @ts-ignore */
     requestChecksumCalculation: "WHEN_REQUIRED",
+    /* @ts-ignore — B2 does not support AWS checksum headers */
+    responseChecksumValidation: "WHEN_REQUIRED",
   });
 }
 
@@ -327,6 +329,10 @@ export async function uploadToSmartBucket(
               secretAccessKey: fallbackConfig.appKey,
             },
             forcePathStyle: true,
+            // @ts-ignore — B2 does not support AWS checksum headers
+            requestChecksumCalculation: "WHEN_REQUIRED",
+            // @ts-ignore — B2 does not support AWS checksum headers
+            responseChecksumValidation: "WHEN_REQUIRED",
           });
 
           const fallbackBucketName = getBucketName(fallbackTier);

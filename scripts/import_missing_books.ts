@@ -195,8 +195,9 @@ function b2Client(
       secretAccessKey: Deno.env.get(e.app)!,
     },
     forcePathStyle: true,
-    // @ts-ignore
+    // @ts-ignore — B2 does not support AWS checksum headers
     requestChecksumCalculation: "WHEN_REQUIRED",
+    responseChecksumValidation: "WHEN_REQUIRED",
   });
   return {
     client,

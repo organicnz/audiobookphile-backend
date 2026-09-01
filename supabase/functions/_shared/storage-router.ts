@@ -188,10 +188,10 @@ export class StorageRouter {
 
   /**
    * Resolves a legacy bare filesystem path (e.g. "/audiobooks/Title/file.mp3")
-   * by probing all three storage backends under the canonical key pattern:
+   * by probing all four storage backends under the canonical key pattern:
    *   {itemId}/{filename}
    *
-   * Probe order: b2-tertiary → b2-secondary → b2-primary → supabase
+   * Probe order: b2-tertiary → b2-secondary → b2-quinta → b2-primary → supabase
    * (most new uploads go to b2-tertiary, so check that first)
    *
    * Returns the signed URL and canonical path of whichever backend has the file,
@@ -303,7 +303,7 @@ export class StorageRouter {
       }
     }
 
-    // 3. Try b2-primary
+    // 4. Try b2-primary
     try {
       await getB2PrimaryClient().send(
         new HeadObjectCommand({

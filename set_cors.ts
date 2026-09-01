@@ -46,6 +46,10 @@ function applyCors(prefix: string): Promise<unknown> {
       secretAccessKey: Deno.env.get(`${prefix}_APP_KEY`)!,
     },
     forcePathStyle: true,
+    // @ts-ignore — B2 does not support AWS checksum headers
+    requestChecksumCalculation: "WHEN_REQUIRED",
+    // @ts-ignore — B2 does not support AWS checksum headers
+    responseChecksumValidation: "WHEN_REQUIRED",
   });
   const params = {
     Bucket: Deno.env.get(`${prefix}_BUCKET_NAME`)!,
