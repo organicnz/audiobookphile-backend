@@ -2,6 +2,7 @@ import { createOpenApiRouter, z } from "../_shared/openapi.ts";
 import { StorageRouter } from "../../_shared/storage-router.ts";
 import { requireAdminRole } from "../_shared/auth.ts";
 import { presignUpload } from "../../_shared/uploadPresign.ts";
+import { assertStorageQuota } from "../../_shared/storage-quota.ts";
 import { parseTitleAndAuthor } from "../../_shared/titleAuthorParser.ts";
 import { titlesLikelySameWork } from "../../_shared/titleMatch.ts";
 import { analyzeItemWarnings } from "../../_shared/invariants.ts";
@@ -617,6 +618,24 @@ async function handleUploadPresign(c: Context<{ Variables: Variables }>) {
   }
 
   const { filename, contentType } = parsed.data;
+
+  // 10x pro: presign is B2-only for audio – do not mint supabase:// for .mp3/.m4b
+  // (prevents the 7.5 GB blow-up). If caller requests an image cover, route to covers quota check.
+  if (contentType?.startsWith("image/") || filename.includes("/cover.")) {
+    // cover path – ensure Supabase quota allows it (estimate 500 KiB if unknown)
+    try {
+      await assertStorageQuota(supabase, 512 * 1024);
+    } // @ts-ignore
+    catch (q: any) {
+      if (q?.status === 507) {
+        return c.json(
+          { error: q.message, code: "STORAGE_QUOTA_EXCEEDED" },
+          507 as any,
+        );
+      }
+      throw q;
+    }
+  }
 
   try {
     const res = await presignUpload(supabase, filename, contentType);

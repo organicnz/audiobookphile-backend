@@ -12,6 +12,7 @@ import { fetchBookMetadata } from "../../_shared/coverFetch.ts";
 import { analyzeItemWarnings } from "../../_shared/invariants.ts";
 import { ensureBookAIInsights } from "../aiService.ts";
 import { createOpenApiRouter, z } from "../_shared/openapi.ts";
+import { assertStorageQuota } from "../../_shared/storage-quota.ts";
 import {
   FUZZY_MATCH_RATIO,
   SEARCH_MATCH_COUNT,
@@ -600,6 +601,20 @@ itemsRouter.openapi(itemCoverRoute, async (c): Promise<Response> => {
           coverPath = `${itemId}/cover.${ext}`;
           const contentType = `image/${ext === "png" ? "png" : "jpeg"}`;
 
+          // 10x pro: quota guard before any Supabase Storage write (free = 1 GiB)
+          try {
+            await assertStorageQuota(adminClient, fileData.byteLength);
+          } catch (q: any) {
+            // @ts-ignore – 507 not in OpenAPI spec but correct for quota
+            if (q?.status === 507) {
+              return c.json({
+                error: q.message,
+                code: "STORAGE_QUOTA_EXCEEDED",
+              }, 507);
+            }
+            throw q;
+          }
+
           const { error: uploadError } = await adminClient.storage.from(
             "covers",
           ).upload(coverPath, fileData, { upsert: true, contentType });
@@ -756,6 +771,30 @@ const handleCoverUpload = async (
 
   if (!fileData || fileData.byteLength === 0) {
     return c.json({ error: "No file provided" }, 400);
+  }
+
+  // 10x pro: quota guard + image mime guard (covers bucket allows only images)
+  const allowedCover = [
+    "image/jpeg",
+    "image/png",
+    "image/webp",
+    "image/gif",
+    "image/svg+xml",
+  ];
+  if (!allowedCover.includes(contentType)) {
+    return c.json({ error: `Cover mime not allowed: ${contentType}` }, 400);
+  }
+  try {
+    await assertStorageQuota(adminClient, fileData.byteLength);
+  } // @ts-ignore – 507 not in OpenAPI spec
+  catch (q: any) {
+    if (q?.status === 507) {
+      return c.json(
+        { error: q.message, code: "STORAGE_QUOTA_EXCEEDED" },
+        507 as any,
+      );
+    }
+    throw q;
   }
 
   const storagePath = `${itemId}/cover.${extension}`;
@@ -920,6 +959,20 @@ async function handleSyncCovers(
         const fetchRes = await fetchBookMetadata(title, author);
         if (fetchRes && fetchRes.cover && fetchRes.cover.buffer) {
           const fileData = new Uint8Array(fetchRes.cover.buffer);
+          // quota guard – stop sync-covers from blowing quota
+          try {
+            await assertStorageQuota(supabase, fileData.byteLength);
+          } // @ts-ignore
+          catch (q: any) {
+            if (q?.status === 507) {
+              return c.json({
+                success: false,
+                error: q.message,
+                code: "STORAGE_QUOTA_EXCEEDED",
+              }, 507 as any);
+            }
+            throw q;
+          }
           const ext = fetchRes.cover.extension || "jpg";
           const storagePath = `${item.id}/cover.${ext}`;
           const { error: upErr } = await supabase.storage.from("covers").upload(

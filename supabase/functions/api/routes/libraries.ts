@@ -7,6 +7,7 @@ import { Database } from "../../../../src/types/supabase.ts";
 import { requireAdminRole } from "../_shared/auth.ts";
 import { smartSortLibraryItems } from "../../_shared/zai.ts";
 import { createOpenApiRouter, SuccessSchema, z } from "../_shared/openapi.ts";
+import { assertStorageQuota } from "../../_shared/storage-quota.ts";
 
 export const librariesRouter = createOpenApiRouter();
 
@@ -1337,6 +1338,20 @@ librariesRouter.openapi(matchAllRoute, async (c) => {
 
             if (result.cover) {
               const storagePath = `${item.id}/cover.${result.cover.extension}`;
+              try {
+                await assertStorageQuota(
+                  supabase,
+                  result.cover.buffer.byteLength,
+                );
+              } catch (q: any) {
+                if (q?.status === 507) {
+                  console.warn(
+                    `[matchAll] quota exceeded, skip cover for ${item.id}`,
+                  );
+                  continue;
+                }
+                throw q;
+              }
               await supabase.storage.from("covers").upload(
                 storagePath,
                 result.cover.buffer,

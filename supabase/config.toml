@@ -109,15 +109,30 @@ port = 54324
 
 [storage]
 enabled = true
-# The maximum file size allowed (e.g. "5MB", "500KB").
+# Global fallback – individual buckets override below.
 file_size_limit = "50MiB"
 
-# Uncomment to configure local storage buckets
-# [storage.buckets.images]
-# public = false
-# file_size_limit = "50MiB"
-# allowed_mime_types = ["image/png", "image/jpeg"]
-# objects_path = "./images"
+# ── 10x pro: explicit per-bucket limits (local parity for prod `storage.buckets`) ──
+# `covers` is the only bucket that should receive Supabase Storage writes:
+# small images (≤5 MiB). `audio-files` is legacy – all audio must go to B2
+# via presigned S3; keep a tight 10 MiB guard so accidental Supabase audio
+# uploads fail fast and do not silently blow the 1 GB free quota.
+[storage.buckets.covers]
+public = true
+file_size_limit = "5MiB"
+allowed_mime_types = ["image/jpeg", "image/png", "image/webp", "image/gif", "image/svg+xml"]
+# objects_path = "./buckets/covers"
+
+[storage.buckets.audio-files]
+public = false
+file_size_limit = "10MiB"
+allowed_mime_types = ["audio/mpeg", "audio/mp4", "audio/ogg", "audio/flac", "audio/x-matroska", "audio/wav", "audio/aac", "audio/webm", "audio/x-aiff", "audio/x-caf", "audio/opus"]
+# objects_path = "./buckets/audio-files"
+
+[storage.buckets.backups]
+public = false
+file_size_limit = "5MiB"
+allowed_mime_types = ["application/json", "application/gzip", "application/zip"]
 
 # Allow connections via S3 compatible clients
 [storage.s3_protocol]

@@ -1,4 +1,5 @@
 import { SupabaseClient } from "npm:@supabase/supabase-js@2.44.0";
+import { assertStorageQuota } from "./storage-quota.ts";
 
 /**
  * Robustly fetches an author's avatar using a 3-tier waterfall logic.
@@ -40,6 +41,15 @@ export async function fetchAuthorAvatar(
             const buf = await imgRes.arrayBuffer();
             if (buf.byteLength > 5000) {
               storagePath = `authors/${author.id}/photo.jpg`;
+              try {
+                await assertStorageQuota(adminClient, buf.byteLength);
+              } catch (q: any) {
+                if (q?.status === 507) {
+                  console.warn(`[Avatar] quota exceeded, skip ${author.name}`);
+                  return null;
+                }
+                throw q;
+              }
               const { error: uploadErr } = await adminClient.storage.from(
                 "covers",
               ).upload(storagePath, buf, {
@@ -97,6 +107,17 @@ export async function fetchAuthorAvatar(
                 const buf = await imgRes.arrayBuffer();
                 if (buf.byteLength > 5000) {
                   storagePath = `authors/${author.id}/photo.jpg`;
+                  try {
+                    await assertStorageQuota(adminClient, buf.byteLength);
+                  } catch (q: any) {
+                    if (q?.status === 507) {
+                      console.warn(
+                        `[Avatar] quota exceeded, skip ${author.name}`,
+                      );
+                      return null;
+                    }
+                    throw q;
+                  }
                   const { error: uploadErr } = await adminClient.storage.from(
                     "covers",
                   ).upload(storagePath, buf, {
@@ -136,6 +157,15 @@ export async function fetchAuthorAvatar(
       if (imgRes.ok) {
         const buf = await imgRes.arrayBuffer();
         storagePath = `authors/${author.id}/photo.svg`;
+        try {
+          await assertStorageQuota(adminClient, buf.byteLength);
+        } catch (q: any) {
+          if (q?.status === 507) {
+            console.warn(`[Avatar] quota exceeded, skip ${author.name}`);
+            return null;
+          }
+          throw q;
+        }
         const { error: uploadErr } = await adminClient.storage.from("covers")
           .upload(storagePath, buf, {
             upsert: true,
