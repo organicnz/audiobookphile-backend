@@ -496,17 +496,66 @@ downloadsRouter.openapi(downloadItemRoute, async (c) => {
     let isMissing = false;
 
     try {
-      finalSignedUrl = await storage.getSignedUrl(
-        storagePath,
+      const isLegacyPath = storagePath.startsWith("/") ||
+        (!storagePath.includes("://") && storagePath.length > 0);
+
+      if (isLegacyPath) {
+        const resolved = await storage.resolveAndSign(
+          storagePath,
+          libraryItemId,
+          DOWNLOAD_EXPIRY_SECONDS,
+        );
+        finalSignedUrl = resolved.signedUrl;
+      } else {
+        finalSignedUrl = await storage.getSignedUrl(
+          storagePath,
+          DOWNLOAD_EXPIRY_SECONDS,
+        );
+      }
+    } catch (e: unknown) {
+      // Fallback: try resolving candidates across all tiers
+      const filename = storagePath.split("/").pop() ||
+        String(metadata.filename || (af as any).filename);
+      const mediaId = String((item as any).media_id || "");
+      const rawItemPath = String((item as any).path || "").replace(/^\/+/, "");
+      const recordedPrefix = storagePath.includes("://")
+        ? storagePath.replace(/^[a-z0-9-_]+:\/\//i, "").split("/").slice(0, -1)
+          .join("/")
+        : storagePath.split("/").slice(0, -1).join("/");
+      const cleanStoragePath = storagePath.replace(/^[a-z0-9-_]+:\/\//i, "")
+        .replace(/^\/+/, "");
+
+      const candidates = [
+        `${libraryItemId}/${filename}`,
+        mediaId && mediaId !== libraryItemId ? `${mediaId}/${filename}` : "",
+        recordedPrefix && recordedPrefix !== libraryItemId &&
+          recordedPrefix !== mediaId
+          ? `${recordedPrefix}/${filename}`
+          : "",
+        rawItemPath ? `${rawItemPath}/${filename}` : "",
+        rawItemPath
+          ? `${rawItemPath.replace(/^audiobooks\//, "")}/${filename}`
+          : "",
+        cleanStoragePath,
+        cleanStoragePath.replace(/^audiobooks\//, ""),
+        filename,
+      ].filter(Boolean);
+
+      const resolved = await storage.signFirstExisting(
+        Array.from(new Set(candidates)),
         DOWNLOAD_EXPIRY_SECONDS,
       );
-    } catch (e: unknown) {
-      const signErr = e as Error;
-      console.warn(
-        `[DownloadsRoute] Missing storage file at "${storagePath}": ${signErr.message}. Skipping track.`,
-      );
-      missingTracks.push(storagePath);
-      isMissing = true;
+
+      if (resolved) {
+        finalSignedUrl = resolved.signedUrl;
+      } else {
+        const signErr = e as Error;
+        console.warn(
+          `[DownloadsRoute] Missing storage file at "${storagePath}": ${signErr.message}. Skipping track.`,
+        );
+        missingTracks.push(storagePath);
+        isMissing = true;
+      }
     }
 
     if (!isMissing && finalSignedUrl) {
@@ -580,13 +629,44 @@ downloadsRouter.openapi(downloadFileRoute, async (c) => {
   const DOWNLOAD_EXPIRY_SECONDS = 4 * 3600;
 
   try {
+    const isLegacyPath = storagePath.startsWith("/") ||
+      (!storagePath.includes("://") && storagePath.length > 0);
+
+    if (isLegacyPath) {
+      const resolved = await storage.resolveAndSign(
+        storagePath,
+        libraryItemId,
+        DOWNLOAD_EXPIRY_SECONDS,
+      );
+      return c.json({ url: resolved.signedUrl } as Record<string, any>, 200);
+    }
+
     const signedUrl = await storage.getSignedUrl(
       storagePath,
       DOWNLOAD_EXPIRY_SECONDS,
     );
     return c.json({ url: signedUrl } as Record<string, any>, 200);
-  } catch (e: unknown) {
-    return c.json({ error: (e as Error).message }, 500);
+  } catch (_e: unknown) {
+    // Fallback: try resolving candidates across all tiers
+    const filename = storagePath.split("/").pop() || "";
+    const cleanStoragePath = storagePath.replace(/^[a-z0-9-_]+:\/\//i, "")
+      .replace(/^\/+/, "");
+    const candidates = [
+      `${libraryItemId}/${filename}`,
+      cleanStoragePath,
+      cleanStoragePath.replace(/^audiobooks\//, ""),
+      filename,
+    ].filter(Boolean);
+
+    const resolved = await storage.signFirstExisting(
+      Array.from(new Set(candidates)),
+      DOWNLOAD_EXPIRY_SECONDS,
+    );
+
+    if (resolved) {
+      return c.json({ url: resolved.signedUrl } as Record<string, any>, 200);
+    }
+    return c.json({ error: (_e as Error).message }, 404);
   }
 });
 

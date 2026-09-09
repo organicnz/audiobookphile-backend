@@ -468,35 +468,40 @@ export class PlaybackService {
     const audioTracks: Record<string, unknown>[] = [];
     const missingTracks: string[] = [];
 
-    // --- Self-heal: verify the first scheme'd track actually exists ---
+    // --- Self-heal: verify tracks and recover any dead or missing paths ---
     // Presigning is a purely local computation — it never contacts storage —
     // so a stale or mis-recorded path yields URLs that 404 only when the
-    // player fetches them (the "black screen" book failure mode: the session
-    // succeeds, every track fails, and the client retries silently).
-    // Legacy paths were already HEAD-verified inside resolveAndSign; scheme'd
-    // paths were not. Probe the first live scheme'd track, and on a miss
-    // re-resolve every track across all tiers and candidate prefixes
-    // ({itemId}/{filename} plus the recorded path's own prefix — uploads are
-    // keyed by a client-generated bookId that can differ from the item id),
-    // then patch the DB with wherever the files actually live.
-    // Bound the worst case: a 100-track book with every path dead must not
-    // issue hundreds of HEAD probes inside one request (latency + rate limits).
-    const MAX_SELF_HEAL_TRACKS = 40;
+    // player fetches them. On missing tracks or when the first live track's
+    // HEAD probe fails, re-resolve every track across all tiers and candidate
+    // prefixes (itemId, mediaId, recorded prefix, item path, filename).
+    const MAX_SELF_HEAL_TRACKS = 60;
     let selfHealedCount = 0;
     const firstLive = signedTrackResults.find((r) =>
       !r.isMissing && r.finalSignedUrl
     );
     const firstLiveWasVerified = !!firstLive?.resolvedCanonicalPath;
+    let firstLiveExists = true;
     if (firstLive && !firstLiveWasVerified) {
-      const exists = await storage.fileExists(firstLive.storagePath).catch(
+      firstLiveExists = await storage.fileExists(firstLive.storagePath).catch(
         () => false,
       );
-      if (!exists) {
+      if (!firstLiveExists) {
         console.warn(
           `[PlaybackService] Recorded path for first track no longer exists: "${firstLive.storagePath}" — probing alternate tiers/prefixes for ${libraryItemId}`,
         );
-        for (const res of signedTrackResults) {
-          if (res.isMissing) continue;
+      }
+    }
+
+    const hasMissingTracks = signedTrackResults.some((r) =>
+      r.isMissing || !r.finalSignedUrl
+    );
+    const mediaId = String((item as any).media_id || "");
+    const rawItemPath = String((item as any).path || "").replace(/^\/+/, "");
+
+    if (!firstLiveExists || hasMissingTracks) {
+      for (const res of signedTrackResults) {
+        // If first live track didn't exist, all tracks need re-resolution; otherwise heal missing tracks
+        if (!firstLiveExists || res.isMissing || !res.finalSignedUrl) {
           if (selfHealedCount >= MAX_SELF_HEAL_TRACKS) {
             console.warn(
               `[PlaybackService] Self-heal budget (${MAX_SELF_HEAL_TRACKS}) exhausted for ${libraryItemId}; remaining tracks marked missing`,
@@ -505,16 +510,42 @@ export class PlaybackService {
             res.finalSignedUrl = "";
             continue;
           }
-          const filename = res.storagePath.split("/").pop()!;
+
+          const filename = res.storagePath.split("/").pop() ||
+            String(res.metadata.filename || res.filename);
           const recordedPrefix = res.storagePath.includes("://")
-            ? res.storagePath.replace(/^[a-z0-9-]+:\/\//i, "").split("/")
+            ? res.storagePath.replace(/^[a-z0-9-_]+:\/\//i, "").split("/")
               .slice(0, -1).join("/")
-            : "";
-          const candidates = [`${libraryItemId}/${filename}`];
-          if (recordedPrefix && recordedPrefix !== libraryItemId) {
-            candidates.push(`${recordedPrefix}/${filename}`);
-          }
-          const resolved = await storage.signFirstExisting(candidates, 604800);
+            : res.storagePath.split("/").slice(0, -1).join("/");
+
+          const cleanStoragePath = res.storagePath.replace(
+            /^[a-z0-9-_]+:\/\//i,
+            "",
+          ).replace(/^\/+/, "");
+
+          const candidateList = [
+            `${libraryItemId}/${filename}`,
+            mediaId && mediaId !== libraryItemId
+              ? `${mediaId}/${filename}`
+              : "",
+            recordedPrefix && recordedPrefix !== libraryItemId &&
+              recordedPrefix !== mediaId
+              ? `${recordedPrefix}/${filename}`
+              : "",
+            rawItemPath ? `${rawItemPath}/${filename}` : "",
+            rawItemPath
+              ? `${rawItemPath.replace(/^audiobooks\//, "")}/${filename}`
+              : "",
+            cleanStoragePath,
+            cleanStoragePath.replace(/^audiobooks\//, ""),
+            filename,
+          ].filter(Boolean);
+
+          const uniqueCandidates = Array.from(new Set(candidateList));
+          const resolved = await storage.signFirstExisting(
+            uniqueCandidates,
+            604800,
+          );
           if (resolved) {
             console.info(
               `[PlaybackService] Self-healed track "${filename}": ${res.storagePath} → ${resolved.canonicalPath}`,
@@ -522,10 +553,11 @@ export class PlaybackService {
             selfHealedCount++;
             res.finalSignedUrl = resolved.signedUrl;
             res.resolvedCanonicalPath = resolved.canonicalPath;
+            res.isMissing = false;
           } else {
             console.warn(
               `[PlaybackService] Track "${filename}" not found in any backend under ${
-                candidates.join(", ")
+                uniqueCandidates.join(", ")
               }`,
             );
             res.isMissing = true;

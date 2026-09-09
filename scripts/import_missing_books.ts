@@ -1,33 +1,125 @@
-// Bulk-import library books from a source directory tree into B2 (NOT Supabase
-// Storage). Supabase `audio-files` is legacy and capped at 10 MiB per file
-// (see 20260830000000_storage_hardening.sql) – it blew to 7.5 GB / 858 objects
-// on 2026-08-26 by bypassing B2. All new audio MUST go to B2 via presigned S3.
+// Bulk-import or single-import library books from a source directory tree into B2.
+// Supabase `audio-files` is legacy and capped at 10 MiB per file (see 20260830000000_storage_hardening.sql).
+// All audio MUST go to B2 via presigned S3 or PutObject.
 //
-// This script now uploads to the B2 pool (primary→secondary→tertiary→quartet→quinta)
-// using @aws-sdk/client-s3 PutObject, then patches `library_items.audio_files`
-// with `b2://{id}/{filename}` paths so StorageRouter can sign them.
+// 10x Pro Improvements:
+//   - Single config source: imports getConfig and isTierConfigured from b2-config.ts
+//   - Dynamic targets: --item-id <uuid>, --title <title>, or --auto-match
+//   - Real duration extraction via music-metadata
+//   - Overwrites stale b2-*:// / supabase:// paths with new canonical URI
+//   - Updates library_items.duration and size
+//   - Resumable: skips existing B2 objects with matching size
+//   - Dry-run by default, --apply writes
 //
-// Safety: resumable (skips existing B2 objects with matching size), dry-run
-// by default, `--apply` writes. No Supabase Storage `audio-files` writes.
+// Usage:
+//   # 1. Single book import (point directly at folder of .mp3 files):
+//   deno run --allow-all --env-file=env/local.env scripts/import_missing_books.ts "/path/to/21 Lessons" --item-id 788c1e1d-cd44-4169-8b55-0347d1796a63 [--apply] [--b2-tier B2|B2_SECONDARY|B2_TERTIARY|B2_QUARTET|B2_QUINTET]
 //
-// Usage: deno run --allow-all --env-file .env.local scripts/import_missing_books.ts <sourceRoot> [--apply] [--b2-tier B2|B2_SECONDARY|B2_TERTIARY|B2_QUARTET|B2_QUINTET]
-import { createClient } from "npm:@supabase/supabase-js@2.44.0";
+//   # 2. Single book by title search:
+//   deno run --allow-all --env-file=env/local.env scripts/import_missing_books.ts "/path/to/21 Lessons" --title "21 Lessons" [--apply]
+//
+//   # 3. Auto-match all subfolders in a library tree against database items:
+//   deno run --allow-all --env-file=env/local.env scripts/import_missing_books.ts "/path/to/library_root" --auto-match [--apply]
+//
+//   # 4. Built-in plan scan:
+//   deno run --allow-all --env-file=env/local.env scripts/import_missing_books.ts "/path/to/library_root" [--apply]
+
+import { createClient } from "@supabase/supabase-js";
 import {
   HeadObjectCommand,
   PutObjectCommand,
   S3Client,
-} from "npm:@aws-sdk/client-s3@^3.693.0";
+} from "@aws-sdk/client-s3";
+import { parseBuffer } from "music-metadata";
 
-const URL_BASE = Deno.env.get("SUPABASE_URL") ?? "";
-const SVC = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
-if (!URL_BASE || !SVC) throw new Error("env required");
+import {
+  BUCKET_Tiers,
+  getConfig,
+  isTierConfigured,
+} from "../supabase/functions/_shared/b2-config.ts";
+import { BucketTier } from "../supabase/functions/_shared/b2-types.ts";
+import { tierToPrefix } from "../supabase/functions/_shared/storage-router.ts";
+
+const URL_BASE = Deno.env.get("SUPABASE_URL") ||
+  Deno.env.get("NEXT_PUBLIC_SUPABASE_URL") || "";
+const SVC = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ||
+  Deno.env.get("SUPABASE_SERVICE_KEY") || "";
+
+if (!URL_BASE || !SVC) {
+  throw new Error(
+    "SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY required in environment",
+  );
+}
 const db = createClient(URL_BASE, SVC, { auth: { persistSession: false } });
 
-const SOURCE_ROOT = Deno.args[0];
-const APPLY = Deno.args.includes("--apply");
-const AUDIO = [".mp3", ".m4b", ".m4a", ".ogg", ".flac"];
+// CLI flags
+const args = Deno.args;
+const APPLY = args.includes("--apply");
+const AUTO_MATCH = args.includes("--auto-match");
+
+const itemIdIdx = args.indexOf("--item-id") !== -1
+  ? args.indexOf("--item-id")
+  : args.indexOf("--book-id");
+const TARGET_ITEM_ID = itemIdIdx !== -1 ? args[itemIdIdx + 1] : null;
+
+const titleIdx = args.indexOf("--title");
+const TARGET_TITLE = titleIdx !== -1 ? args[titleIdx + 1] : null;
+
+const tierIdx = args.indexOf("--b2-tier");
+const rawTier =
+  (tierIdx !== -1
+    ? args[tierIdx + 1]
+    : (Deno.env.get("ACTIVE_B2_TIER") || "B2")).toUpperCase();
+const B2_TIER: BucketTier =
+  (BUCKET_Tiers as readonly string[]).includes(rawTier)
+    ? (rawTier as BucketTier)
+    : "B2";
+
+const positionalArgs = args.filter((a, i) => {
+  if (a.startsWith("-")) return false;
+  const prev = args[i - 1];
+  if (
+    prev &&
+    ["--item-id", "--book-id", "--title", "--b2-tier", "--dir"].includes(prev)
+  ) {
+    return false;
+  }
+  return true;
+});
+
+const dirIdx = args.indexOf("--dir");
+const SOURCE_ROOT = dirIdx !== -1 ? args[dirIdx + 1] : positionalArgs[0];
+
+if (!SOURCE_ROOT) {
+  console.error(
+    "Usage: deno run --allow-all scripts/import_missing_books.ts <sourcePath> [options]",
+  );
+  console.error(
+    "Options: --apply, --item-id <uuid>, --title <string>, --auto-match, --b2-tier <tier>",
+  );
+  Deno.exit(1);
+}
+
+const AUDIO = [
+  ".mp3",
+  ".m4b",
+  ".m4a",
+  ".ogg",
+  ".flac",
+  ".wav",
+  ".aac",
+  ".opus",
+];
 
 const PLAN: Array<{ dir: string; titleLike: string }> = [
+  {
+    dir: "21 Lessons for the 21st Century - Yuval Noah Harari (Unabridged)",
+    titleLike: "21 Lessons for the 21st Century",
+  },
+  {
+    dir: "Yuval Noah Harari/21 Lessons for the 21st Century",
+    titleLike: "21 Lessons for the 21st Century",
+  },
   {
     dir:
       "Christopher HItchens/Christopher Hitchens - Mortality [96] Unabridged",
@@ -125,116 +217,49 @@ const PLAN: Array<{ dir: string; titleLike: string }> = [
 
 const normKey = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
 
-async function itemIdFor(titleLike: string): Promise<string | null> {
+async function itemIdFor(
+  titleLike: string,
+): Promise<{ id: string; title: string } | null> {
   const want = normKey(titleLike);
   const probe = `%${titleLike.slice(0, 20)}%`;
-  const { data } = await db.from("library_items").select("id,title").ilike(
-    "title",
-    probe,
-  ).limit(25);
+  const { data } = await db
+    .from("library_items")
+    .select("id,title")
+    .ilike("title", probe)
+    .limit(25);
+
   if (!data?.length) return null;
   const hit = data.find((r) =>
     normKey(r.title).includes(want.slice(0, 12)) ||
     want.includes(normKey(r.title))
   );
-  return hit?.id ?? data[0].id;
+  return hit ?? data[0];
 }
 
-// ── B2 pool (mirrors supabase/functions/_shared/b2-bucket-pool.ts) ──
-const TIER_ENV: Record<
-  string,
-  { key: string; app: string; ep: string; bucket: string; region: string }
-> = {
-  B2: {
-    key: "B2_KEY_ID",
-    app: "B2_APP_KEY",
-    ep: "B2_ENDPOINT",
-    bucket: "B2_BUCKET_NAME",
-    region: "B2_REGION",
-  },
-  B2_SECONDARY: {
-    key: "B2_SECONDARY_KEY_ID",
-    app: "B2_SECONDARY_APP_KEY",
-    ep: "B2_SECONDARY_ENDPOINT",
-    bucket: "B2_SECONDARY_BUCKET_NAME",
-    region: "B2_SECONDARY_REGION",
-  },
-  B2_TERTIARY: {
-    key: "B2_TERTIARY_KEY_ID",
-    app: "B2_TERTIARY_APP_KEY",
-    ep: "B2_TERTIARY_ENDPOINT",
-    bucket: "B2_TERTIARY_BUCKET_NAME",
-    region: "B2_TERTIARY_REGION",
-  },
-  B2_QUARTET: {
-    key: "B2_QUARTET_KEY_ID",
-    app: "B2_QUARTET_APP_KEY",
-    ep: "B2_QUARTET_ENDPOINT",
-    bucket: "B2_QUARTET_BUCKET_NAME",
-    region: "B2_QUARTET_REGION",
-  },
-  B2_QUINTET: {
-    key: "B2_QUINTA_KEY_ID",
-    app: "B2_QUINTA_APP_KEY",
-    ep: "B2_QUINTA_ENDPOINT",
-    bucket: "B2_QUINTA_BUCKET_NAME",
-    region: "B2_QUINTA_REGION",
-  },
-};
-function b2Client(
-  tier: string,
-): { client: S3Client; bucket: string; prefix: string } {
-  const e = TIER_ENV[tier] ?? TIER_ENV.B2;
-  const bucket = Deno.env.get(e.bucket)!;
-  if (!bucket) throw new Error(`Missing ${e.bucket} for tier ${tier}`);
-  const client = new S3Client({
-    endpoint: Deno.env.get(e.ep)!,
-    region: Deno.env.get(e.region) || "us-west-004",
-    credentials: {
-      accessKeyId: Deno.env.get(e.key)!,
-      secretAccessKey: Deno.env.get(e.app)!,
-    },
-    forcePathStyle: true,
-    // @ts-ignore — B2 does not support AWS checksum headers
-    requestChecksumCalculation: "WHEN_REQUIRED",
-    responseChecksumValidation: "WHEN_REQUIRED",
-  });
-  return {
-    client,
-    bucket,
-    prefix: tier === "B2"
-      ? "b2://"
-      : tier.toLowerCase().replace("_", "-") + "://",
-  };
+// B2 Client Initialization using b2-config.ts single source of truth
+if (!isTierConfigured(B2_TIER)) {
+  console.error(`B2 Tier "${B2_TIER}" is not configured in environment!`);
+  Deno.exit(1);
 }
-const B2_TIER = Deno.args[Deno.args.indexOf("--b2-tier") + 1] ??
-  Deno.env.get("ACTIVE_B2_TIER") ?? "B2";
-const { client: b2, bucket: B2_BUCKET, prefix: B2_PREFIX } = b2Client(
-  B2_TIER.toUpperCase(),
-);
 
-async function existingSizes(itemId: string): Promise<Map<string, number>> {
-  const m = new Map<string, number>();
-  // Probe B2 (primary) + Supabase fallback for legacy objects – we skip upload if size matches on either
-  try {
-    // Cheap: Head each candidate on B2 lazily in caller; here we list Supabase for legacy skip only
-    let offset = 0;
-    for (;;) {
-      const { data } = await db.storage.from("audio-files").list(itemId, {
-        limit: 1000,
-        offset,
-      });
-      if (!data || data.length === 0) break;
-      for (const f of data) {
-        if (f.id !== null) m.set(f.name, f.metadata?.size ?? 0);
-      }
-      if (data.length < 1000) break;
-      offset += 1000;
-    }
-  } catch { /* legacy Supabase list may fail */ }
-  // Also probe B2 via HeadObject in per-file loop (b2HeadExists)
-  return m;
-}
+const config = getConfig(B2_TIER);
+const b2 = new S3Client({
+  endpoint: config.endpoint,
+  region: config.region,
+  credentials: {
+    accessKeyId: config.keyId,
+    secretAccessKey: config.appKey,
+  },
+  forcePathStyle: true,
+  // @ts-ignore: S3Client checksum options exist at runtime; the pinned SDK types lag behind
+  requestChecksumCalculation: "WHEN_REQUIRED",
+  // @ts-ignore: S3Client checksum options exist at runtime; the pinned SDK types lag behind
+  responseChecksumValidation: "WHEN_REQUIRED",
+});
+
+const B2_BUCKET = config.bucketName;
+const B2_PREFIX = tierToPrefix(B2_TIER);
+
 async function b2HeadExists(key: string): Promise<number | null> {
   try {
     const out = await b2.send(
@@ -251,229 +276,463 @@ async function walkAudio(dir: string): Promise<
 > {
   const out: Array<{ path: string; name: string; size: number }> = [];
   const seen = new Set<string>();
+
   async function rec(d: string) {
-    for await (const e of Deno.readDir(d)) {
-      const p = `${d}/${e.name}`;
-      if (e.isDirectory && !e.name.startsWith(".")) await rec(p);
-      else if (
-        e.isFile &&
-        !e.name.startsWith("._") && AUDIO.some((x) =>
-          e.name.toLowerCase().endsWith(x)
-        )
-      ) {
-        const key = e.name.toLowerCase().replace(/[^a-z0-9]/g, "");
-        if (seen.has(key)) continue;
-        seen.add(key);
-        let size = 0;
-        try {
-          size = (await Deno.stat(p)).size;
-        } catch {
-          continue;
+    try {
+      for await (const e of Deno.readDir(d)) {
+        const p = `${d}/${e.name}`;
+        if (e.isDirectory && !e.name.startsWith(".")) {
+          await rec(p);
+        } else if (
+          e.isFile &&
+          !e.name.startsWith("._") &&
+          AUDIO.some((x) => e.name.toLowerCase().endsWith(x))
+        ) {
+          const key = e.name.toLowerCase().replace(/[^a-z0-9]/g, "");
+          if (seen.has(key)) continue;
+          seen.add(key);
+          let size = 0;
+          try {
+            size = (await Deno.stat(p)).size;
+          } catch {
+            continue;
+          }
+          out.push({ path: p, name: e.name, size });
         }
-        out.push({ path: p, name: e.name, size });
       }
+    } catch (err) {
+      console.warn(
+        `Could not read dir "${d}": ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
     }
   }
+
   await rec(dir);
+  // Sort naturally by filename
+  out.sort((a, b) =>
+    a.name.localeCompare(b.name, undefined, {
+      numeric: true,
+      sensitivity: "base",
+    })
+  );
   return out;
 }
 
-console.log(
-  `B2 target: ${B2_BUCKET} via ${B2_PREFIX} (tier ${B2_TIER}) – dry=${!APPLY}`,
-);
-let up = 0, sk = 0, fl = 0, gb = 0;
+interface ImportTarget {
+  dirPath: string;
+  itemId: string;
+  bookTitle: string;
+}
 
-for (const plan of PLAN) {
-  const fullDir = `${SOURCE_ROOT}/${plan.dir}`;
-  try {
-    await Deno.stat(fullDir);
-  } catch {
-    console.log(`SKIP (no dir): ${plan.dir.slice(0, 50)}`);
-    continue;
-  }
-  const itemId = await itemIdFor(plan.titleLike);
-  if (!itemId) {
-    console.log(`SKIP (no item): ${plan.titleLike}`);
-    continue;
-  }
-  const files = await walkAudio(fullDir);
-  if (files.length === 0) {
-    console.log(`SKIP (no audio): ${plan.dir.slice(0, 50)}`);
-    continue;
-  }
-  const existing = await existingSizes(itemId);
+/// One row of the `library_items.audio_files` JSONB column. `metadata` is
+/// required here because this script normalizes every entry on write; rows
+/// read back from the DB always carry it.
+interface LibraryFileEntry {
+  index?: number;
+  ino?: string;
+  duration?: number;
+  codec?: string;
+  mimeType?: string;
+  addedAt?: number;
+  updatedAt?: number;
+  metadata: {
+    filename?: string;
+    relPath?: string;
+    path?: string;
+    size?: number;
+    duration?: number;
+    [key: string]: unknown;
+  };
+  [key: string]: unknown;
+}
 
-  let iUp = 0, iSk = 0, iFl = 0;
-  const renames: Array<[string, string]> = [];
-  // Build a B2-aware skip map: check B2 head for each file (fast) + legacy Supabase list
-  for (const f of files) {
-    if (existing.get(f.name) === f.size) {
-      iSk++;
+async function collectTargets(): Promise<ImportTarget[]> {
+  const targets: ImportTarget[] = [];
+
+  // Mode 1: Targeted Item ID
+  if (TARGET_ITEM_ID) {
+    const { data: item } = await db
+      .from("library_items")
+      .select("id, title")
+      .eq("id", TARGET_ITEM_ID)
+      .single();
+
+    if (!item) {
+      throw new Error(`Item with ID ${TARGET_ITEM_ID} not found in database.`);
+    }
+    targets.push({
+      dirPath: SOURCE_ROOT,
+      itemId: item.id,
+      bookTitle: item.title,
+    });
+    return targets;
+  }
+
+  // Mode 2: Targeted Title
+  if (TARGET_TITLE) {
+    const hit = await itemIdFor(TARGET_TITLE);
+    if (!hit) {
+      throw new Error(`No book found matching title "${TARGET_TITLE}".`);
+    }
+    targets.push({
+      dirPath: SOURCE_ROOT,
+      itemId: hit.id,
+      bookTitle: hit.title,
+    });
+    return targets;
+  }
+
+  // Mode 3: Auto-Match subdirectories
+  if (AUTO_MATCH) {
+    console.log(`Scanning "${SOURCE_ROOT}" for book subdirectories...`);
+    const { data: allItems } = await db.from("library_items").select(
+      "id, title, path",
+    );
+    const items = allItems || [];
+
+    for await (const entry of Deno.readDir(SOURCE_ROOT)) {
+      if (!entry.isDirectory || entry.name.startsWith(".")) continue;
+      const subDir = `${SOURCE_ROOT}/${entry.name}`;
+      const folderKey = normKey(entry.name);
+
+      const matched = items.find((it) => {
+        const titleKey = normKey(it.title || "");
+        const pathKey = normKey(it.path || "");
+        return (
+          folderKey.includes(titleKey) ||
+          titleKey.includes(folderKey) ||
+          (pathKey && folderKey.includes(pathKey))
+        );
+      });
+
+      if (matched) {
+        targets.push({
+          dirPath: subDir,
+          itemId: matched.id,
+          bookTitle: matched.title,
+        });
+      } else {
+        console.log(
+          `  [auto-match] No DB item match for folder "${entry.name}"`,
+        );
+      }
+    }
+    return targets;
+  }
+
+  // Mode 4: Built-in Plan
+  for (const plan of PLAN) {
+    const fullDir = `${SOURCE_ROOT}/${plan.dir}`;
+    try {
+      await Deno.stat(fullDir);
+    } catch {
       continue;
     }
-    const b2Key = `${itemId}/${f.name}`;
+    const hit = await itemIdFor(plan.titleLike);
+    if (hit) {
+      targets.push({
+        dirPath: fullDir,
+        itemId: hit.id,
+        bookTitle: hit.title,
+      });
+    }
+  }
+
+  // If no plan matches, but SOURCE_ROOT itself has audio files, try matching SOURCE_ROOT folder name
+  if (targets.length === 0) {
+    const baseDir = SOURCE_ROOT.split("/").filter(Boolean).pop() || "";
+    const hit = await itemIdFor(baseDir);
+    if (hit) {
+      targets.push({
+        dirPath: SOURCE_ROOT,
+        itemId: hit.id,
+        bookTitle: hit.title,
+      });
+    }
+  }
+
+  return targets;
+}
+
+console.log(`\n=== 10x Pro B2 Audio Importer ===`);
+console.log(`Target B2 Tier: ${B2_TIER} (${B2_BUCKET}) via ${B2_PREFIX}`);
+console.log(`Mode: ${APPLY ? "WRITE (APPLY)" : "DRY RUN (no writes)"}`);
+console.log(`Source Root: ${SOURCE_ROOT}\n`);
+
+const targets = await collectTargets();
+if (targets.length === 0) {
+  console.log(
+    "No matching targets found to process. Check directory or provide --item-id.",
+  );
+  Deno.exit(0);
+}
+
+console.log(`Found ${targets.length} target book(s) to process:`);
+for (const t of targets) {
+  console.log(`  - [${t.itemId}] "${t.bookTitle}" (folder: ${t.dirPath})`);
+}
+console.log();
+
+let totalUploaded = 0;
+let totalSkipped = 0;
+let totalFailed = 0;
+let totalGigabytes = 0;
+
+for (const target of targets) {
+  const { dirPath, itemId, bookTitle } = target;
+  const files = await walkAudio(dirPath);
+
+  if (files.length === 0) {
+    console.log(`SKIP (no audio files): "${bookTitle}" in ${dirPath}`);
+    continue;
+  }
+
+  console.log(`\nProcessing: "${bookTitle}" (${files.length} audio files)`);
+
+  let iUp = 0;
+  let iSk = 0;
+  let iFl = 0;
+  const renames: Array<[string, string]> = [];
+  const fileMetadataMap = new Map<
+    string,
+    { duration: number; codec: string; mimeType: string }
+  >();
+
+  for (let i = 0; i < files.length; i++) {
+    const f = files[i];
+    // Sanitize B2 key
+    const safeName = f.name.replace(/~/g, "-").replace(
+      /[^A-Za-z0-9 ._\-]/g,
+      "_",
+    );
+    if (safeName !== f.name) renames.push([f.name, safeName]);
+
+    const b2Key = `${itemId}/${safeName}`;
     const b2Size = await b2HeadExists(b2Key);
+
+    const ext = safeName.split(".").pop()!.toLowerCase();
+    const ct = ext === "ogg"
+      ? "audio/ogg"
+      : ext === "m4b" || ext === "m4a" || ext === "mp4"
+      ? "audio/mp4"
+      : ext === "flac"
+      ? "audio/flac"
+      : ext === "wav"
+      ? "audio/wav"
+      : "audio/mpeg";
+
+    const codec = ct.includes("mp4")
+      ? "aac"
+      : ct.includes("ogg")
+      ? "vorbis"
+      : ct.includes("flac")
+      ? "flac"
+      : "mp3";
+
+    // Read buffer for metadata duration (or upload)
+    let buf: Uint8Array | null = null;
+    let duration = 0;
+
+    try {
+      buf = new Uint8Array(await Deno.readFile(f.path));
+      try {
+        const parsed = await parseBuffer(buf, ct);
+        duration = Math.round(parsed.format.duration || 0);
+      } catch {
+        duration = 0;
+      }
+    } catch (err) {
+      console.warn(
+        `  Failed reading file ${f.path}: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    }
+
+    fileMetadataMap.set(safeName, { duration, codec, mimeType: ct });
+
     if (b2Size !== null && b2Size === f.size) {
       iSk++;
+      console.log(
+        `  [${i + 1}/${files.length}] Exists on B2: ${safeName} (${
+          (f.size / 1e6).toFixed(1)
+        } MB, ${duration}s)`,
+      );
       continue;
     }
-    if (!APPLY) continue;
+
+    if (!APPLY) {
+      console.log(
+        `  [DRY] Would upload [${
+          i + 1
+        }/${files.length}]: ${safeName} -> ${B2_PREFIX}${b2Key}`,
+      );
+      iUp++;
+      continue;
+    }
+
+    if (!buf) {
+      iFl++;
+      continue;
+    }
+
     let uploaded = false;
-    let targetName = f.name;
     for (let attempt = 1; attempt <= 4 && !uploaded; attempt++) {
       try {
-        const buf = new Uint8Array(await Deno.readFile(f.path));
-        const ct = f.name.endsWith(".ogg")
-          ? "audio/ogg"
-          : f.name.endsWith(".m4b") || f.name.endsWith(".m4a")
-          ? "audio/mp4"
-          : f.name.endsWith(".flac")
-          ? "audio/flac"
-          : "audio/mpeg";
-        // Sanitize B2 key (B2 also rejects control chars)
-        const safeName = targetName.replace(/~/g, "-").replace(
-          /[^A-Za-z0-9 ._\-]/g,
-          "_",
-        );
-        if (safeName !== targetName) renames.push([targetName, safeName]);
-        targetName = safeName;
-        const key = `${itemId}/${targetName}`;
-        // 10x pro: audio MUST go to B2 – never to Supabase storage
         await b2.send(
           new PutObjectCommand({
             Bucket: B2_BUCKET,
-            Key: key,
+            Key: b2Key,
             Body: buf,
             ContentType: ct,
           }),
         );
         uploaded = true;
         iUp++;
-        gb += buf.length / 1e9;
-        process.stdout.write(
-          `\r  ${plan.titleLike.slice(0, 22)}: ${
-            iUp + iSk
-          }/${files.length} → ${B2_PREFIX}${key.slice(0, 40)}`,
+        totalGigabytes += buf.length / 1e9;
+        console.log(
+          `  Uploaded [${
+            i + 1
+          }/${files.length}]: ${safeName} -> ${B2_PREFIX}${b2Key} (${
+            (buf.length / 1e6).toFixed(1)
+          } MB, ${duration}s)`,
         );
-        // Patch DB: insert/update audio_files entry with b2:// path so playback signs from B2
-        // We do this per-file to be resumable; the full item patch happens after loop too.
       } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
         if (attempt === 4) {
           iFl++;
-          console.log(
-            `\n  FAIL ${f.name}: ${(e as Error).message.slice(0, 120)}`,
-          );
-        } else await new Promise((r) => setTimeout(r, 2000 * attempt));
+          console.error(`  FAIL [${attempt}/4] ${safeName}: ${msg}`);
+        } else {
+          await new Promise((r) => setTimeout(r, 1500 * attempt));
+        }
       }
     }
   }
-  // Patch library_items.audio_files to point at B2 (and apply any renames)
-  if (APPLY && (iUp > 0 || renames.length > 0)) {
-    const { data: cur } = await db.from("library_items").select(
-      "id, audio_files, size",
-    ).eq("id", itemId).single();
-    const existingAf: any[] = Array.isArray(cur?.audio_files)
+
+  // Database Patching
+  if (APPLY && (iUp > 0 || iSk > 0)) {
+    const { data: cur } = await db
+      .from("library_items")
+      .select("id, audio_files, size, duration")
+      .eq("id", itemId)
+      .single();
+
+    const existingAf: LibraryFileEntry[] = Array.isArray(cur?.audio_files)
       ? cur!.audio_files
       : [];
     const byName = new Map(
-      existingAf.map((
-        x: any,
-      ) => [String(x?.metadata?.filename ?? x?.metadata?.relPath ?? ""), x]),
+      existingAf.map((x: LibraryFileEntry) => [
+        String(x?.metadata?.filename ?? x?.metadata?.relPath ?? ""),
+        x,
+      ]),
     );
-    for (const f of files) {
-      const name = renames.find(([a]) => a === f.name)?.[1] ?? f.name;
-      const key = `${itemId}/${name}`;
-      const b2Path = `${B2_PREFIX}${key}`;
-      const ct = name.endsWith(".ogg")
-        ? "audio/ogg"
-        : name.endsWith(".m4b") || name.endsWith(".m4a")
-        ? "audio/mp4"
-        : name.endsWith(".flac")
-        ? "audio/flac"
-        : "audio/mpeg";
-      if (!byName.has(name) && !byName.has(f.name)) {
-        byName.set(name, {
-          index: byName.size + 1,
+
+    for (let i = 0; i < files.length; i++) {
+      const f = files[i];
+      const safeName = renames.find(([orig]) => orig === f.name)?.[1] ?? f.name;
+      const b2Key = `${itemId}/${safeName}`;
+      const b2Path = `${B2_PREFIX}${b2Key}`;
+      const meta = fileMetadataMap.get(safeName) ||
+        { duration: 0, codec: "mp3", mimeType: "audio/mpeg" };
+
+      const existingEntry = byName.get(safeName) ?? byName.get(f.name);
+      if (!existingEntry) {
+        byName.set(safeName, {
+          index: i + 1,
           ino: crypto.randomUUID(),
-          duration: 0,
-          codec: ct.includes("mp4")
-            ? "aac"
-            : ct.includes("ogg")
-            ? "vorbis"
-            : "mp3",
+          duration: meta.duration,
+          codec: meta.codec,
+          mimeType: meta.mimeType,
           metadata: {
-            filename: name,
-            ext: "." + name.split(".").pop()!.toLowerCase(),
+            filename: safeName,
+            ext: "." + safeName.split(".").pop()!.toLowerCase(),
             path: b2Path,
-            relPath: name,
+            relPath: safeName,
             size: f.size,
-            duration: 0,
-            codec: "mp3",
+            duration: meta.duration,
+            codec: meta.codec,
             mtimeMs: Date.now(),
             ctimeMs: Date.now(),
             birthtimeMs: Date.now(),
-            mimeType: ct,
+            mimeType: meta.mimeType,
           },
           addedAt: Date.now(),
           updatedAt: Date.now(),
-          mimeType: ct,
         });
       } else {
-        // Ensure existing entry's path is upgraded to B2 (migrate legacy /... or supabase://)
-        const ent = byName.get(name) ?? byName.get(f.name);
-        if (ent && String(ent?.metadata?.path ?? "").startsWith("/")) {
-          ent.metadata.path = b2Path;
+        // Unconditionally update storage path to newly verified/uploaded B2 path
+        existingEntry.metadata.path = b2Path;
+        existingEntry.metadata.filename = safeName;
+        existingEntry.metadata.relPath = safeName;
+        existingEntry.metadata.size = f.size;
+        if (meta.duration > 0) {
+          existingEntry.duration = meta.duration;
+          existingEntry.metadata.duration = meta.duration;
         }
-        if (
-          ent && String(ent?.metadata?.path ?? "").startsWith("supabase://")
-        ) ent.metadata.path = b2Path;
+        existingEntry.updatedAt = Date.now();
+        byName.set(safeName, existingEntry);
       }
     }
-    for (const [from, to] of renames) {
-      const ent = byName.get(from);
-      if (ent) {
-        byName.delete(from);
-        ent.metadata.filename = to;
-        ent.metadata.relPath = to;
-        byName.set(to, ent);
-      }
-    }
+
     const merged = Array.from(byName.values());
-    // Re-index
-    merged.forEach((x: any, i: number) => x.index = i + 1);
+    merged.sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
+    merged.forEach((x: LibraryFileEntry, idx: number) => {
+      x.index = idx + 1;
+    });
+
     const totalSize = merged.reduce(
-      (s: number, x: any) => s + Number(x?.metadata?.size ?? 0),
+      (s: number, x: LibraryFileEntry) => s + Number(x?.metadata?.size ?? 0),
       0,
     );
-    const { error } = await db.from("library_items").update({
-      audio_files: merged as any,
-      library_files: merged.map((x: any) => ({
+    const totalDuration = merged.reduce(
+      (d: number, x: LibraryFileEntry) =>
+        d + Number(x?.duration ?? x?.metadata?.duration ?? 0),
+      0,
+    );
+
+    const updatePayload: Record<string, unknown> = {
+      audio_files: merged,
+      library_files: merged.map((x: LibraryFileEntry) => ({
         ino: x.ino,
         metadata: x.metadata,
         addedAt: x.addedAt,
         updatedAt: x.updatedAt,
       })),
       size: totalSize,
-    }).eq("id", itemId);
-    console.log(
-      error
-        ? `  DB patch FAILED: ${error.message}`
-        : `  DB patched ${merged.length} tracks → ${B2_PREFIX} (size ${
-          (totalSize / 1e9).toFixed(2)
-        } GB)`,
-    );
+    };
+    if (totalDuration > 0) {
+      updatePayload.duration = totalDuration;
+    }
+
+    const { error: updateErr } = await db
+      .from("library_items")
+      .update(updatePayload)
+      .eq("id", itemId);
+
+    if (updateErr) {
+      console.error(
+        `  Database update FAILED for "${bookTitle}": ${updateErr.message}`,
+      );
+    } else {
+      console.log(
+        `  Database patched: ${merged.length} tracks -> ${B2_PREFIX} (Duration: ${
+          Math.round(totalDuration / 60)
+        }m, Size: ${(totalSize / 1e6).toFixed(1)} MB)`,
+      );
+    }
   }
-  up += iUp;
-  sk += iSk;
-  fl += iFl;
-  console.log(
-    `${APPLY ? "DONE" : "DRY"} "${
-      plan.titleLike.slice(0, 28)
-    }": up=${iUp} skip=${iSk} fail=${iFl} (of ${files.length})`,
-  );
+
+  totalUploaded += iUp;
+  totalSkipped += iSk;
+  totalFailed += iFl;
 }
-console.log(
-  `\nTOTAL apply=${APPLY} uploaded=${up} skippedExisting=${sk} failed=${fl} data=${
-    gb.toFixed(2)
-  }GB`,
-);
+
+console.log(`\n========================================`);
+console.log(`Summary: mode=${APPLY ? "APPLY" : "DRY-RUN"}`);
+console.log(`  Uploaded: ${totalUploaded}`);
+console.log(`  Skipped (existing): ${totalSkipped}`);
+console.log(`  Failed: ${totalFailed}`);
+console.log(`  Data transferred: ${totalGigabytes.toFixed(2)} GB`);
+console.log(`========================================\n`);

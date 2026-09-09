@@ -281,3 +281,91 @@ Deno.test("self-heal: legacy paths skip the probe - already verified by resolveA
   assertEquals(session.missingTrackCount, 0);
   assertEquals(session.audioTracks.length, 1);
 });
+
+Deno.test("StorageRouter: parsePath correctly normalizes all 5 B2 tiers and Supabase prefixes", () => {
+  const router = new StorageRouter(null);
+  assertEquals(router.parsePath("supabase://item/file.mp3"), {
+    tier: "SUPABASE",
+    key: "item/file.mp3",
+  });
+  assertEquals(router.parsePath("b2-tertiary://item/file.mp3"), {
+    tier: "B2_TERTIARY",
+    key: "item/file.mp3",
+  });
+  assertEquals(router.parsePath("b2_tertiary://item/file.mp3"), {
+    tier: "B2_TERTIARY",
+    key: "item/file.mp3",
+  });
+  assertEquals(router.parsePath("b2-secondary://item/file.mp3"), {
+    tier: "B2_SECONDARY",
+    key: "item/file.mp3",
+  });
+  assertEquals(router.parsePath("b2_secondary://item/file.mp3"), {
+    tier: "B2_SECONDARY",
+    key: "item/file.mp3",
+  });
+  assertEquals(router.parsePath("b2-quartet://item/file.mp3"), {
+    tier: "B2_QUARTET",
+    key: "item/file.mp3",
+  });
+  assertEquals(router.parsePath("b2_quartet://item/file.mp3"), {
+    tier: "B2_QUARTET",
+    key: "item/file.mp3",
+  });
+  assertEquals(router.parsePath("b2-quinta://item/file.mp3"), {
+    tier: "B2_QUINTET",
+    key: "item/file.mp3",
+  });
+  assertEquals(router.parsePath("b2_quinta://item/file.mp3"), {
+    tier: "B2_QUINTET",
+    key: "item/file.mp3",
+  });
+  assertEquals(router.parsePath("b2_quintet://item/file.mp3"), {
+    tier: "B2_QUINTET",
+    key: "item/file.mp3",
+  });
+  assertEquals(router.parsePath("b2://item/file.mp3"), {
+    tier: "B2",
+    key: "item/file.mp3",
+  });
+  assertEquals(router.parsePath("b2-primary://item/file.mp3"), {
+    tier: "B2",
+    key: "item/file.mp3",
+  });
+  assertEquals(router.parsePath("/audiobooks/Yuval/21 Lessons/01.mp3"), {
+    tier: "B2",
+    key: "audiobooks/Yuval/21 Lessons/01.mp3",
+    isLegacy: true,
+  });
+});
+
+Deno.test("self-heal: recovers even when initial presigning threw for all tracks", async () => {
+  stubStorage({
+    getSignedUrl: () => Promise.reject(new Error("invalid tier/scheme")),
+    fileExists: () => Promise.resolve(false),
+    signFirstExisting: (keys: string[]) =>
+      Promise.resolve({
+        signedUrl: "recovered-signed-url",
+        canonicalPath: `b2-quinta://${keys[0]}`,
+      }),
+  });
+  const session = await PlaybackService.startSession(
+    fakeSupabase(itemWith([
+      {
+        duration: 10,
+        metadata: {
+          filename: "track1.mp3",
+          path: "b2_unknown://custom/track1.mp3",
+        },
+      },
+    ])),
+    "user-1",
+    ITEM_ID,
+  );
+  assertEquals(session.missingTrackCount, 0);
+  assertEquals(session.audioTracks.length, 1);
+  assertEquals(
+    (session.audioTracks[0] as Record<string, unknown>).contentUrl,
+    "recovered-signed-url",
+  );
+});

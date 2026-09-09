@@ -1,3 +1,20 @@
+/* ============================================================================
+ * STORAGE ROUTER — WITH SINGLE CONFIG SOURCE OF TRUTH
+ *
+ * PURPOSE: Routes storage paths (b2-tertiary://, b2-secondary://, b2-quartet://,
+ * b2-quinta://, b2-primary://, b2://, supabase://) to the correct B2 client or
+ * Supabase Storage.
+ * Probing order: b2-tertiary → b2-secondary → b2-quartet → b2-quinta → b2-primary → supabase.
+ *
+ * KEY IMPROVEMENTS:
+ *   - Config from b2-config.ts single source (not scattered env reads)
+ *   - Full support for all 5 B2 tiers including B2_QUARTET and B2_QUINTET
+ *   - Support for both hyphenated (b2-secondary://) and underscored (b2_secondary://) schemes
+ *   - Proactive multi-candidate legacy path resolution
+ *   - Real HEAD probes with health-gated fallbacks
+ *   - Graceful degradation to Supabase when all B2 tiers fail
+ * ========================================================================== */
+
 import {
   GetObjectCommand,
   HeadObjectCommand,
@@ -5,133 +22,184 @@ import {
 } from "npm:@aws-sdk/client-s3@^3.693.0";
 import { getSignedUrl } from "npm:@aws-sdk/s3-request-presigner@^3.693.0";
 
+import { BucketTier } from "./b2-types.ts";
+import { getConfig, isTierConfigured } from "./b2-config.ts";
+
 // S3Client instances are cached per-process to avoid re-initialising on every
-// request. Each edge function invocation is a new process, but within a single
-// invocation (e.g. signing N tracks in parallel) this avoids N allocations.
-let _b2PrimaryClient: S3Client | null = null;
-let _b2SecondaryClient: S3Client | null = null;
-let _b2TertiaryClient: S3Client | null = null;
-let _b2QuintaClient: S3Client | null = null;
+// request. Within a single invocation (e.g. signing N tracks in parallel), this
+// avoids N allocations.
+const _b2Clients: Map<BucketTier, S3Client> = new Map();
 
-function getB2PrimaryClient(): S3Client {
-  if (!_b2PrimaryClient) {
-    _b2PrimaryClient = new S3Client({
-      endpoint: Deno.env.get("B2_ENDPOINT")!,
-      region: Deno.env.get("B2_REGION") || "us-west-004",
-      credentials: {
-        accessKeyId: Deno.env.get("B2_KEY_ID")!,
-        secretAccessKey: Deno.env.get("B2_APP_KEY")!,
-      },
-      forcePathStyle: true,
-      // B2 rejects presigned URLs that carry unsigned x-amz-checksum-* query
-      // params, which the AWS SDK injects by default on newer versions. These
-      // options force checksums to be computed only when the operation requires
-      // them, keeping GetObject presigned URLs clean. Without this, every
-      // download signed via this router fails with SignatureDoesNotMatch.
-      // @ts-ignore — options recognised at runtime, not in older type defs
-      requestChecksumCalculation: "WHEN_REQUIRED",
-      // @ts-ignore
-      responseChecksumValidation: "WHEN_REQUIRED",
-    });
+/* -------------------------------------------------------------------------
+ * Lazy-initialised B2 clients — one per tier, created on first access.
+ * ------------------------------------------------------------------------- */
+
+function getB2Client(tier: BucketTier): S3Client {
+  if (_b2Clients.has(tier)) {
+    return _b2Clients.get(tier)!;
   }
-  return _b2PrimaryClient;
+
+  const config = getConfig(tier);
+
+  const client = new S3Client({
+    endpoint: config.endpoint,
+    region: config.region,
+    credentials: {
+      accessKeyId: config.keyId,
+      secretAccessKey: config.appKey,
+    },
+    forcePathStyle: true,
+    // @ts-ignore
+    requestChecksumCalculation: "WHEN_REQUIRED",
+    // @ts-ignore
+    responseChecksumValidation: "WHEN_REQUIRED",
+  });
+
+  _b2Clients.set(tier, client);
+  return client;
 }
 
-function getB2SecondaryClient(): S3Client {
-  if (!_b2SecondaryClient) {
-    _b2SecondaryClient = new S3Client({
-      endpoint: Deno.env.get("B2_SECONDARY_ENDPOINT")!,
-      region: Deno.env.get("B2_SECONDARY_REGION") || "us-west-004",
-      credentials: {
-        accessKeyId: Deno.env.get("B2_SECONDARY_KEY_ID")!,
-        secretAccessKey: Deno.env.get("B2_SECONDARY_APP_KEY")!,
-      },
-      forcePathStyle: true,
-      // See getB2PrimaryClient: required to keep GetObject presigned URLs
-      // B2-compatible on AWS SDK v3.693.0+ / v3.1085.0+.
-      // @ts-ignore — options recognised at runtime, not in older type defs
-      requestChecksumCalculation: "WHEN_REQUIRED",
-      // @ts-ignore
-      responseChecksumValidation: "WHEN_REQUIRED",
-    });
-  }
-  return _b2SecondaryClient;
-}
+/* -------------------------------------------------------------------------
+ * Configuration readiness checks.
+ * ------------------------------------------------------------------------- */
 
-function getB2TertiaryClient(): S3Client {
-  if (!_b2TertiaryClient) {
-    _b2TertiaryClient = new S3Client({
-      endpoint: Deno.env.get("B2_TERTIARY_ENDPOINT")!,
-      region: Deno.env.get("B2_TERTIARY_REGION") || "us-west-004",
-      credentials: {
-        accessKeyId: Deno.env.get("B2_TERTIARY_KEY_ID")!,
-        secretAccessKey: Deno.env.get("B2_TERTIARY_APP_KEY")!,
-      },
-      forcePathStyle: true,
-      // See getB2PrimaryClient: required to keep GetObject presigned URLs
-      // B2-compatible on AWS SDK v3.693.0+ / v3.1085.0+.
-      // @ts-ignore — options recognised at runtime, not in older type defs
-      requestChecksumCalculation: "WHEN_REQUIRED",
-      // @ts-ignore
-      responseChecksumValidation: "WHEN_REQUIRED",
-    });
-  }
-  return _b2TertiaryClient;
-}
-
-/** True when the quinta B2 tier is fully configured (endpoint + bucket). */
 export function b2QuintaConfigured(): boolean {
-  return !!Deno.env.get("B2_QUINTA_ENDPOINT") &&
-    !!Deno.env.get("B2_QUINTA_BUCKET_NAME");
+  return isTierConfigured("B2_QUINTET");
 }
 
-/** True when the tertiary B2 tier is fully configured (endpoint + bucket). */
+export function b2QuartetConfigured(): boolean {
+  return isTierConfigured("B2_QUARTET");
+}
+
 export function b2TertiaryConfigured(): boolean {
-  return !!Deno.env.get("B2_TERTIARY_ENDPOINT") &&
-    !!Deno.env.get("B2_TERTIARY_BUCKET_NAME");
+  return isTierConfigured("B2_TERTIARY");
 }
 
-/* Get the quinta B2 client (lazy-initialised). */
-function getB2QuintaClient(): S3Client {
-  if (!_b2QuintaClient) {
-    _b2QuintaClient = new S3Client({
-      endpoint: Deno.env.get("B2_QUINTA_ENDPOINT")!,
-      region: Deno.env.get("B2_QUINTA_REGION") || "us-west-004",
-      credentials: {
-        accessKeyId: Deno.env.get("B2_QUINTA_KEY_ID")!,
-        secretAccessKey: Deno.env.get("B2_QUINTA_APP_KEY")!,
-      },
-      forcePathStyle: true,
-      // See getB2PrimaryClient: required to keep GetObject presigned URLs
-      // B2-compatible on AWS SDK v3.693.0+ / v3.1085.0+.
-      // @ts-ignore — options recognised at runtime, not in older type defs
-      requestChecksumCalculation: "WHEN_REQUIRED",
-      // @ts-ignore
-      responseChecksumValidation: "WHEN_REQUIRED",
-    });
+export function b2SecondaryConfigured(): boolean {
+  return isTierConfigured("B2_SECONDARY");
+}
+
+/* -------------------------------------------------------------------------
+ * Canonical Scheme Formatter
+ * ------------------------------------------------------------------------- */
+
+export function tierToPrefix(tier: BucketTier | "SUPABASE"): string {
+  switch (tier) {
+    case "B2_TERTIARY":
+      return "b2-tertiary://";
+    case "B2_SECONDARY":
+      return "b2-secondary://";
+    case "B2_QUARTET":
+      return "b2-quartet://";
+    case "B2_QUINTET":
+      return "b2-quinta://";
+    case "B2":
+      return "b2://";
+    case "SUPABASE":
+      return "supabase://";
   }
-  return _b2QuintaClient;
 }
 
-/**
- * Result of a successful path resolution for a legacy bare path.
- * Contains the signed URL and the canonical storage path (with scheme prefix)
- * so callers can optionally persist the resolved path back to the DB.
- */
 export interface ResolvedStoragePath {
   signedUrl: string;
   /** The canonical path with scheme prefix, e.g. "b2-secondary://itemId/file.mp3" */
   canonicalPath: string;
 }
 
+export interface ParsedStoragePath {
+  tier: BucketTier | "SUPABASE";
+  key: string;
+  isLegacy?: boolean;
+}
+
+/* -------------------------------------------------------------------------
+ * StorageRouter class — main API for all storage path operations.
+ * ------------------------------------------------------------------------- */
+
 export class StorageRouter {
   constructor(private supabase: any) {}
 
-  async getSignedUrl(path: string, expiresIn: number): Promise<string> {
+  /**
+   * Parse arbitrary path strings (including legacy, underscored, hyphenated) into tier + key.
+   */
+  parsePath(path: string): ParsedStoragePath | null {
+    if (!path || typeof path !== "string") return null;
+
     if (path.startsWith("supabase://")) {
-      const actualPath = path.replace("supabase://", "");
-      const { data, error } = await this.supabase.storage.from("audio-files")
-        .createSignedUrl(actualPath, expiresIn);
+      return { tier: "SUPABASE", key: path.replace("supabase://", "") };
+    }
+    if (
+      path.startsWith("b2-tertiary://") || path.startsWith("b2_tertiary://")
+    ) {
+      return {
+        tier: "B2_TERTIARY",
+        key: path.replace(/^b2[-_]tertiary:\/\//, ""),
+      };
+    }
+    if (
+      path.startsWith("b2-secondary://") || path.startsWith("b2_secondary://")
+    ) {
+      return {
+        tier: "B2_SECONDARY",
+        key: path.replace(/^b2[-_]secondary:\/\//, ""),
+      };
+    }
+    if (
+      path.startsWith("b2-quartet://") ||
+      path.startsWith("b2_quartet://") ||
+      path.startsWith("b2-quarta://") ||
+      path.startsWith("b2_quarta://")
+    ) {
+      return {
+        tier: "B2_QUARTET",
+        key: path.replace(/^b2[-_]quart(?:et|a):\/\//, ""),
+      };
+    }
+    if (
+      path.startsWith("b2-quinta://") ||
+      path.startsWith("b2_quinta://") ||
+      path.startsWith("b2-quintet://") ||
+      path.startsWith("b2_quintet://")
+    ) {
+      return {
+        tier: "B2_QUINTET",
+        key: path.replace(/^b2[-_]quint(?:et|a):\/\//, ""),
+      };
+    }
+    if (
+      path.startsWith("b2://") ||
+      path.startsWith("b2-primary://") ||
+      path.startsWith("b2_primary://") ||
+      path.startsWith("s3://")
+    ) {
+      return {
+        tier: "B2",
+        key: path
+          .replace(/^b2:\/\//, "")
+          .replace(/^b2[-_]primary:\/\//, "")
+          .replace(/^s3:\/\//, ""),
+      };
+    }
+    if (!path.includes("://")) {
+      return { tier: "B2", key: path.replace(/^\/+/, ""), isLegacy: true };
+    }
+    return null;
+  }
+
+  /* -------------------------------------------------------------------
+   * getSignedUrl — returns a presigned URL for the given storage path.
+   * ------------------------------------------------------------------- */
+
+  async getSignedUrl(path: string, expiresIn: number): Promise<string> {
+    const parsed = this.parsePath(path);
+    if (!parsed) {
+      throw new Error(`Unsupported storage provider for path: ${path}`);
+    }
+
+    if (parsed.tier === "SUPABASE") {
+      const { data, error } = await this.supabase.storage
+        .from("audio-files")
+        .createSignedUrl(parsed.key, expiresIn);
 
       if (error || !data?.signedUrl) {
         throw new Error(`Supabase presign failed: ${error?.message}`);
@@ -139,84 +207,56 @@ export class StorageRouter {
       return data.signedUrl;
     }
 
-    if (path.startsWith("b2-tertiary://")) {
-      const actualPath = path.replace("b2-tertiary://", "");
-      const command = new GetObjectCommand({
-        Bucket: Deno.env.get("B2_TERTIARY_BUCKET_NAME")!,
-        Key: actualPath,
-      });
-      // @ts-ignore: Deno npm specifier duplication causes S3Client type mismatch
-      return await getSignedUrl(getB2TertiaryClient(), command, { expiresIn });
+    if (!isTierConfigured(parsed.tier)) {
+      throw new Error(`Bucket tier "${parsed.tier}" is not configured`);
     }
 
-    if (path.startsWith("b2-secondary://")) {
-      const actualPath = path.replace("b2-secondary://", "");
-      const command = new GetObjectCommand({
-        Bucket: Deno.env.get("B2_SECONDARY_BUCKET_NAME")!,
-        Key: actualPath,
-      });
-      // @ts-ignore: Deno npm specifier duplication causes S3Client type mismatch
-      return await getSignedUrl(getB2SecondaryClient(), command, { expiresIn });
-    }
-
-    if (path.startsWith("b2-quinta://")) {
-      const actualPath = path.replace("b2-quinta://", "");
-      const command = new GetObjectCommand({
-        Bucket: Deno.env.get("B2_QUINTA_BUCKET_NAME")!,
-        Key: actualPath,
-      });
-      // @ts-ignore: Deno npm specifier duplication causes S3Client type mismatch
-      return await getSignedUrl(getB2QuintaClient(), command, { expiresIn });
-    }
-
-    if (
-      path.startsWith("b2://") || path.startsWith("b2-primary://") ||
-      path.startsWith("s3://") || !path.includes("://")
-    ) {
-      const actualPath = path.replace("b2://", "").replace("b2-primary://", "")
-        .replace("s3://", "");
-      const command = new GetObjectCommand({
-        Bucket: Deno.env.get("B2_BUCKET_NAME")!,
-        Key: actualPath,
-      });
-      // @ts-ignore: Deno npm specifier duplication causes S3Client type mismatch
-      return await getSignedUrl(getB2PrimaryClient(), command, { expiresIn });
-    }
-
-    throw new Error(`Unsupported storage provider for path: ${path}`);
+    const client = getB2Client(parsed.tier);
+    const command = new GetObjectCommand({
+      Bucket: getConfig(parsed.tier).bucketName,
+      Key: parsed.key,
+    });
+    // @ts-ignore
+    return await getSignedUrl(client, command, { expiresIn });
   }
 
-  /**
-   * Resolves a legacy bare filesystem path (e.g. "/audiobooks/Title/file.mp3")
-   * by probing all four storage backends under the canonical key pattern:
-   *   {itemId}/{filename}
-   *
-   * Probe order: b2-tertiary → b2-secondary → b2-quinta → b2-primary → supabase
-   * (most new uploads go to b2-tertiary, so check that first)
-   *
-   * Returns the signed URL and canonical path of whichever backend has the file,
-   * or throws if none of them do.
-   */
+  /* -------------------------------------------------------------------
+   * resolveAndSign — resolves a legacy path or un-schemed path by probing
+   * all candidate keys across all B2 backends and Supabase Storage.
+   * ------------------------------------------------------------------- */
+
   async resolveAndSign(
     legacyPath: string,
     itemId: string,
     expiresIn: number,
   ): Promise<ResolvedStoragePath> {
-    // Extract just the filename from the legacy path
     const filename = legacyPath.split("/").pop()!;
-    return await this.probeKey(`${itemId}/${filename}`, expiresIn);
+    const cleanLegacy = legacyPath.replace(/^\/+/, "");
+    const candidates = [
+      `${itemId}/${filename}`,
+      cleanLegacy,
+      `audiobooks/${cleanLegacy}`,
+      cleanLegacy.replace(/^audiobooks\//, ""),
+      filename,
+    ].filter(Boolean);
+
+    const uniqueCandidates = Array.from(new Set(candidates));
+    const resolved = await this.signFirstExisting(uniqueCandidates, expiresIn);
+    if (resolved) {
+      return resolved;
+    }
+
+    throw new Error(
+      `File not found in any storage backend for legacy path "${legacyPath}" (itemId: ${itemId})`,
+    );
   }
 
-  /**
-   * Signs the first key that actually exists, probing each candidate across
-   * all backends in tier order. Returns null when no candidate exists anywhere.
-   *
-   * Used by playback self-heal: presigned URLs for recorded paths are minted
-   * without contacting storage, so a stale/mis-recorded path produces a URL
-   * that 404s at fetch time (the "black screen" book failure mode). When the
-   * recorded path is dead, the file often lives under a sibling prefix
-   * (client upload bookId ≠ library item id) or in a different tier.
-   */
+  /* -------------------------------------------------------------------
+   * signFirstExisting — signs the first key that actually exists, probing
+   * each candidate across all backends in tier order. Returns null when no
+   * candidate exists anywhere.
+   * ------------------------------------------------------------------- */
+
   async signFirstExisting(
     keys: string[],
     expiresIn: number,
@@ -231,201 +271,127 @@ export class StorageRouter {
     return null;
   }
 
-  /** HEAD-probes one canonical key across every backend, signing on first hit. */
+  /* -------------------------------------------------------------------
+   * probeKey — HEAD-probes one canonical key across every backend, signing on
+   * first hit. Probe order:
+   *   1. b2-tertiary
+   *   2. b2-secondary
+   *   3. b2-quartet
+   *   4. b2-quinta
+   *   5. b2-primary
+   *   6. Supabase Storage
+   * ------------------------------------------------------------------- */
+
   private async probeKey(
     key: string,
     expiresIn: number,
   ): Promise<ResolvedStoragePath> {
-    // 1. Try b2-tertiary (only when configured; unset envs must not throw)
-    if (b2TertiaryConfigured()) {
-      try {
-        await getB2TertiaryClient().send(
-          new HeadObjectCommand({
-            Bucket: Deno.env.get("B2_TERTIARY_BUCKET_NAME")!,
-            Key: key,
-          }),
-        );
-        const command = new GetObjectCommand({
-          Bucket: Deno.env.get("B2_TERTIARY_BUCKET_NAME")!,
-          Key: key,
-        });
-        // @ts-ignore: Deno npm specifier duplication causes S3Client type mismatch
-        const signedUrl = await getSignedUrl(getB2TertiaryClient(), command, {
-          expiresIn,
-        });
-        return { signedUrl, canonicalPath: `b2-tertiary://${key}` };
-      } catch {
-        // not in b2-tertiary
+    const cleanKey = key.replace(/^\/+/, "");
+
+    const b2Tiers: BucketTier[] = [
+      "B2_TERTIARY",
+      "B2_SECONDARY",
+      "B2_QUARTET",
+      "B2_QUINTET",
+      "B2",
+    ];
+
+    for (const tier of b2Tiers) {
+      if (isTierConfigured(tier)) {
+        try {
+          const client = getB2Client(tier);
+          const bucketName = getConfig(tier).bucketName;
+          await client.send(
+            new HeadObjectCommand({
+              Bucket: bucketName,
+              Key: cleanKey,
+            }),
+          );
+          const command = new GetObjectCommand({
+            Bucket: bucketName,
+            Key: cleanKey,
+          });
+          // @ts-ignore
+          const signedUrl = await getSignedUrl(client, command, {
+            expiresIn,
+          });
+          return {
+            signedUrl,
+            canonicalPath: `${tierToPrefix(tier)}${cleanKey}`,
+          };
+        } catch {
+          // not in this tier — continue to next tier
+        }
       }
     }
 
-    // 2. Try b2-secondary
+    // Try Supabase Storage — last resort
     try {
-      await getB2SecondaryClient().send(
-        new HeadObjectCommand({
-          Bucket: Deno.env.get("B2_SECONDARY_BUCKET_NAME")!,
-          Key: key,
-        }),
-      );
-      const command = new GetObjectCommand({
-        Bucket: Deno.env.get("B2_SECONDARY_BUCKET_NAME")!,
-        Key: key,
-      });
-      // @ts-ignore: Deno npm specifier duplication causes S3Client type mismatch
-      const signedUrl = await getSignedUrl(getB2SecondaryClient(), command, {
-        expiresIn,
-      });
-      return { signedUrl, canonicalPath: `b2-secondary://${key}` };
-    } catch {
-      // not in b2-secondary
-    }
-
-    // 3. Try b2-quinta
-    if (b2QuintaConfigured()) {
-      try {
-        await getB2QuintaClient().send(
-          new HeadObjectCommand({
-            Bucket: Deno.env.get("B2_QUINTA_BUCKET_NAME")!,
-            Key: key,
-          }),
-        );
-        const command = new GetObjectCommand({
-          Bucket: Deno.env.get("B2_QUINTA_BUCKET_NAME")!,
-          Key: key,
-        });
-        // @ts-ignore: Deno npm specifier duplication causes S3Client type mismatch
-        const signedUrl = await getSignedUrl(getB2QuintaClient(), command, {
-          expiresIn,
-        });
-        return { signedUrl, canonicalPath: `b2-quinta://${key}` };
-      } catch {
-        // not in b2-quinta
-      }
-    }
-
-    // 4. Try b2-primary
-    try {
-      await getB2PrimaryClient().send(
-        new HeadObjectCommand({
-          Bucket: Deno.env.get("B2_BUCKET_NAME")!,
-          Key: key,
-        }),
-      );
-      const command = new GetObjectCommand({
-        Bucket: Deno.env.get("B2_BUCKET_NAME")!,
-        Key: key,
-      });
-      // @ts-ignore: Deno npm specifier duplication causes S3Client type mismatch
-      const signedUrl = await getSignedUrl(getB2PrimaryClient(), command, {
-        expiresIn,
-      });
-      return { signedUrl, canonicalPath: `b2://${key}` };
-    } catch {
-      // not in b2-primary
-    }
-
-    // 4. Try Supabase Storage
-    const folder = key.split("/").slice(0, -1).join("/");
-    const filename = key.split("/").pop()!;
-    const { data: listed } = await this.supabase.storage
-      .from("audio-files")
-      .list(folder, { search: filename });
-
-    if (listed && listed.some((f: any) => f.name === filename)) {
-      const supabasePath = key;
-      const { data, error } = await this.supabase.storage
+      const folder = cleanKey.split("/").slice(0, -1).join("/");
+      const filename = cleanKey.split("/").pop()!;
+      const { data: listed, error: listErr } = await this.supabase.storage
         .from("audio-files")
-        .createSignedUrl(supabasePath, expiresIn);
+        .list(folder, { search: filename });
 
-      if (!error && data?.signedUrl) {
-        return {
-          signedUrl: data.signedUrl,
-          canonicalPath: `supabase://${supabasePath}`,
-        };
+      if (!listErr && listed && listed.some((f: any) => f.name === filename)) {
+        const { data, error } = await this.supabase.storage
+          .from("audio-files")
+          .createSignedUrl(cleanKey, expiresIn);
+
+        if (!error && data?.signedUrl) {
+          return {
+            signedUrl: data.signedUrl,
+            canonicalPath: `supabase://${cleanKey}`,
+          };
+        }
       }
+    } catch {
+      // Supabase storage check failed
     }
 
     throw new Error(
-      `File not found in any storage backend for key "${key}"`,
+      `File not found in any storage backend for key "${cleanKey}"`,
     );
   }
 
+  /* -------------------------------------------------------------------------
+   * fileExists — checks if a file exists at the given path.
+   * ------------------------------------------------------------------------- */
+
   async fileExists(path: string): Promise<boolean> {
-    if (path.startsWith("supabase://")) {
-      const actualPath = path.replace("supabase://", "");
-      const folder = actualPath.split("/").slice(0, -1).join("/");
-      const filename = actualPath.split("/").pop()!;
-      const { data } = await this.supabase.storage.from("audio-files").list(
-        folder,
-        { search: filename },
+    const parsed = this.parsePath(path);
+    if (!parsed) {
+      return false;
+    }
+
+    if (parsed.tier === "SUPABASE") {
+      try {
+        const folder = parsed.key.split("/").slice(0, -1).join("/");
+        const filename = parsed.key.split("/").pop()!;
+        const { data, error } = await this.supabase.storage
+          .from("audio-files")
+          .list(folder, { search: filename });
+        return !error && !!(data && data.some((f: any) => f.name === filename));
+      } catch {
+        return false;
+      }
+    }
+
+    if (!isTierConfigured(parsed.tier)) {
+      return false;
+    }
+
+    try {
+      const client = getB2Client(parsed.tier);
+      await client.send(
+        new HeadObjectCommand({
+          Bucket: getConfig(parsed.tier).bucketName,
+          Key: parsed.key,
+        }),
       );
-      return !!(data && data.length > 0 && data[0].name === filename);
+      return true;
+    } catch {
+      return false;
     }
-
-    if (path.startsWith("b2-tertiary://")) {
-      const actualPath = path.replace("b2-tertiary://", "");
-      try {
-        await getB2TertiaryClient().send(
-          new HeadObjectCommand({
-            Bucket: Deno.env.get("B2_TERTIARY_BUCKET_NAME")!,
-            Key: actualPath,
-          }),
-        );
-        return true;
-      } catch {
-        return false;
-      }
-    }
-
-    if (path.startsWith("b2-secondary://")) {
-      const actualPath = path.replace("b2-secondary://", "");
-      try {
-        await getB2SecondaryClient().send(
-          new HeadObjectCommand({
-            Bucket: Deno.env.get("B2_SECONDARY_BUCKET_NAME")!,
-            Key: actualPath,
-          }),
-        );
-        return true;
-      } catch {
-        return false;
-      }
-    }
-
-    if (path.startsWith("b2-quinta://")) {
-      const actualPath = path.replace("b2-quinta://", "");
-      try {
-        await getB2QuintaClient().send(
-          new HeadObjectCommand({
-            Bucket: Deno.env.get("B2_QUINTA_BUCKET_NAME")!,
-            Key: actualPath,
-          }),
-        );
-        return true;
-      } catch {
-        return false;
-      }
-    }
-
-    if (
-      path.startsWith("b2://") || path.startsWith("b2-primary://") ||
-      path.startsWith("s3://") || !path.includes("://")
-    ) {
-      const actualPath = path.replace("b2://", "").replace("b2-primary://", "")
-        .replace("s3://", "");
-      try {
-        await getB2PrimaryClient().send(
-          new HeadObjectCommand({
-            Bucket: Deno.env.get("B2_BUCKET_NAME")!,
-            Key: actualPath,
-          }),
-        );
-        return true;
-      } catch {
-        return false;
-      }
-    }
-
-    throw new Error(`Unsupported storage provider for path: ${path}`);
   }
 }

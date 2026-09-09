@@ -1,0 +1,33 @@
+name: storage-health
+
+on:
+  schedule:
+    - cron: "17 3 * * *" # daily 03:17 UTC
+  workflow_dispatch:
+
+jobs:
+  storage-health:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+      - name: Query storage quota
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_PROJECT_ID: iambzzclljayqdxkeepy
+        run: |
+          supabase link --project-ref "$SUPABASE_PROJECT_ID"
+          echo "=== storage_quota_snapshot ==="
+          supabase db query --linked "select * from storage_quota_snapshot() order by bucket_id" || true
+          echo "=== quota check (would fail if >1 GiB) ==="
+          supabase db query --linked "select public.check_storage_quota(0)" || {
+            echo "::warning::Storage over 1 GiB free quota – run scripts/migrate_supabase_audio_to_b2.ts --apply --prune or upgrade to Pro (100 GiB)"
+            echo "OVER_QUOTA=1" >> $GITHUB_ENV
+          }
+          if [ "${OVER_QUOTA:-0}" = "1" ]; then
+            echo "::error::Free plan 1 GiB exceeded – grace until 2026-09-29 then 402. Migrate audio-files (7.5 GB) to B2."
+            exit 1
+          fi
+          echo "Storage OK (<1 GiB)"
