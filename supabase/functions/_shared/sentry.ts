@@ -43,7 +43,7 @@ if (dsn) {
     // DENO_DEPLOYMENT_ID is the deployed function version — tags events so the
     // remediation pipeline can map a crash to the exact code that threw.
     release: Deno.env.get("DENO_DEPLOYMENT_ID") || undefined,
-    tracesSampleRate: 1.0,
+    tracesSampleRate: Deno.env.get("NODE_ENV") === "production" ? 0.1 : 1.0,
   });
 }
 
