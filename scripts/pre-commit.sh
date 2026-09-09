@@ -154,9 +154,24 @@ fi
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 echo "🔍 [12/13] Deno Lint & Format check..."
-# deno lint/fmt only accepts code files — skip when no TS/SQL files are staged
-if [ -n "$TS_FILES" ] || [ -n "$SQL_FILES" ]; then
-  deno lint --config supabase/functions/deno.json $TS_FILES && deno fmt --check --config supabase/functions/deno.json $TS_FILES $SQL_FILES
+# deno lint/fmt with --config only accepts files under the config root —
+# passing files outside it (e.g. scripts/) fails with "No target files
+# found" and would red-gate every commit touching those paths. Split staged
+# files by scope: in-scope files use the edge-functions config, out-of-scope
+# files use default config discovery (e.g. scripts/deno.json).
+TS_IN_SCOPE=$(echo "$TS_FILES" | tr ' ' '\n' | grep '^supabase/functions/' || true)
+TS_OUT_SCOPE=$(echo "$TS_FILES" | tr ' ' '\n' | grep -v '^supabase/functions/' || true)
+SQL_IN_SCOPE=$(echo "$SQL_FILES" | tr ' ' '\n' | grep '^supabase/functions/' || true)
+SQL_OUT_SCOPE=$(echo "$SQL_FILES" | tr ' ' '\n' | grep -v '^supabase/functions/' || true)
+if [ -n "$TS_IN_SCOPE" ] || [ -n "$SQL_IN_SCOPE" ]; then
+  deno lint --config supabase/functions/deno.json $TS_IN_SCOPE && deno fmt --check --config supabase/functions/deno.json $TS_IN_SCOPE $SQL_IN_SCOPE
+  if [ $? -ne 0 ]; then
+      echo "❌ Deno Lint/Fmt failed."
+      exit 1
+  fi
+fi
+if [ -n "$TS_OUT_SCOPE" ] || [ -n "$SQL_OUT_SCOPE" ]; then
+  deno lint $TS_OUT_SCOPE && deno fmt --check $TS_OUT_SCOPE $SQL_OUT_SCOPE
   if [ $? -ne 0 ]; then
       echo "❌ Deno Lint/Fmt failed."
       exit 1
