@@ -1,5 +1,7 @@
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.44.2";
+import { createClient } from "@supabase/supabase-js";
 import { fetchBookMetadata } from "./supabase/functions/_shared/coverFetch.ts";
+// Legacy pinned CDN side-effect import; predates the repo import maps.
+// deno-lint-ignore no-import-prefix
 import "https://deno.land/std@0.208.0/dotenv/load.ts";
 
 const supabaseUrl = Deno.env.get("SUPABASE_URL")!;

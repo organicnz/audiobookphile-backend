@@ -1,4 +1,4 @@
-import { HeadObjectCommand, S3Client } from "npm:@aws-sdk/client-s3@^3.693.0";
+import { HeadObjectCommand, S3Client } from "@aws-sdk/client-s3";
 const client = new S3Client({
   endpoint: Deno.env.get("B2_ENDPOINT")!,
   region: Deno.env.get("B2_REGION") || "us-west-004",
@@ -18,7 +18,9 @@ const cmd = new HeadObjectCommand({
 try {
   const res = await client.send(cmd);
   console.log("Success, ContentLength:", res.ContentLength);
-} catch (e: any) {
-  console.error("Error:", e.message);
-  console.error("Code:", e.name);
+} catch (e) {
+  const msg = e instanceof Error ? e.message : String(e);
+  const code = e instanceof Error ? e.name : "UnknownError";
+  console.error("Error:", msg);
+  console.error("Code:", code);
 }

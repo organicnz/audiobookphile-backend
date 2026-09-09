@@ -1,5 +1,5 @@
 // Supabase client for Deno environment
-import { createClient as supabaseCreate } from "npm:@supabase/supabase-js@2.44.0";
+import { createClient as supabaseCreate } from "@supabase/supabase-js";
 
 export function createClient() {
   const SUPABASE_URL = Deno.env.get("SUPABASE_URL");

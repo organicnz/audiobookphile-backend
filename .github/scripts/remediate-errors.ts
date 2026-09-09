@@ -335,10 +335,10 @@ function validateFix(): { output: string; ok: boolean } {
   return { output, ok: check.code === 0 && test.code === 0 };
 }
 
-async function hasOpenPrFor(
+function hasOpenPrFor(
   _issueId: string,
   shortId: string,
-): Promise<boolean> {
+): boolean {
   if (DRY_RUN || !REPO) return false;
   const list = exec([
     "gh",

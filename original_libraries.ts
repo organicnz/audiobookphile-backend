@@ -273,7 +273,7 @@ librariesRouter.get("/:id/filterdata", (c) => {
   return c.json(emptyFilterData);
 });
 
-librariesRouter.get("/:id/matchall", async (c) => {
+librariesRouter.get("/:id/matchall", (c) => {
   const supabase = c.get("supabase");
   const libraryId = c.req.param("id");
 
@@ -727,7 +727,7 @@ librariesRouter.get("/:id/personalized", async (c) => {
 
   type ProgressWithItem =
     & Database["public"]["Tables"]["media_progress"]["Row"]
-    & { library_items?: any };
+    & { library_items?: unknown };
 
   const continueItems =
     ((continueResult.data || []) as unknown as ProgressWithItem[])

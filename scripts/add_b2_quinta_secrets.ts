@@ -1,4 +1,4 @@
-import { createClient } from "npm:@supabase/supabase-js@2.44.0";
+import { createClient } from "@supabase/supabase-js";
 
 const supabase = createClient(
   Deno.env.get("SUPABASE_URL")!,
@@ -14,9 +14,10 @@ async function addToVault(secretKey: string, secretValue: string) {
     });
     console.log(`Vault ${secretKey}:`, error?.message || "success");
     return error?.message || "success";
-  } catch (e: any) {
-    console.error(`Vault ${secretKey}:`, e.message);
-    return e.message;
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error(`Vault ${secretKey}:`, msg);
+    return msg;
   }
 }
 

@@ -10,12 +10,30 @@
 //
 // Env: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, B2_* (see .env.local primary tier).
 
-import { createClient } from "npm:@supabase/supabase-js@2.44.0";
+import { createClient } from "@supabase/supabase-js";
 import {
   HeadObjectCommand,
   PutObjectCommand,
   S3Client,
-} from "npm:@aws-sdk/client-s3@^3.693.0";
+} from "@aws-sdk/client-s3";
+
+/** Storage rows returned by `storage.list` (subset of FileObject we use). */
+interface StorageListEntry {
+  id: string | null;
+  name: string;
+  metadata?: { size?: number } | null;
+}
+
+/** One row of the `library_items.audio_files` JSONB column. */
+interface AudioFileEntry {
+  metadata: {
+    path?: string;
+    filename?: string;
+    relPath?: string;
+    [key: string]: unknown;
+  };
+  [key: string]: unknown;
+}
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SVC = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -60,7 +78,7 @@ async function listSupabaseAudio(prefix?: string) {
         offset,
       });
       if (!data || data.length === 0) break;
-      for (const f of data as any[]) {
+      for (const f of data as StorageListEntry[]) {
         if (f.id !== null) {
           out.push({
             name: `${prefix}/${f.name}`,
@@ -75,7 +93,11 @@ async function listSupabaseAudio(prefix?: string) {
     const { data: top } = await db.storage.from("audio-files").list("", {
       limit: 1000,
     });
-    for (const p of (top || []).filter((x: any) => x.id === null && x.name)) {
+    for (
+      const p of (top || []).filter(
+        (x: StorageListEntry) => x.id === null && x.name,
+      )
+    ) {
       out.push(...await listSupabaseAudio(p.name));
     }
   }
@@ -110,7 +132,7 @@ for (const o of all) {
 }
 
 let migrated = 0, skipped = 0, failed = 0;
-let pruneCandidates: string[] = [];
+const pruneCandidates: string[] = [];
 
 for (const [folder, objs] of byFolder) {
   let folderHasB2 = 0; // count of objs that already have a B2 copy
@@ -194,7 +216,9 @@ for (const [folder, objs] of byFolder) {
     const { data: fresh } = await db.from("library_items").select(
       "audio_files, library_files, size",
     ).eq("id", folder).single();
-    let af: any[] = Array.isArray(fresh?.audio_files) ? fresh!.audio_files : [];
+    const af: AudioFileEntry[] = Array.isArray(fresh?.audio_files)
+      ? fresh!.audio_files
+      : [];
     let changed = false;
     for (const a of af) {
       const p = String(a?.metadata?.path ?? "");
@@ -216,7 +240,7 @@ for (const [folder, objs] of byFolder) {
     }
     if (changed) {
       const { error } = await db.from("library_items").update(
-        { audio_files: af } as any,
+        { audio_files: af },
       ).eq("id", folder);
       console.log(
         error

@@ -1,4 +1,4 @@
-import { PutObjectCommand, S3Client } from "npm:@aws-sdk/client-s3@^3.693.0";
+import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 const client = new S3Client({
   endpoint: Deno.env.get("B2_ENDPOINT")!,
   region: Deno.env.get("B2_REGION") || "us-west-004",
@@ -24,6 +24,8 @@ try {
     }),
   );
   console.log("Upload succeeded");
-} catch (e: any) {
-  console.error("Error:", e.message, e.name);
+} catch (e) {
+  const msg = e instanceof Error ? e.message : String(e);
+  const code = e instanceof Error ? e.name : "UnknownError";
+  console.error("Error:", msg, code);
 }

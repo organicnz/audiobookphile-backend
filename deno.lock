@@ -587,6 +587,10 @@
     "https://esm.sh/ws@8.21.0?target=denonext": "bbe46738716c3f43e77c16cd757403a4a9e8bcca1559f405c06fe59e5b6f3de5"
   },
   "workspace": {
+    "dependencies": [
+      "npm:@aws-sdk/client-s3@3",
+      "npm:@supabase/supabase-js@2.44.0"
+    ],
     "packageJson": {
       "dependencies": [
         "npm:@aws-sdk/client-s3@^3.1118.0",

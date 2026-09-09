@@ -1,4 +1,57 @@
 // ── Collections ───────────────────────────────────────────────────────────────
+
+/** Supabase row shapes for the legacy collection/playlist endpoints. */
+interface NestedLibraryItem {
+  id?: string;
+  cover_path?: string | null;
+  [key: string]: unknown;
+}
+
+interface NestedBook {
+  id?: string;
+  title?: string;
+  cover_path?: string | null;
+  duration?: number | string | null;
+  library_items?: NestedLibraryItem[] | NestedLibraryItem | null;
+  [key: string]: unknown;
+}
+
+interface CollectionBookRow {
+  books?: NestedBook | null;
+  book_id?: string;
+  order?: number;
+  [key: string]: unknown;
+}
+
+interface CollectionRow {
+  id?: string;
+  name?: string;
+  description?: string | null;
+  library_id?: string;
+  created_at?: string;
+  updated_at?: string | null;
+  collection_books?: CollectionBookRow[];
+  [key: string]: unknown;
+}
+
+interface PlaylistMediaRow {
+  books?: NestedBook | null;
+  media_item_id?: string;
+  order?: number;
+  [key: string]: unknown;
+}
+
+interface PlaylistRow {
+  id?: string;
+  name?: string;
+  description?: string | null;
+  library_id?: string;
+  user_id?: string;
+  created_at?: string;
+  updated_at?: string | null;
+  playlist_media_items?: PlaylistMediaRow[];
+  [key: string]: unknown;
+}
 librariesRouter.get("/:id/collections", async (c) => {
   const supabase = c.get("supabase");
   const libraryId = c.req.param("id");
@@ -22,8 +75,8 @@ librariesRouter.get("/:id/collections", async (c) => {
 
   if (error) return c.json({ error: error.message }, 500);
 
-  const results = (collectionRows || []).map((cObj: any) => {
-    const books = (cObj.collection_books || []).map((cb: any) => {
+  const results = (collectionRows || []).map((cObj: CollectionRow) => {
+    const books = (cObj.collection_books || []).map((cb: CollectionBookRow) => {
       const book = cb.books;
       const libraryItem = Array.isArray(book?.library_items)
         ? book.library_items[0]
@@ -43,15 +96,15 @@ librariesRouter.get("/:id/collections", async (c) => {
       };
     });
     // Sort books by order
-    books.sort((a: any, b: any) => a.order - b.order);
+    books.sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
 
     return {
       id: cObj.id,
       name: cObj.name,
       description: cObj.description || null,
       libraryId: cObj.library_id,
-      addedAt: new Date(cObj.created_at).getTime(),
-      updatedAt: new Date(cObj.updated_at || cObj.created_at).getTime(),
+      addedAt: new Date(cObj.created_at ?? "").getTime(),
+      updatedAt: new Date(cObj.updated_at ?? cObj.created_at ?? "").getTime(),
       books,
       numBooks: books.length,
     };
@@ -91,28 +144,30 @@ librariesRouter.get("/:id/playlists", async (c) => {
 
   if (error) return c.json({ error: error.message }, 500);
 
-  const results = (playlistRows || []).map((pObj: any) => {
-    const items = (pObj.playlist_media_items || []).map((pm: any) => {
-      const book = pm.books;
-      const libraryItem = Array.isArray(book?.library_items)
-        ? book.library_items[0]
-        : book?.library_items;
-      const itemId = libraryItem?.id || pm.media_item_id;
-      const coverPath = libraryItem?.cover_path || book?.cover_path || null;
-      return {
-        id: itemId,
-        order: pm.order,
-        title: book?.title || "",
-        cover: coverPath,
-        media: {
-          id: book?.id,
-          coverPath,
-          duration: Number(book?.duration) || undefined,
-        },
-      };
-    });
+  const results = (playlistRows || []).map((pObj: PlaylistRow) => {
+    const items = (pObj.playlist_media_items || []).map(
+      (pm: PlaylistMediaRow) => {
+        const book = pm.books;
+        const libraryItem = Array.isArray(book?.library_items)
+          ? book.library_items[0]
+          : book?.library_items;
+        const itemId = libraryItem?.id || pm.media_item_id;
+        const coverPath = libraryItem?.cover_path || book?.cover_path || null;
+        return {
+          id: itemId,
+          order: pm.order,
+          title: book?.title || "",
+          cover: coverPath,
+          media: {
+            id: book?.id,
+            coverPath,
+            duration: Number(book?.duration) || undefined,
+          },
+        };
+      },
+    );
     // Sort items by order
-    items.sort((a: any, b: any) => a.order - b.order);
+    items.sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
 
     return {
       id: pObj.id,
@@ -120,8 +175,8 @@ librariesRouter.get("/:id/playlists", async (c) => {
       description: pObj.description || null,
       libraryId: pObj.library_id,
       userId: pObj.user_id,
-      addedAt: new Date(pObj.created_at).getTime(),
-      updatedAt: new Date(pObj.updated_at || pObj.created_at).getTime(),
+      addedAt: new Date(pObj.created_at ?? "").getTime(),
+      updatedAt: new Date(pObj.updated_at ?? pObj.created_at ?? "").getTime(),
       items,
     };
   });

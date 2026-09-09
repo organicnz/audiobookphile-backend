@@ -8,7 +8,8 @@
 // Env: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, ZAI_API_KEY.
 // Exit 0 when every cover matches (or was repaired to match); 1 otherwise.
 
-import { createClient } from "npm:@supabase/supabase-js@2.44.0";
+import { createClient } from "@supabase/supabase-js";
+import type { SupabaseClient } from "@supabase/supabase-js";
 // @ts-ignore - path aliasing handled by deno.json import map at repo root
 
 const URL_BASE = Deno.env.get("SUPABASE_URL") ?? "";
@@ -145,9 +146,8 @@ async function collectCandidates(
 }
 
 /** Vision-arbitrated repair: only upload art the model confirms matches. */
-// deno-lint-ignore no-explicit-any
 async function visionRepair(
-  db: any,
+  db: SupabaseClient,
   itemId: string,
   title: string,
   author: string,

@@ -18,7 +18,7 @@
  *
  * For key rotation (a separate concern), see scripts/ROTATE_B2_KEYS.md.
  */
-import { PutBucketCorsCommand, S3Client } from "npm:@aws-sdk/client-s3@^3.0.0";
+import { PutBucketCorsCommand, S3Client } from "@aws-sdk/client-s3";
 
 const CORS_RULES = [
   {
