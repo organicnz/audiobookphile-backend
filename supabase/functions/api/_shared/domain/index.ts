@@ -19,11 +19,12 @@ export type {
   CheckExistingResult,
   ItemStatus,
   MediaType,
+} from "./items.ts";
+
+export type {
   SearchHistoryItem,
   SearchIntent,
   SearchResultItem,
   SmartSearchParams,
   SmartSearchResult,
-} from "./items.ts";
-
-export type {} from "./search.ts";
+} from "./search.ts";

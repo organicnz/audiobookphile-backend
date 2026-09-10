@@ -37,13 +37,18 @@ export function sanitizeString(input: string): string {
 
 /**
  * Create a sanitized string schema with max length validation.
+ * The optional pattern is checked BEFORE sanitization (ZodEffects from
+ * `.transform()` exposes no string checks, so regex must come first).
  */
-export function sanitizedString(maxLength: number, minLength = 1): z.ZodString {
-  return z
-    .string()
-    .min(minLength)
-    .max(maxLength)
-    .transform((val) => sanitizeString(val));
+export function sanitizedString(
+  maxLength: number,
+  minLength = 1,
+  pattern?: RegExp,
+  patternMessage?: string,
+): z.ZodEffects<z.ZodString, string, string> {
+  const base = z.string().min(minLength).max(maxLength);
+  const checked = pattern ? base.regex(pattern, patternMessage) : base;
+  return checked.transform((val) => sanitizeString(val));
 }
 
 /**
@@ -51,11 +56,12 @@ export function sanitizedString(maxLength: number, minLength = 1): z.ZodString {
  */
 export const CommonSchemas = {
   // Auth
-  username: sanitizedString(MAX_LENGTHS.USERNAME)
-    .regex(
-      /^[\w-]+$/,
-      "Username can only contain letters, numbers, hyphens, and underscores",
-    ),
+  username: sanitizedString(
+    MAX_LENGTHS.USERNAME,
+    1,
+    /^[\w-]+$/,
+    "Username can only contain letters, numbers, hyphens, and underscores",
+  ),
 
   email: z.string().email().max(MAX_LENGTHS.EMAIL).transform(sanitizeString),
 
