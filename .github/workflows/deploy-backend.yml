@@ -364,7 +364,6 @@ jobs:
           # Edge functions tag events with DENO_DEPLOYMENT_ID at runtime;
           # the SHA release with associated commits powers suspect-commits
           # (issue → PR/author linking) for the remediation pipeline.
-          release: backend-${{ github.sha }}
           version: backend-${{ github.sha }}
           set_commits: auto
           ignore_missing: true
