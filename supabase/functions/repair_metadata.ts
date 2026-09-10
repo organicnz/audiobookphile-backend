@@ -24,6 +24,7 @@
 //   result, so a refetch can only store art for a plausibly-same work.
 
 import { createClient } from "npm:@supabase/supabase-js@2.44.0";
+import { Sentry } from "./_shared/sentry.ts";
 import {
   significantTokens,
   titlesLikelySameWork,
@@ -383,4 +384,13 @@ async function main() {
   console.log(`\n✅ applied ${repairs.length} repairs`);
 }
 
-main();
+main().catch(async (err) => {
+  console.error(
+    "❌ Fatal error:",
+    err instanceof Error ? err.message : String(err),
+  );
+  // No-op when Sentry is not configured; flushed before exit otherwise.
+  Sentry.captureException(err);
+  await Sentry.flush(2000);
+  Deno.exit(1);
+});
