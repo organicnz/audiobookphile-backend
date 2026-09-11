@@ -19,6 +19,7 @@ import {
   SEARCH_MATCH_THRESHOLD,
 } from "../_shared/constants.ts";
 import { getErrorMessage } from "../_shared/errors.ts";
+import { sanitizeString } from "../_shared/validation.ts";
 
 export const itemsRouter = createOpenApiRouter();
 
@@ -363,7 +364,13 @@ const syncInsightsRoute = {
 
 itemsRouter.openapi(checkExistingRoute, async (c) => {
   const supabase = c.get("supabase");
-  const { title, author, libraryId, mediaType } = c.req.valid("query");
+  const validated = c.req.valid("query");
+  // Sanitize user-controlled match inputs (XSS/control-char hardening from
+  // the shared validation module). The OpenAPI route schema above stays the
+  // contract: empty title/author remain valid for author-only lookups.
+  const title = sanitizeString(validated.title);
+  const author = sanitizeString(validated.author);
+  const { libraryId, mediaType } = validated;
 
   // Normalise helper — strips punctuation/spaces for fuzzy comparison
   const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");

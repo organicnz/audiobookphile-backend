@@ -341,6 +341,48 @@ jobs:
             "checkout=${{ steps.checkout.outcome }};cli=${{ steps.cli.outcome }};repair=${{ steps.repair.outcome }};migrations=${{ steps.migrations.outcome }};config=${{ steps.config.outcome }};email=${{ steps.email.outcome }};signing=${{ steps.signing.outcome }};vault=${{ steps.vault.outcome }};secrets=${{ steps.secrets.outcome }}"
           supabase functions deploy api --project-ref $SUPABASE_PROJECT_ID --no-verify-jwt
 
+  sentry-release:
+    name: Sentry Release (Backend)
+    needs: deploy
+    runs-on: [self-hosted, macOS]
+    steps:
+      - name: Checkout Repository
+        id: checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Check Sentry secrets
+        id: secrets
+        run: |
+          if [ -z "${{ secrets.SENTRY_AUTH_TOKEN }}" ]; then
+            echo "SENTRY_AUTH_TOKEN not configured — skipping Sentry release."
+            echo "To enable issue-to-PR linking for the remediation pipeline,"
+            echo "add secrets.SENTRY_AUTH_TOKEN (scopes: project:read,"
+            echo "project:write, project:releases, org:read)."
+            echo "available=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create Sentry Release
+        id: release
+        if: steps.secrets.outputs.available == 'true'
+        uses: getsentry/action-release@v1
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG: ${{ secrets.SENTRY_ORG || 'organicnz' }}
+          SENTRY_PROJECT: ${{ secrets.SENTRY_PROJECT || 'audiobookphile' }}
+        with:
+          environment: ${{ github.ref_name }}
+          # Edge functions tag events with DENO_DEPLOYMENT_ID at runtime;
+          # the SHA release with associated commits powers suspect-commits
+          # (issue → PR/author linking) for the remediation pipeline.
+          version: backend-${{ github.sha }}
+          set_commits: auto
+          ignore_missing: true
+          ignore_empty: true
+
   post-deploy-verify:
     name: Post-Deploy Verification (Smoke & Schemathesis)
     needs: deploy

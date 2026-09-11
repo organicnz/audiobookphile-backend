@@ -1,4 +1,5 @@
 import { createOpenApiRouter, z } from "../_shared/openapi.ts";
+import { sanitizeString } from "../_shared/validation.ts";
 import { ZAI_CHAT_MODEL } from "../../_shared/zai.ts";
 
 /**
@@ -192,7 +193,7 @@ searchRouter.openapi(createHistoryRoute, async (c) => {
   if (!parsed.success) {
     return c.json({ error: parsed.error.flatten().fieldErrors }, 400);
   }
-  const query = parsed.data.query;
+  const query = sanitizeString(parsed.data.query);
 
   // Delete any existing exact same query to avoid duplicates and move it to top
   await supabase.from("search_history").delete().eq("user_id", user.id).eq(
@@ -255,7 +256,7 @@ async function handleSmartSearch(c: Context<{ Variables: Variables }>) {
     return c.json({ error: parsed.error.flatten().fieldErrors }, 400);
   }
 
-  const queryText = parsed.data.query || "";
+  const queryText = sanitizeString(parsed.data.query || "");
   const libraryId = parsed.data.libraryId || "";
 
   if (!queryText) {
@@ -351,7 +352,7 @@ async function handleGenerateEmbedding(c: Context<{ Variables: Variables }>) {
     return c.json({ error: parsed.error.flatten().fieldErrors }, 400);
   }
 
-  const text = parsed.data.text || parsed.data.input || "";
+  const text = sanitizeString(parsed.data.text || parsed.data.input || "");
   if (!text) {
     return c.json({ error: "Text or input is required" }, 400);
   }
