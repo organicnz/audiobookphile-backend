@@ -33,10 +33,10 @@ jobs:
         env:
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
           SENTRY_ORG: organicnz
+          SENTRY_PROJECT: audiobookphile-backend
         with:
           environment: ${{ github.ref_name }}
           version: ${{ github.sha }}
-          project: audiobookphile-backend
           set_commits: auto
           ignore_missing: true
           ignore_empty: true
