@@ -30,6 +30,7 @@ import { adminRouter } from "./routes/admin.ts";
 import { twoFactorRouter } from "./routes/twoFactor.ts";
 import { webauthnRouter } from "./routes/webauthn.ts";
 import { aiRouter } from "./aiService.ts";
+import { sentryRouter } from "./routes/sentry.ts";
 
 import { Variables } from "./_shared/types.ts";
 import { ApiError, serviceRoleMiddleware } from "./_shared/errors.ts";
@@ -190,6 +191,20 @@ const healthHandler = async (c: Context<{ Variables: Variables }>) => {
     for (const table of tables) tableStatus[table] = "unconfigured";
   }
 
+  // Sentry health check
+  const sentryClient = Sentry.getClient();
+  const sentryHealthy = Boolean(sentryClient);
+
+  // Optionally send a test event if requested via query param
+  let sentryTestEvent: string | undefined;
+  if (c.req.query("sentry_test") === "true" && sentryHealthy) {
+    try {
+      sentryTestEvent = Sentry.captureMessage("Sentry health check", "debug");
+    } catch (err) {
+      console.error("[Health] Sentry test event failed:", err);
+    }
+  }
+
   const payload: Record<string, unknown> = {
     status: "ok",
     timestamp: new Date().toISOString(),
@@ -197,9 +212,14 @@ const healthHandler = async (c: Context<{ Variables: Variables }>) => {
     services: {
       database: url && serviceRoleKey ? "connected" : "unconfigured",
       zai: zaiConfigured ? "configured" : "unconfigured",
+      sentry: sentryHealthy ? "configured" : "unconfigured",
     },
     tables: tableStatus,
   };
+
+  if (sentryTestEvent) {
+    payload.sentryTestEvent = sentryTestEvent;
+  }
 
   // Contract shape checks (P1.3). The nested /api/health check sends
   // x-contract-check so it does not recurse into itself.
@@ -379,6 +399,8 @@ mountRouter("/api/me/bookmarks", bookmarksRouter);
 mountRouter("/api/me/search", searchRouter);
 mountRouter("/api/search", searchRouter);
 mountRouter("/api", searchRouter);
+// Sentry monitoring and health check endpoints (no auth required)
+mountRouter("/api/sentry", sentryRouter);
 mountRouter("/api/me", meRouter);
 mountRouter("/api/admin/analytics", adminRouter);
 mountRouter("/api/admin-analytics", adminRouter);

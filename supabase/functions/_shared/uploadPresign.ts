@@ -83,7 +83,7 @@ export async function presignUpload(
   });
 
   try {
-    const url = await getSignedUrl(client, command, {
+    const url = await getSignedUrl(client as any, command as any, {
       expiresIn: 3600,
     });
 
@@ -125,7 +125,7 @@ export async function presignUpload(
           ContentType: contentType || "application/octet-stream",
         });
 
-        const url = await getSignedUrl(fallbackClient, command, {
+        const url = await getSignedUrl(fallbackClient as any, command as any, {
           expiresIn: 3600,
         });
 

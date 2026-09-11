@@ -11,10 +11,17 @@ function resolveSecretKey(): string | undefined {
     try {
       const parsed = JSON.parse(keys) as Record<string, string>;
       if (parsed.default) return parsed.default;
-    } catch {
-      // malformed JSON — fall through to vault-less init below
+      console.warn(
+        "[Sentry] SUPABASE_SECRET_KEYS parsed but no 'default' key found",
+      );
+    } catch (err) {
+      console.error(
+        "[Sentry] Failed to parse SUPABASE_SECRET_KEYS:",
+        err instanceof Error ? err.message : String(err),
+      );
     }
   }
+  console.warn("[Sentry] No service role key found in environment");
   return undefined;
 }
 
@@ -25,26 +32,67 @@ function resolveSecretKey(): string | undefined {
 async function readVaultSecret(name: string): Promise<string | null> {
   const url = Deno.env.get("SUPABASE_URL");
   const key = resolveSecretKey();
-  if (!url || !key) return null;
-  const supabase = createClient(url, key);
-  const { data, error } = await supabase.rpc("read_secret", { p_name: name });
-  if (error) throw error;
-  return (data as string | null) ?? null;
+  if (!url || !key) {
+    console.warn(
+      `[Sentry] Cannot read vault secret '${name}': missing SUPABASE_URL or service key`,
+    );
+    return null;
+  }
+
+  try {
+    const supabase = createClient(url, key);
+    const { data, error } = await supabase.rpc("read_secret", { p_name: name });
+    if (error) {
+      console.error(`[Sentry] Vault RPC error for '${name}':`, error.message);
+      return null;
+    }
+    if (!data) {
+      console.warn(`[Sentry] No vault secret found for '${name}'`);
+      return null;
+    }
+    return (data as string) ?? null;
+  } catch (err) {
+    console.error(
+      `[Sentry] Failed to read vault secret '${name}':`,
+      err instanceof Error ? err.message : String(err),
+    );
+    return null;
+  }
 }
 
 // SENTRY_DSN: env var wins (local dev via config.toml), otherwise Vault.
-const dsn = Deno.env.get("SENTRY_DSN") ??
-  await readVaultSecret("SENTRY_DSN").catch(() => null);
+let dsn: string | undefined | null = Deno.env.get("SENTRY_DSN");
+
+if (!dsn) {
+  dsn = await readVaultSecret("SENTRY_DSN");
+  if (dsn) {
+    console.info("[Sentry] DSN loaded from Vault");
+  } else {
+    console.warn(
+      "[Sentry] No DSN found in environment or Vault - Sentry disabled",
+    );
+  }
+} else {
+  console.info("[Sentry] DSN loaded from environment variable");
+}
 
 if (dsn) {
-  Sentry.init({
-    dsn,
-    environment: Deno.env.get("NODE_ENV") || "development",
-    // DENO_DEPLOYMENT_ID is the deployed function version — tags events so the
-    // remediation pipeline can map a crash to the exact code that threw.
-    release: Deno.env.get("DENO_DEPLOYMENT_ID") || undefined,
-    tracesSampleRate: Deno.env.get("NODE_ENV") === "production" ? 0.1 : 1.0,
-  });
+  try {
+    Sentry.init({
+      dsn,
+      environment: Deno.env.get("NODE_ENV") || "development",
+      // DENO_DEPLOYMENT_ID is the deployed function version — tags events so the
+      // remediation pipeline can map a crash to the exact code that threw.
+      release: Deno.env.get("DENO_DEPLOYMENT_ID") || undefined,
+      tracesSampleRate: Deno.env.get("NODE_ENV") === "production" ? 0.1 : 1.0,
+    });
+    console.info("[Sentry] Initialized successfully");
+  } catch (err) {
+    console.error(
+      "[Sentry] Initialization failed:",
+      err instanceof Error ? err.message : String(err),
+    );
+  }
 }
 
 /**

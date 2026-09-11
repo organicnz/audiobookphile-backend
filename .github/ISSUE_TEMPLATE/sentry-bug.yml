@@ -1,0 +1,65 @@
+name: "🐛 Sentry Bug Report"
+description: "Report a bug detected by Sentry error monitoring"
+labels: ["bug", "sentry", "auto-generated"]
+assignees: ["organicnz"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This issue was created from a Sentry error event. Please fill in the details below.
+  - type: input
+    id: sentry-issue-url
+    attributes:
+      label: Sentry Issue URL
+      description: Link to the Sentry issue
+      placeholder: "https://sentry.io/organizations/organicnz/issues/..."
+    validations:
+      required: true
+  - type: input
+    id: error-message
+    attributes:
+      label: Error Message
+      description: The error message from Sentry
+    validations:
+      required: true
+  - type: dropdown
+    id: severity
+    attributes:
+      label: Severity
+      options:
+        - Critical (app crash / data loss)
+        - High (feature broken)
+        - Medium (degraded experience)
+        - Low (cosmetic / minor)
+    validations:
+      required: true
+  - type: dropdown
+    id: component
+    attributes:
+      label: Affected Component
+      options:
+        - Edge Functions (API)
+        - Storage (B2/S3)
+        - Database (Supabase/Postgres)
+        - AI (ZAI/Metadata)
+        - Auth (JWT/2FA/WebAuthn)
+        - Playback (Sessions/Sync)
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: stack-trace
+    attributes:
+      label: Stack Trace
+      description: Paste the relevant stack trace from Sentry
+      render: shell
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to Reproduce
+      description: If known, describe how to reproduce the error
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional Context
+      description: Any additional context (user impact, frequency, related PRs)
