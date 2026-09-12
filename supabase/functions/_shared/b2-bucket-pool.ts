@@ -71,15 +71,15 @@ class BucketHealthTracker {
   }
 
   /* Record a failed operation to a bucket tier */
-  recordError(tier: BucketTier, latency: number) {
+  recordError(tier: BucketTier, latency: number, isFatal: boolean = false) {
     /* Type-safe */
     const entry = this.health.get(tier)!;
     entry.lastError = Date.now();
     entry.errorCount++;
     /* Update moving average latency */
     entry.avgLatency = entry.avgLatency * 0.9 + latency * 0.1;
-    /* Mark unhealthy if too many errors */
-    entry.isHealthy = entry.errorCount < 5;
+    /* Mark unhealthy if fatal (healthcheck failure) or too many errors */
+    entry.isHealthy = !isFatal && entry.errorCount < 3;
   }
 
   /* Get health status for a specific tier */
@@ -109,57 +109,65 @@ export const bucketHealth = new BucketHealthTracker();
  * ------------------------------------------------------------------------- */
 
 export function selectBucket(
-  _preferredTier: "B2" = "B2",
+  preferredTier?: BucketTier,
   forceFallover: boolean = false,
 ): { tier: BucketTier; config: BucketConfig; health: BucketHealth } {
-  /* Get health status of all tiers — tier is BucketTier from the function signature */
   const allHealth = bucketHealth.getAllHealth();
 
-  /* If forceFallover is true, iterate chain but still respect health */
-  if (forceFallover) {
-    /* When force falling over, we still want the first healthy bucket */
-    for (const tier of BUCKET_Tiers) {
-      const health = allHealth.get(tier)!;
-      /* Skip unhealthy buckets; if all unhealthy, primary will be returned below */
-      if (!health.isHealthy) continue;
+  // 1. Resolve requested tier from argument or ACTIVE_B2_TIER environment variable
+  let requestedTier: BucketTier | undefined = preferredTier;
+  if (!requestedTier) {
+    const envTier = (Deno.env.get("ACTIVE_B2_TIER") || "").toUpperCase();
+    if (
+      envTier === "QUINTA" || envTier === "B2_QUINTA" ||
+      envTier === "B2_QUINTET"
+    ) {
+      requestedTier = "B2_QUINTET";
+    } else if (envTier === "TERTIARY" || envTier === "B2_TERTIARY") {
+      requestedTier = "B2_TERTIARY";
+    } else if (envTier === "SECONDARY" || envTier === "B2_SECONDARY") {
+      requestedTier = "B2_SECONDARY";
+    } else if (envTier === "QUARTET" || envTier === "B2_QUARTET") {
+      requestedTier = "B2_QUARTET";
+    } else if (envTier === "PRIMARY" || envTier === "B2") {
+      requestedTier = "B2";
     }
   }
 
-  /* Primary strategy: use primary if healthy and not forcing fallover */
-  if (!forceFallover) {
-    const primaryHealth = allHealth.get("B2")!;
-    if (primaryHealth.isHealthy) {
-      const config = getConfig("B2"); // use single config source — type-safe
-      /* Selected primary — log decision (suppressed in production to avoid log noise) */
-      // @ts-ignore — runtime logging, not type concern
-      // console.log(`Selecting primary B2 bucket (successes: ${primaryHealth.successCount}, errors: ${primaryHealth.errorCount})`);
-      return { tier: "B2", config, health: primaryHealth };
+  // If requested tier is explicitly set, configured, and healthy, prioritize it
+  if (!forceFallover && requestedTier && isTierConfigured(requestedTier)) {
+    const health = allHealth.get(requestedTier)!;
+    if (health?.isHealthy) {
+      return { tier: requestedTier, config: getConfig(requestedTier), health };
     }
   }
 
-  /* Fallback chain: secondary → tertiary → quartet → quinta */
-  const fallbackChain: BucketTier[] = [
-    "B2_SECONDARY",
-    "B2_TERTIARY",
-    "B2_QUARTET",
+  // Priority search chain: prioritize verified active tiers (QUINTET, TERTIARY) then remaining
+  const candidateChain: BucketTier[] = [
     "B2_QUINTET",
+    "B2_TERTIARY",
+    "B2",
+    "B2_SECONDARY",
+    "B2_QUARTET",
   ];
-  for (const tier of fallbackChain) {
-    const health = allHealth.get(tier)!;
-    if (health.isHealthy) {
-      const config = getConfig(tier); // use single config source
-      // @ts-ignore — runtime logging suppression
-      // console.log(`Falling back to ${tier} bucket (successes: ${health.successCount}, errors: ${health.errorCount})`);
-      return { tier, config, health };
+
+  for (const tier of candidateChain) {
+    if (!isTierConfigured(tier)) continue;
+    const health = allHealth.get(tier);
+    if (health?.isHealthy) {
+      return { tier, config: getConfig(tier), health };
     }
   }
 
-  /* If no bucket is healthy, return primary anyway (best effort) */
-  // @ts-ignore — runtime logging suppression
-  // console.warn("No healthy buckets available, using primary despite errors");
+  // If no bucket is marked healthy, fallback to first configured tier
+  for (const tier of candidateChain) {
+    if (isTierConfigured(tier)) {
+      return { tier, config: getConfig(tier), health: allHealth.get(tier)! };
+    }
+  }
+
   const primaryHealth = allHealth.get("B2")!;
-  const config = getConfig("B2"); // single config source
-  return { tier: "B2", config, health: primaryHealth };
+  return { tier: "B2", config: getConfig("B2"), health: primaryHealth };
 }
 
 /* -------------------------------------------------------------------------
@@ -251,7 +259,7 @@ export async function healthCheckBuckets(): Promise<
       results.set(tier, bucketHealth.getHealth(tier));
     } catch (error) {
       console.error(`Health check failed for ${tier}:`, error);
-      bucketHealth.recordError(tier, 0);
+      bucketHealth.recordError(tier, 0, true);
       results.set(tier, bucketHealth.getHealth(tier));
     }
   }

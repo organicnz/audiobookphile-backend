@@ -70,8 +70,8 @@ export async function presignUpload(
   await healthCheckBuckets();
 
   /* Select the best bucket using the pool strategy (health-aware).
-   * Default to primary (B2) unless configured otherwise. */
-  const { tier, config: _config, health } = selectBucket("B2");
+   * Uses ACTIVE_B2_TIER or first healthy tier in pool. */
+  const { tier, config: _config, health } = selectBucket();
 
   const client = getOrCreateClient(tier);
   const bucketName = getBucketName(tier);

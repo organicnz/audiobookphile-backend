@@ -47,36 +47,106 @@ const PRUNE = Deno.args.includes("--prune");
 const onlyIdx = Deno.args.indexOf("--only");
 const ONLY = onlyIdx >= 0 ? Deno.args[onlyIdx + 1] : null;
 
-// B2 client (primary tier mirrors import_missing_books.ts)
+const tierIdx = Deno.args.indexOf("--tier");
+const TARGET_TIER = tierIdx !== -1
+  ? Deno.args[tierIdx + 1].toUpperCase()
+  : "B2_QUINTET";
+
+// B2 client configuration
 function b2Client() {
-  const bucket = Deno.env.get("B2_BUCKET_NAME")!;
-  if (!bucket) throw new Error("B2_BUCKET_NAME missing");
+  const isQuinta = TARGET_TIER === "B2_QUINTET" || TARGET_TIER === "QUINTA";
+  const isTertiary = TARGET_TIER === "B2_TERTIARY" ||
+    TARGET_TIER === "TERTIARY";
+
+  let bucket = Deno.env.get("B2_QUINTA_BUCKET_NAME") ||
+    "audiobookphile-b2-quinta";
+  let keyId = Deno.env.get("B2_QUINTA_KEY_ID") || "004746c4cd161520000000001";
+  let appKey = Deno.env.get("B2_QUINTA_APP_KEY") ||
+    "K004Yf65aAz/9AfneyUY55Kai9FlNJE";
+  let endpoint = "https://s3.us-west-004.backblazeb2.com";
+  let region = "us-west-004";
+  let prefix = "b2-quinta://";
+
+  if (isTertiary) {
+    bucket = Deno.env.get("B2_TERTIARY_BUCKET_NAME") || "audiobooks-tertiary";
+    keyId = Deno.env.get("B2_TERTIARY_KEY_ID") || "00419494b11d7d50000000001";
+    appKey = Deno.env.get("B2_TERTIARY_APP_KEY") ||
+      "K0046AN59ZrZE65LITqR0j4cVfGrzek";
+    prefix = "b2-tertiary://";
+  } else if (!isQuinta) {
+    bucket = Deno.env.get("B2_BUCKET_NAME") || bucket;
+    keyId = Deno.env.get("B2_KEY_ID") || keyId;
+    appKey = Deno.env.get("B2_APP_KEY") || appKey;
+    endpoint = Deno.env.get("B2_ENDPOINT") || endpoint;
+    region = Deno.env.get("B2_REGION") || region;
+    prefix = "b2://";
+  }
+
   const client = new S3Client({
-    endpoint: Deno.env.get("B2_ENDPOINT")!,
-    region: Deno.env.get("B2_REGION") || "us-west-004",
+    endpoint,
+    region,
     credentials: {
-      accessKeyId: Deno.env.get("B2_KEY_ID")!,
-      secretAccessKey: Deno.env.get("B2_APP_KEY")!,
+      accessKeyId: keyId,
+      secretAccessKey: appKey,
     },
     forcePathStyle: true,
     // @ts-ignore — B2 does not support AWS checksum headers
     requestChecksumCalculation: "WHEN_REQUIRED",
     responseChecksumValidation: "WHEN_REQUIRED",
   });
-  return { client, bucket };
+  return { client, bucket, prefix };
 }
-const { client: b2, bucket: B2_BUCKET } = b2Client();
-const B2_PREFIX = "b2://";
+const { client: b2, bucket: B2_BUCKET, prefix: B2_PREFIX } = b2Client();
+
+const objectsFileIdx = Deno.args.indexOf("--objects-file");
+const OBJECTS_FILE = objectsFileIdx !== -1
+  ? Deno.args[objectsFileIdx + 1]
+  : null;
 
 async function listSupabaseAudio(prefix?: string) {
   const out: Array<{ name: string; size: number }> = [];
+
+  if (OBJECTS_FILE) {
+    try {
+      const content = await Deno.readTextFile(OBJECTS_FILE);
+      const parsed = JSON.parse(content);
+      const rows = Array.isArray(parsed) ? parsed : parsed.rows || [];
+      for (const r of rows) {
+        const name = r.name || r.Key;
+        const size = Number(
+          r.size || r.Size ||
+            (typeof r.metadata === "object" ? r.metadata?.size : 0) || 0,
+        );
+        if (name && (!prefix || name.startsWith(prefix))) {
+          out.push({ name, size });
+        }
+      }
+      return out;
+    } catch (err) {
+      console.warn(
+        `Could not read objects file ${OBJECTS_FILE}:`,
+        (err as Error).message,
+      );
+    }
+  }
+
   if (prefix) {
     let offset = 0;
     for (;;) {
-      const { data } = await db.storage.from("audio-files").list(prefix, {
-        limit: 1000,
-        offset,
-      });
+      const { data, error } = await db.storage.from("audio-files").list(
+        prefix,
+        {
+          limit: 1000,
+          offset,
+        },
+      );
+      if (error) {
+        console.warn(
+          `Storage API list error on prefix '${prefix}':`,
+          error.message,
+        );
+        break;
+      }
       if (!data || data.length === 0) break;
       for (const f of data as StorageListEntry[]) {
         if (f.id !== null) {
@@ -90,9 +160,30 @@ async function listSupabaseAudio(prefix?: string) {
       offset += 1000;
     }
   } else {
-    const { data: top } = await db.storage.from("audio-files").list("", {
+    const { data: top, error } = await db.storage.from("audio-files").list("", {
       limit: 1000,
     });
+    if (error) {
+      console.warn("Storage API list error:", error.message);
+      const errWithStatus = error as { status?: number };
+      if (
+        error.message?.includes("exceed_storage_size_quota") ||
+        errWithStatus.status === 402
+      ) {
+        console.error(
+          "\n❌ SUPABASE RESTRICTION DETECTED: HTTP 402 Payment Required",
+        );
+        console.error(
+          "Storage for this project is restricted due to 'exceed_storage_size_quota'.",
+        );
+        console.error(
+          "The project owner must temporarily remove spend caps in the Supabase Dashboard:",
+        );
+        console.error(
+          "👉 https://supabase.com/dashboard/project/iambzzclljayqdxkeepy/settings/billing\n",
+        );
+      }
+    }
     for (
       const p of (top || []).filter(
         (x: StorageListEntry) => x.id === null && x.name,

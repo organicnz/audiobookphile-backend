@@ -18,16 +18,29 @@
 import { BucketConfig, BucketTier } from "./b2-types.ts";
 
 /* -------------------------------------------------------------------------
- * Per-tier configuration loaded from Deno.env at module init time.
- * Frozen after init to prevent accidental mutation in production.
+ * Helper: ensure B2 endpoints use the S3-compatible API endpoint format.
+ * https://api.backblazeb2.com is Native B2 JSON, while AWS SDK requires
+ * https://s3.<region>.backblazeb2.com.
  * ------------------------------------------------------------------------- */
+function resolveS3Endpoint(
+  endpoint?: string,
+  region: string = "us-west-004",
+): string {
+  if (!endpoint || endpoint.includes("api.backblazeb2.com")) {
+    return `https://s3.${region}.backblazeb2.com`;
+  }
+  return endpoint;
+}
 
 const bucketConfigs: Record<BucketTier, BucketConfig> = {
   B2: {
     tier: "B2" as const,
     keyId: Deno.env.get("B2_KEY_ID")!,
     appKey: Deno.env.get("B2_APP_KEY")!,
-    endpoint: Deno.env.get("B2_ENDPOINT")!,
+    endpoint: resolveS3Endpoint(
+      Deno.env.get("B2_ENDPOINT"),
+      Deno.env.get("B2_REGION") || "us-west-004",
+    ),
     region: Deno.env.get("B2_REGION") || "us-west-004",
     bucketName: Deno.env.get("B2_BUCKET_NAME")!,
     isConfigured: !!Deno.env.get("B2_KEY_ID") &&
@@ -37,7 +50,10 @@ const bucketConfigs: Record<BucketTier, BucketConfig> = {
     tier: "B2_SECONDARY" as const,
     keyId: Deno.env.get("B2_SECONDARY_KEY_ID")!,
     appKey: Deno.env.get("B2_SECONDARY_APP_KEY")!,
-    endpoint: Deno.env.get("B2_SECONDARY_ENDPOINT")!,
+    endpoint: resolveS3Endpoint(
+      Deno.env.get("B2_SECONDARY_ENDPOINT"),
+      Deno.env.get("B2_SECONDARY_REGION") || "us-west-004",
+    ),
     region: Deno.env.get("B2_SECONDARY_REGION") || "us-west-004",
     bucketName: Deno.env.get("B2_SECONDARY_BUCKET_NAME")!,
     isConfigured: !!Deno.env.get("B2_SECONDARY_KEY_ID") &&
@@ -47,7 +63,10 @@ const bucketConfigs: Record<BucketTier, BucketConfig> = {
     tier: "B2_TERTIARY" as const,
     keyId: Deno.env.get("B2_TERTIARY_KEY_ID")!,
     appKey: Deno.env.get("B2_TERTIARY_APP_KEY")!,
-    endpoint: Deno.env.get("B2_TERTIARY_ENDPOINT")!,
+    endpoint: resolveS3Endpoint(
+      Deno.env.get("B2_TERTIARY_ENDPOINT"),
+      Deno.env.get("B2_TERTIARY_REGION") || "us-west-004",
+    ),
     region: Deno.env.get("B2_TERTIARY_REGION") || "us-west-004",
     bucketName: Deno.env.get("B2_TERTIARY_BUCKET_NAME")!,
     isConfigured: !!Deno.env.get("B2_TERTIARY_KEY_ID") &&
@@ -57,7 +76,10 @@ const bucketConfigs: Record<BucketTier, BucketConfig> = {
     tier: "B2_QUARTET" as const,
     keyId: Deno.env.get("B2_QUARTET_KEY_ID")!,
     appKey: Deno.env.get("B2_QUARTET_APP_KEY")!,
-    endpoint: Deno.env.get("B2_QUARTET_ENDPOINT")!,
+    endpoint: resolveS3Endpoint(
+      Deno.env.get("B2_QUARTET_ENDPOINT"),
+      Deno.env.get("B2_QUARTET_REGION") || "us-west-004",
+    ),
     region: Deno.env.get("B2_QUARTET_REGION") || "us-west-004",
     bucketName: Deno.env.get("B2_QUARTET_BUCKET_NAME")!,
     isConfigured: !!Deno.env.get("B2_QUARTET_KEY_ID") &&
@@ -67,7 +89,10 @@ const bucketConfigs: Record<BucketTier, BucketConfig> = {
     tier: "B2_QUINTET" as const,
     keyId: Deno.env.get("B2_QUINTA_KEY_ID")!,
     appKey: Deno.env.get("B2_QUINTA_APP_KEY")!,
-    endpoint: Deno.env.get("B2_QUINTA_ENDPOINT")!,
+    endpoint: resolveS3Endpoint(
+      Deno.env.get("B2_QUINTA_ENDPOINT"),
+      Deno.env.get("B2_QUINTA_REGION") || "us-west-004",
+    ),
     region: Deno.env.get("B2_QUINTA_REGION") || "us-west-004",
     bucketName: Deno.env.get("B2_QUINTA_BUCKET_NAME")!,
     isConfigured: !!Deno.env.get("B2_QUINTA_KEY_ID") &&
