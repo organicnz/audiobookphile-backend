@@ -7,8 +7,10 @@
 
 import { parseTitleAndAuthor } from "../../../_shared/titleAuthorParser.ts";
 import { titlesLikelySameWork } from "../../../_shared/titleMatch.ts";
-import { ZAI_CHAT_MODEL } from "../../../_shared/zai.ts";
-import type { SupabaseClient } from "npm:@supabase/supabase-js@2.44.0";
+import {
+  matchExistingBookWithZAI,
+  ZAI_CHAT_MODEL,
+} from "../../../_shared/zai.ts";
 
 /* =========================================================================
  * Title & Author Resolution
@@ -121,16 +123,17 @@ function normalizeTitle(s: string): string {
  * 1. Direct ID match (bookId / media_id).
  * 2. Exact title match (case-insensitive).
  * 3. Normalized title match (strips format tags, punctuation).
- * 4. Z.ai semantic match for fuzzy cases (when API key available).
+ * 4. Author + Title substring match.
+ * 5. Z.ai semantic match for fuzzy cases (when API key available).
  *
  * Returns the matched item's `id` or `null`.
  */
 export async function checkDuplicateBook(
-  supabase: SupabaseClient,
+  supabase: any,
   title: string,
-  _author: string,
+  author: string,
   libraryId: string,
-  _zaiApiKey: string,
+  zaiApiKey: string,
   bookId?: string,
 ): Promise<string | null> {
   let matchedId: string | null = null;
@@ -152,7 +155,7 @@ export async function checkDuplicateBook(
     }
   }
 
-  // 2-3. Title-based matching
+  // 2-5. Title & Author matching
   if (!matchedId && title) {
     const { data: allLibItems } = await supabase
       .from("library_items")
@@ -176,9 +179,75 @@ export async function checkDuplicateBook(
           matchedId = item.id;
           break;
         }
+        if (
+          normItemTitle && normTitle &&
+          normItemTitle.length >= 6 && normTitle.length >= 6 &&
+          (normItemTitle.startsWith(normTitle) ||
+            normTitle.startsWith(normItemTitle))
+        ) {
+          const itemAuthor = (item.author_names_first_last || "").toLowerCase()
+            .replace(/[^\p{L}\p{N}]/gu, "");
+          const uploadAuthor = (author || "").toLowerCase().replace(
+            /[^\p{L}\p{N}]/gu,
+            "",
+          );
+          if (
+            itemAuthor && uploadAuthor &&
+            (itemAuthor === uploadAuthor ||
+              itemAuthor.includes(uploadAuthor) ||
+              uploadAuthor.includes(itemAuthor))
+          ) {
+            matchedId = item.id;
+            break;
+          }
+        }
+      }
+
+      if (!matchedId && zaiApiKey) {
+        matchedId = await matchExistingBookWithZAI(
+          title,
+          author,
+          allLibItems,
+          zaiApiKey,
+        );
       }
     }
   }
 
   return matchedId;
+}
+
+/**
+ * Check for an existing duplicate book and return the hydrated item record.
+ */
+export async function findDuplicateBook(
+  supabase: any,
+  title: string,
+  author: string,
+  libraryId: string,
+  zaiApiKey: string,
+  bookId?: string,
+): Promise<any | null> {
+  const matchedId = await checkDuplicateBook(
+    supabase,
+    title,
+    author,
+    libraryId,
+    zaiApiKey,
+    bookId,
+  );
+
+  if (!matchedId) return null;
+
+  const { data: fullItem } = await supabase
+    .from("library_items")
+    .select(
+      "id, media_id, size, library_files, audio_files, duration, author_names_first_last, title",
+    )
+    .eq("id", matchedId)
+    .eq("library_id", libraryId)
+    .limit(1)
+    .maybeSingle();
+
+  return fullItem || null;
 }

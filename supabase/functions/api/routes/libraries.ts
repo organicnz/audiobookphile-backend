@@ -11,31 +11,13 @@ import { assertStorageQuota } from "../../_shared/storage-quota.ts";
 
 export const librariesRouter = createOpenApiRouter();
 
-interface CacheEntry {
-  items: any[];
-  count: number | null;
-  timestamp: number;
-}
-const itemsCache = new Map<string, CacheEntry>();
-const CACHE_TTL = 1000 * 60; // 60 seconds
-
-// Shelf/list projections. The audio_files/library_files/chapters/embedding
-// columns can be megabytes per item (hundreds of chapter MP3s), so list
-// endpoints select only the columns the UI renders and leave per-file data
-// to the detail endpoint (/api/items/:id). Keeps a 100-book shelf ~20x
-// smaller and skips the pgvector embedding column entirely.
-const LIST_ITEM_SELECT =
-  "id, library_id, ino, path, rel_path, title, subtitle, " +
-  "author_names_first_last, narrators, genres, tags, published_year, " +
-  "published_date, publisher, description, isbn, asin, language, explicit, " +
-  "abridged, cover_path, duration, size, is_file, is_missing, is_invalid, " +
-  "mtime, ctime, birthtime, created_at, updated_at, media_type, " +
-  "book_authors(authors(*)), book_series(series(*))";
-const FULL_ITEM_SELECT = "*, book_authors(authors(*)), book_series(series(*))";
-
-type LibraryWithFolders = Database["public"]["Tables"]["libraries"]["Row"] & {
-  library_folders: Database["public"]["Tables"]["library_folders"]["Row"][];
-};
+import {
+  FULL_ITEM_SELECT,
+  libraryItemsCache,
+  type LibraryWithFolders,
+  LIST_ITEM_SELECT,
+  parseSortParams,
+} from "../_shared/domain/libraries.ts";
 
 // =========================
 // OpenAPI Schemas & Route Definitions
@@ -736,22 +718,7 @@ librariesRouter.openapi(libraryItemsRoute, async (c) => {
   const isFetchAll = limit === 0;
   const offset = isFetchAll ? 0 : page * limit;
 
-  let dbSortField = "created_at";
-  if (sortParam.includes("author")) {
-    dbSortField = "author_names_first_last";
-  } else if (sortParam.includes("title") || sortParam.includes("name")) {
-    dbSortField = "title";
-  } else if (sortParam.includes("pub") || sortParam.includes("year")) {
-    dbSortField = "published_year";
-  } else if (sortParam.includes("update")) {
-    dbSortField = "updated_at";
-  } else if (sortParam.includes("duration")) {
-    dbSortField = "duration";
-  } else if (sortParam.includes("size")) {
-    dbSortField = "size";
-  } else {
-    dbSortField = "created_at";
-  }
+  const { column: dbSortField } = parseSortParams(sortParam, isDesc);
 
   const search = (queryParams.get("q") || queryParams.get("search") || "")
     .trim();
@@ -770,11 +737,10 @@ librariesRouter.openapi(libraryItemsRoute, async (c) => {
       }`;
     let items: any[] = [];
     let count: number | null = 0;
-    const now = Date.now();
-    const cached = itemsCache.get(cacheKey);
+    const cached = libraryItemsCache.get(cacheKey);
 
-    if (cached && now - cached.timestamp < CACHE_TTL) {
-      items = cached.items;
+    if (cached) {
+      items = cached.items as any[];
       count = cached.count;
     } else {
       if (isFetchAll) {
@@ -880,7 +846,7 @@ librariesRouter.openapi(libraryItemsRoute, async (c) => {
       }
 
       // Save to cache
-      itemsCache.set(cacheKey, { items, count, timestamp: now });
+      libraryItemsCache.set(cacheKey, items, count);
     }
 
     // Natural in-memory sort refinement for title & author

@@ -6,6 +6,19 @@ import {
   upsertMediaProgress,
 } from "../_shared/progress.ts";
 import { getErrorMessage } from "./_shared/errors.ts";
+import {
+  generateManifest,
+  normalizeAudioFile,
+  normalizeAudioFiles,
+  resolveSyncConflict,
+} from "./_shared/domain/playback.ts";
+
+export {
+  generateManifest,
+  normalizeAudioFile,
+  normalizeAudioFiles,
+  resolveSyncConflict,
+};
 
 export class PlaybackService {
   static async startSession(

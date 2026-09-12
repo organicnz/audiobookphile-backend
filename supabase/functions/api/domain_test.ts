@@ -100,7 +100,7 @@ Deno.test("Libraries Domain: parseSortParams correctly parses column and order",
     ascending: false,
   });
   assertEquals(parseSortParams("invalid_col", false), {
-    column: "title",
+    column: "created_at",
     ascending: true,
   });
 });

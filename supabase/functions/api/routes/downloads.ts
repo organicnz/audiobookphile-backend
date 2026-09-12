@@ -3,17 +3,15 @@ import { StorageRouter } from "../../_shared/storage-router.ts";
 import { requireAdminRole } from "../_shared/auth.ts";
 import { presignUpload } from "../../_shared/uploadPresign.ts";
 import { assertStorageQuota } from "../../_shared/storage-quota.ts";
-import { parseTitleAndAuthor } from "../../_shared/titleAuthorParser.ts";
-import { titlesLikelySameWork } from "../../_shared/titleMatch.ts";
 import { analyzeItemWarnings } from "../../_shared/invariants.ts";
 import { Context } from "hono";
 import { Variables } from "../_shared/types.ts";
 import { getErrorMessage } from "../_shared/errors.ts";
+import { naturalSortFilenames } from "../../_shared/zai.ts";
 import {
-  matchExistingBookWithZAI,
-  naturalSortFilenames,
-  ZAI_CHAT_MODEL,
-} from "../../_shared/zai.ts";
+  findDuplicateBook as checkDuplicateBook,
+  resolveTitleAndAuthor,
+} from "../_shared/domain/downloads.ts";
 
 // ===== Zod schemas for /upload/finalize =====
 const UploadCheckSchema = z.object({
@@ -1320,191 +1318,6 @@ downloadsRouter.openapi(uploadFinalizeRoute, async (c) => {
     );
   }
 });
-async function resolveTitleAndAuthor(
-  rawTitle: string,
-  rawAuthor: string,
-  zaiApiKey: string,
-) {
-  let { cleanTitle: title, cleanAuthor: author } = parseTitleAndAuthor(
-    rawTitle,
-    rawAuthor,
-  );
-
-  if (
-    (!author || author === "Unknown Author" || !title) && rawTitle &&
-    zaiApiKey
-  ) {
-    try {
-      const aiRes = await fetch(
-        "https://open.bigmodel.cn/api/paas/v4/chat/completions",
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${zaiApiKey}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            model: ZAI_CHAT_MODEL,
-            thinking: { type: "disabled" },
-            messages: [
-              {
-                role: "user",
-                content:
-                  `Extract the exact book title and author name from this filename/text: "${rawTitle}". Return ONLY a JSON object: {"title": "...", "author": "..."}`,
-              },
-            ],
-            temperature: 0.1,
-          }),
-          signal: AbortSignal.timeout(8_000),
-        },
-      );
-      if (aiRes.ok) {
-        const aiData = await aiRes.json();
-        const content = aiData.choices?.[0]?.message?.content || "";
-        const match = content.match(/\{[\s\S]*\}/);
-        if (match) {
-          const parsed = JSON.parse(match[0]);
-          // Gate: the extraction must plausibly describe THIS file. A
-          // hallucinated different-work title here would feed the duplicate
-          // checker and create/merge the wrong book.
-          const extractedTitle = typeof parsed.title === "string"
-            ? parsed.title.trim()
-            : "";
-          if (
-            extractedTitle &&
-            !titlesLikelySameWork(rawTitle, extractedTitle)
-          ) {
-            console.warn(
-              `[upload-fallback] REJECTED extracted title "${extractedTitle}" for "${rawTitle}": titles are dissimilar`,
-            );
-            parsed.title = undefined;
-            parsed.author = undefined;
-          }
-          if (parsed.title) title = parsed.title;
-          if (parsed.author && parsed.author !== author) author = parsed.author;
-        }
-      }
-    } catch (e: unknown) {
-      const err = e as Error;
-      console.error(
-        "[upload-fallback] Z.ai GLM-4 fallback error:",
-        err.message,
-      );
-    }
-  }
-  return { title, author };
-}
-
-async function checkDuplicateBook(
-  supabase: any,
-  title: string,
-  author: string,
-  libraryId: string,
-  zaiApiKey: string,
-  bookId?: string,
-) {
-  let matchedId: string | null = null;
-
-  const normalizeTitle = (s: string) => {
-    if (!s) return "";
-    let v = s.toLowerCase().trim();
-    v = v.replace(
-      /\[(audiobook|unabridged|abridged|mp3)\]|\((audiobook|unabridged|abridged|mp3)\)/gi,
-      "",
-    );
-    v = v.replace(/\b(cd|disc|part|vol|volume)\s*\d+\b/gi, "");
-    return v.replace(/[^\p{L}\p{N}]/gu, "");
-  };
-
-  // Lightweight candidate scan: only id/title/author columns (audio_files and
-  // library_files JSONB columns can be huge). The full record is hydrated in a
-  // second indexed query only for the single matched item.
-  const LIGHT_SELECT = "id, media_id, title, author_names_first_last";
-  const SCAN_LIMIT = 500;
-
-  if (bookId) {
-    const { data: itemsById } = await supabase
-      .from("library_items")
-      .select(LIGHT_SELECT)
-      .or(`id.eq.${bookId},media_id.eq.${bookId}`)
-      .eq("library_id", libraryId)
-      .limit(1);
-
-    if (itemsById && itemsById.length > 0) {
-      matchedId = itemsById[0].id;
-    }
-  }
-
-  if (!matchedId && title) {
-    const { data: allLibItems } = await supabase
-      .from("library_items")
-      .select(LIGHT_SELECT)
-      .eq("library_id", libraryId)
-      .limit(SCAN_LIMIT);
-
-    if (allLibItems?.length) {
-      const normTitle = normalizeTitle(title);
-
-      for (const item of allLibItems) {
-        const itemTitle = (item.title || "").trim();
-        if (itemTitle.toLowerCase() === title.trim().toLowerCase()) {
-          matchedId = item.id;
-          break;
-        }
-        const normItemTitle = normalizeTitle(itemTitle);
-        if (normItemTitle && normItemTitle === normTitle) {
-          matchedId = item.id;
-          break;
-        }
-        if (
-          normItemTitle && normTitle &&
-          normItemTitle.length >= 6 && normTitle.length >= 6 &&
-          (normItemTitle.startsWith(normTitle) ||
-            normTitle.startsWith(normItemTitle))
-        ) {
-          const itemAuthor = (item.author_names_first_last || "").toLowerCase()
-            .replace(/[^\p{L}\p{N}]/gu, "");
-          const uploadAuthor = (author || "").toLowerCase().replace(
-            /[^\p{L}\p{N}]/gu,
-            "",
-          );
-          if (
-            itemAuthor && uploadAuthor &&
-            (itemAuthor === uploadAuthor ||
-              itemAuthor.includes(uploadAuthor) ||
-              uploadAuthor.includes(itemAuthor))
-          ) {
-            matchedId = item.id;
-            break;
-          }
-        }
-      }
-
-      if (!matchedId && zaiApiKey) {
-        matchedId = await matchExistingBookWithZAI(
-          title,
-          author,
-          allLibItems,
-          zaiApiKey,
-        );
-      }
-    }
-  }
-
-  if (!matchedId) return null;
-
-  const { data: fullItem } = await supabase
-    .from("library_items")
-    .select(
-      "id, media_id, size, library_files, audio_files, duration, author_names_first_last, title",
-    )
-    .eq("id", matchedId)
-    .eq("library_id", libraryId)
-    .limit(1)
-    .maybeSingle();
-
-  return fullItem || null;
-}
 
 downloadsRouter.openapi(uploadCheckRoute, async (c) => {
   try {

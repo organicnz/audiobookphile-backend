@@ -128,16 +128,24 @@ export function parseSortParams(
   sortBy: string = "title",
   sortDesc: boolean = false,
 ): { column: string; ascending: boolean } {
-  const allowedColumns = [
-    "title",
-    "author_names_first_last",
-    "published_year",
-    "created_at",
-    "updated_at",
-    "duration",
-    "size",
-  ];
+  const normalized = sortBy.toLowerCase();
+  let column = "created_at";
 
-  const column = allowedColumns.includes(sortBy) ? sortBy : "title";
+  if (normalized.includes("author")) {
+    column = "author_names_first_last";
+  } else if (normalized.includes("title") || normalized.includes("name")) {
+    column = "title";
+  } else if (normalized.includes("pub") || normalized.includes("year")) {
+    column = "published_year";
+  } else if (normalized.includes("update")) {
+    column = "updated_at";
+  } else if (normalized.includes("duration")) {
+    column = "duration";
+  } else if (normalized.includes("size")) {
+    column = "size";
+  } else if (normalized.includes("added") || normalized.includes("created")) {
+    column = "created_at";
+  }
+
   return { column, ascending: !sortDesc };
 }
