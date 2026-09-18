@@ -1,6 +1,6 @@
 # Operations Runbook
 
-Production project: `kfidobawnbziftwxavyl` · Edge API: `https://kfidobawnbziftwxavyl.supabase.co/functions/v1/api`
+Production project: `$SUPABASE_PROJECT_ID` · Edge API: `https://${SUPABASE_PROJECT_ID}.supabase.co/functions/v1/api`
 
 ## Workflows (self-hosted macOS runner)
 

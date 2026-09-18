@@ -13,14 +13,17 @@ import json
 import urllib.request
 import urllib.error
 
-BACKUP_DIR = "/Users/organic/dev/work/audiobookphile/audiobookphile-backend/backup_export"
-ENV_PATH = "/Users/organic/dev/work/audiobookphile/audiobookphile-backend/.env"
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+BACKEND_DIR = os.path.dirname(SCRIPT_DIR)
+BACKUP_DIR = os.environ.get("BACKUP_DIR", os.path.join(BACKEND_DIR, "backup_export"))
+ENV_PATH = os.environ.get("ENV_PATH", os.path.join(BACKEND_DIR, ".env"))
 
-if len(sys.argv) < 2:
-    print("Usage: python3 scripts/restore_to_new_project.py <NEW_PROJECT_REF>")
+NEW_PROJECT_REF = (
+    sys.argv[1].strip() if len(sys.argv) > 1 else os.environ.get("SUPABASE_PROJECT_ID")
+)
+if not NEW_PROJECT_REF:
+    print("Usage: python3 scripts/restore_to_new_project.py <NEW_PROJECT_REF> (or set SUPABASE_PROJECT_ID)")
     sys.exit(1)
-
-NEW_PROJECT_REF = sys.argv[1].strip()
 
 token = None
 if os.path.exists(ENV_PATH):

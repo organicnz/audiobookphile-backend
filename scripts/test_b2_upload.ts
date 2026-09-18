@@ -12,9 +12,9 @@ const client = new S3Client({
   responseChecksumValidation: "WHEN_REQUIRED",
 });
 try {
-  const file = await Deno.readFile(
-    "/Users/organic/dev/work/audiobookphile/audiobookphile-backend/src/Arguably Essays by Christopher Hitchens/Eugenia Cheng - The Art of Logic in an Illogical World/Art of Logic 01.mp3",
-  );
+  const testFilePath = Deno.env.get("TEST_AUDIO_FILE") ||
+    new URL("../test-upload.mp3", import.meta.url).pathname;
+  const file = await Deno.readFile(testFilePath);
   await client.send(
     new PutObjectCommand({
       Bucket: Deno.env.get("B2_BUCKET_NAME")!,

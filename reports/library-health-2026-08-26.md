@@ -1,6 +1,6 @@
 # Library Health Report — 2025-08-25/26 repair sessions
 
-Production: `kfidobawnbziftwxavyl` (migrated from `iambzzclljayqdxkeepy`) · All mutations snapshotted to `reports/backups/`
+Production: `$SUPABASE_PROJECT_ID` · All mutations snapshotted to `reports/backups/`
 
 ## Structural repairs
 | Fix | Scale | Verification |

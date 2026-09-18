@@ -10,10 +10,13 @@ import urllib.request
 import urllib.error
 from datetime import datetime
 
-# Load Supabase management token
-ENV_PATH = "/Users/organic/dev/work/audiobookphile/audiobookphile-backend/.env"
-SUPABASE_PROJECT_ID = os.environ.get("SUPABASE_PROJECT_ID", "kfidobawnbziftwxavyl")
-BACKUP_DIR = "/Users/organic/dev/work/audiobookphile/audiobookphile-backend/backup_export"
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+BACKEND_DIR = os.path.dirname(SCRIPT_DIR)
+BACKUP_DIR = os.environ.get("BACKUP_DIR", os.path.join(BACKEND_DIR, "backup_export"))
+ENV_PATH = os.environ.get("ENV_PATH", os.path.join(BACKEND_DIR, ".env"))
+SUPABASE_PROJECT_ID = os.environ.get("SUPABASE_PROJECT_ID")
+if not SUPABASE_PROJECT_ID:
+    raise RuntimeError("SUPABASE_PROJECT_ID environment variable is required")
 
 token = None
 if os.path.exists(ENV_PATH):

@@ -1,12 +1,12 @@
+const path = require("path");
 const { createClient } = require("@supabase/supabase-js");
 require("dotenv").config({
-  path:
-    "/Users/organic/dev/work/audiobookphile/audiobookphile-backend/supabase/.env",
+  path: process.env.ENV_PATH || path.resolve(__dirname, "supabase/.env"),
 });
 
 const supabase = createClient(
-  process.env.SUPABASE_URL || "http://127.0.0.1:54321",
-  process.env.SUPABASE_ANON_KEY || "ey...", // Need the actual local anon key if testing locally
+  process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL,
+  process.env.SUPABASE_ANON_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
 );
 
 async function run() {

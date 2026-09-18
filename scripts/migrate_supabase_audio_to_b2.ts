@@ -179,8 +179,10 @@ async function listSupabaseAudio(prefix?: string) {
         console.error(
           "The project owner must temporarily remove spend caps in the Supabase Dashboard:",
         );
+        const projectRef = Deno.env.get("SUPABASE_PROJECT_ID") ||
+          "<project-ref>";
         console.error(
-          "👉 https://supabase.com/dashboard/project/kfidobawnbziftwxavyl/settings/billing\n",
+          `👉 https://supabase.com/dashboard/project/${projectRef}/settings/billing\n`,
         );
       }
     }

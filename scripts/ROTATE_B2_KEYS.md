@@ -61,14 +61,14 @@ cd audiobookphile-backend
 bunx supabase secrets set \
   B2_SECONDARY_KEY_ID="$NEW_KEY_ID" \
   B2_SECONDARY_APP_KEY="$NEW_APP_KEY" \
-  --project-ref kfidobawnbziftwxavyl
+  --project-ref "$SUPABASE_PROJECT_ID"
 ```
 
 No function redeploy is required — secrets are picked up on the next cold start.
 To force a cold start immediately, redeploy the affected functions:
 
 ```bash
-bunx supabase functions deploy upload-presign --project-ref kfidobawnbziftwxavyl
+bunx supabase functions deploy upload-presign --project-ref "$SUPABASE_PROJECT_ID"
 ```
 
 ### 4. Update local `.env`
@@ -95,7 +95,7 @@ curl -sS -X POST \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $ADMIN_JWT" \
   -d '{"filename":"rotation-test.mp3","contentType":"audio/mpeg"}' \
-  "https://kfidobawnbziftwxavyl.supabase.co/functions/v1/api/upload-presign"
+  "https://${SUPABASE_PROJECT_ID}.supabase.co/functions/v1/api/upload-presign"
 # Expect: 200 with {"url":"https://s3...","provider_prefix":"b2-secondary://"}
 
 # Then PUT a small body to the returned URL:
