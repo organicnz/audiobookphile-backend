@@ -180,32 +180,40 @@ interface Repair {
 }
 
 async function repairCover(itemId: string, title: string, author: string) {
-  const res = await fetchBookMetadata(title, author);
-  if (!res?.cover) {
-    console.log(`      cover: none found for "${title}"`);
+  try {
+    const res = await fetchBookMetadata(title, author);
+    if (!res?.cover) {
+      console.log(`      cover: none found for "${title}"`);
+      return false;
+    }
+    const fileData = new Uint8Array(res.cover.buffer);
+    const ext = res.cover.extension || "jpg";
+    const coverPath = `${itemId}/cover.${ext}`;
+    const contentType = `image/${ext === "png" ? "png" : "jpeg"}`;
+    const { error: upErr } = await supabase.storage.from("covers").upload(
+      coverPath,
+      fileData,
+      { upsert: true, contentType },
+    );
+    if (upErr && !upErr.message.includes("exists")) {
+      console.log(`      cover upload failed: ${upErr.message}`);
+      return false;
+    }
+    const { error: dbErr } = await supabase.from("library_items")
+      .update({ cover_path: coverPath }).eq("id", itemId);
+    if (dbErr) {
+      console.log(`      cover_path update failed: ${dbErr.message}`);
+      return false;
+    }
+    console.log(`      cover: uploaded ${coverPath}`);
+    return true;
+  } catch (err) {
+    console.log(
+      `      cover fetch error for "${title}":`,
+      err instanceof Error ? err.message : String(err),
+    );
     return false;
   }
-  const fileData = new Uint8Array(res.cover.buffer);
-  const ext = res.cover.extension || "jpg";
-  const coverPath = `${itemId}/cover.${ext}`;
-  const contentType = `image/${ext === "png" ? "png" : "jpeg"}`;
-  const { error: upErr } = await supabase.storage.from("covers").upload(
-    coverPath,
-    fileData,
-    { upsert: true, contentType },
-  );
-  if (upErr && !upErr.message.includes("exists")) {
-    console.log(`      cover upload failed: ${upErr.message}`);
-    return false;
-  }
-  const { error: dbErr } = await supabase.from("library_items")
-    .update({ cover_path: coverPath }).eq("id", itemId);
-  if (dbErr) {
-    console.log(`      cover_path update failed: ${dbErr.message}`);
-    return false;
-  }
-  console.log(`      cover: uploaded ${coverPath}`);
-  return true;
 }
 
 async function main() {
@@ -247,8 +255,25 @@ async function main() {
     // title/cluster logic. The identity gate inside fetchBookMetadata makes
     // this safe to run against every item in the library.
     if (coversOnly) {
+      const itemCoverPath = String(item.cover_path ?? "");
+      if (
+        itemCoverPath && itemCoverPath !== "missing" &&
+        !itemCoverPath.startsWith("/")
+      ) {
+        const { data: existingData } = await supabase.storage.from("covers")
+          .list(item.id);
+        if (existingData && existingData.length > 0) {
+          console.log(
+            `✓ [${item.id}] "${title}" — cover already present in storage`,
+          );
+          continue;
+        }
+      }
       console.log(`🎨 [${item.id}] "${title}" — cover refetch`);
-      if (apply) await repairCover(item.id, title, author);
+      if (apply) {
+        await repairCover(item.id, title, author);
+        await new Promise((r) => setTimeout(r, 250));
+      }
       continue;
     }
 
