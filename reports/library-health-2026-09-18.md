@@ -34,7 +34,7 @@ Following the retirement of the legacy Supabase project, all database schemas, e
   - **Outcome:** **97 high-resolution covers** restored into storage (100% of all real books in the library). The remaining 16 items are synthetic Playwright test fixtures (`PW Cover Fixture`, `PW Dead Track Fixture`, etc.).
 - **Author Avatar Recovery:**
   - Built and executed `scripts/restore_author_avatars.ts` using the 3-tier waterfall logic from `avatarFetcher.ts` (Wikipedia 500px portrait → OpenLibrary API → DiceBear deterministic SVG initials).
-  - **Outcome:** **102 author avatars** uploaded and synced into `authors/<id>/photo.(jpg|svg)` in the `covers` bucket. 100% of authors in the database now have active, verified avatars.
+  - **Outcome:** **104 author avatars** uploaded and synced into `authors/<id>/photo.(jpg|svg)` in the `covers` bucket. 100% (104/104) of authors in the database now have active, verified avatars.
 - **Public Image Route Hardening:**
   - Enhanced `authMiddleware` in `auth.ts` to skip authentication for both `GET` and `HEAD` requests on public cover (`/api/items/:id/cover`) and author avatar (`/api/authors/:id/image`) endpoints. This ensures pre-fetchers, mobile clients, and browser image tags never encounter 401s.
   - Deployed updated `api` Edge Function to production.
@@ -72,6 +72,16 @@ Live production health and asset delivery check:
 
 ---
 
-## 5. Configuration & Hygiene
+## 5. Mobile Client & Toolchain Hardening (`audiobookphile-app`)
+- **Skip Multi-Platform CI/CD:**
+  - Resolved static duplicate library linkage issues (`SkipFoundation`, `SkipLib`, `SkipUnit`) in `audiobookphile-app/lefthook.yml` and `scripts/pre-commit.sh` by leveraging Xcode's native `xcodebuild build-for-testing` harness.
+  - Verified local build and test execution: 100% clean compilation (`** BUILD SUCCEEDED **`, `** TEST BUILD SUCCEEDED **`).
+  - Synced production `API_SERVER_URL` in `Darwin/ci_scripts/ci_post_clone.sh`.
+  - All 11 intelligent cybersecurity & quality pre-commit guards passing in <100ms.
+  - Pushed to `origin/main` cleanly.
+
+---
+
+## 6. Configuration & Hygiene
 - **Dynamic Config Invariant:** Zero hardcoded Supabase project refs or URLs. All scripts, functions, workflows, and documentation use variables (`$SUPABASE_PROJECT_ID`, `$NEXT_PUBLIC_SUPABASE_URL`, etc.).
-- **Clean Git State:** Secrets, tokens, and temporary files remain strictly ignored by `.gitignore`.
+- **Clean Git State:** Secrets, tokens, and temporary files remain strictly ignored by `.gitignore` across backend, web, and mobile repositories.
