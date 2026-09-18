@@ -101,8 +101,8 @@ export function shouldSkipAuth(c: Context<{ Variables: Variables }>): boolean {
     return true;
   }
 
-  // Skip auth for GET cover images and author images (fetched by <img> / AsyncImage in iOS/Web without Authorization headers)
-  if (c.req.method === "GET") {
+  // Skip auth for GET/HEAD cover images and author images (fetched by <img> / AsyncImage in iOS/Web without Authorization headers)
+  if (c.req.method === "GET" || c.req.method === "HEAD") {
     if (
       (withApi.startsWith("/api/items/") || withoutApi.startsWith("/items/")) &&
       withApi.endsWith("/cover")

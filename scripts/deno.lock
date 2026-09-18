@@ -2,6 +2,7 @@
   "version": "5",
   "specifiers": {
     "npm:@aws-sdk/client-s3@^3.693.0": "3.1134.0",
+    "npm:@aws-sdk/s3-request-presigner@^3.693.0": "3.1135.0",
     "npm:@supabase/supabase-js@2.44.0": "2.44.0"
   },
   "npm": {
@@ -164,6 +165,17 @@
         "@smithy/core",
         "@smithy/fetch-http-handler",
         "@smithy/node-http-handler",
+        "@smithy/types",
+        "tslib"
+      ]
+    },
+    "@aws-sdk/s3-request-presigner@3.1135.0": {
+      "integrity": "sha512-e8fkfFrsROsL2xa4X2Elui7SApBSb+vsJ0XlVdifv7MPOuwPzQ0oQsC1/BQxT1/Hx3IuOVdT0EF9dU87aKse8A==",
+      "dependencies": [
+        "@aws-sdk/core",
+        "@aws-sdk/signature-v4-multi-region",
+        "@aws-sdk/types",
+        "@smithy/core",
         "@smithy/types",
         "tslib"
       ]
