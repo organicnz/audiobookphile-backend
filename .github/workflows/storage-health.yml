@@ -16,7 +16,7 @@ jobs:
       - name: Query storage quota
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-          SUPABASE_PROJECT_ID: iambzzclljayqdxkeepy
+          SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
         run: |
           supabase link --project-ref "$SUPABASE_PROJECT_ID"
           echo "=== storage_quota_snapshot ==="
