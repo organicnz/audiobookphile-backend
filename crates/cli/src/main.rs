@@ -1,5 +1,6 @@
 mod audit;
 mod backup;
+mod restore;
 mod storage;
 
 use anyhow::Result;
@@ -43,6 +44,17 @@ enum Commands {
         #[arg(short, long, default_value = "./backup_export")]
         output: PathBuf,
     },
+
+    /// Restore database schemas, data, and storage from backup into a project
+    DbRestore {
+        /// Target Supabase project reference ID
+        #[arg(short, long)]
+        project_ref: String,
+
+        /// Path to directory containing backup files
+        #[arg(short, long, default_value = "./backup_export")]
+        backup_dir: PathBuf,
+    },
 }
 
 #[tokio::main]
@@ -69,6 +81,9 @@ async fn main() -> Result<()> {
         }
         Commands::DbBackup { output } => {
             backup::run_backup(&output).await?;
+        }
+        Commands::DbRestore { project_ref, backup_dir } => {
+            restore::run_restore(&project_ref, &backup_dir).await?;
         }
     }
 

@@ -9,6 +9,11 @@ concurrency:
   group: nightly-maintenance
   cancel-in-progress: false
 
+permissions:
+  contents: write
+  pull-requests: write
+  issues: read
+
 jobs:
   backup:
     name: Database Snapshot Backup
@@ -91,3 +96,36 @@ jobs:
             ${{ runner.temp }}/audit_report.json
           if-no-files-found: warn
           retention-days: 30
+
+  error-remediation:
+    name: Sentry Error Remediation & PR Generator
+    runs-on: [self-hosted, macOS]
+    timeout-minutes: 30
+    env:
+      SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+      SENTRY_ORG: ${{ secrets.SENTRY_ORG }}
+      SENTRY_PROJECT: ${{ secrets.SENTRY_PROJECT }}
+      ZAI_API_KEY: ${{ secrets.ZAI_API_KEY }}
+      GITHUB_TOKEN: ${{ github.token }}
+      MAX_PRS: "2"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Setup Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Run LLM Error Remediation
+        run: |
+          if [ -z "${{ secrets.SENTRY_AUTH_TOKEN }}" ]; then
+            echo "Warning: SENTRY_AUTH_TOKEN secret is missing — remediation will skip."
+          fi
+          if [ -z "${{ secrets.ZAI_API_KEY }}" ]; then
+            echo "Warning: ZAI_API_KEY secret is missing — remediation will skip."
+          fi
+          deno run -A .github/scripts/remediate-errors.ts
+
