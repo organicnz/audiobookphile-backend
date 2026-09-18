@@ -1,37 +1,104 @@
 #!/bin/bash
-# Add missing Supabase environment variables to .env
+# Automatically populate or refresh Supabase environment variables in .env
+set -euo pipefail
 
-ENV_FILE=".env"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+BACKEND_DIR="$(dirname "$SCRIPT_DIR")"
+ENV_FILE="${BACKEND_DIR}/.env"
 
-if grep -q "^SUPABASE_URL=" "$ENV_FILE"; then
-    echo "✓ SUPABASE_URL already present in .env"
-else
-    PROJECT_ID=$(grep "^SUPABASE_PROJECT_ID=" "$ENV_FILE" | cut -d'=' -f2 | tr -d ' "')
-    sed -i "/^SUPABASE_PROJECT_ID=/a SUPABASE_URL=https://${PROJECT_ID:-your_project_ref}.supabase.co\nSUPABASE_ANON_KEY=your_anon_key_here" "$ENV_FILE"
-    echo "✓ Added SUPABASE_URL and SUPABASE_ANON_KEY to .env"
+if [ ! -f "$ENV_FILE" ]; then
+    echo "Creating new .env at ${ENV_FILE}"
+    touch "$ENV_FILE"
 fi
 
-if grep -q "^ZAI_API_KEY=" ".env"; then
-    echo "✓ ZAI_API_KEY already present in .env"
-else
-    sed -i '/^SUPABASE_PROJECT_ID=/a ZAI_API_KEY=your_zai_api_key_here' ".env" 2>/dev/null || true
-    echo "✓ Added ZAI_API_KEY placeholder to .env"
-fi
+# Run python helper to sync live keys from Supabase Management API if access token is present
+python3 - <<EOF
+import os, json, urllib.request
 
-if grep -q "^HIPPU_AI_API_KEY=" ".env"; then
-    echo "✓ HIPPU_AI_API_KEY already present in .env"
-else
-    sed -i '/^ZAI_API_KEY=/a HIPPU_AI_API_KEY=your_hippu_ai_api_key_here' ".env" 2>/dev/null || true
-    echo "✓ Added HIPPU_AI_API_KEY placeholder to .env"
-fi
+env_file = "$ENV_FILE"
+env = {}
+if os.path.exists(env_file):
+    with open(env_file) as f:
+        for line in f:
+            if "=" in line and not line.startswith("#"):
+                k, v = line.strip().split("=", 1)
+                env[k] = v.strip().strip("'\"")
 
-# Create .env.local if it doesn't exist for local development
-if [ ! -f audiobookphile-backend/.env.local ]; then
-    cp audiobookphile-backend/.env audiobookphile-backend/.env.local
-    chmod 600 audiobookphile-backend/.env.local
+token = env.get("SUPABASE_ACCESS_TOKEN") or os.environ.get("SUPABASE_ACCESS_TOKEN")
+project_id = env.get("SUPABASE_PROJECT_ID") or os.environ.get("SUPABASE_PROJECT_ID")
+
+if not project_id:
+    print("Notice: SUPABASE_PROJECT_ID not set. Please set it in .env or environment.")
+    exit(0)
+
+supabase_url = f"https://{project_id}.supabase.co"
+anon_key = env.get("SUPABASE_ANON_KEY", "")
+service_key = env.get("SUPABASE_SERVICE_ROLE_KEY", "")
+
+if token:
+    try:
+        req = urllib.request.Request(
+            f"https://api.supabase.com/v1/projects/{project_id}/api-keys",
+            headers={"Authorization": f"Bearer {token}"}
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            keys = json.loads(resp.read().decode())
+            for k in keys:
+                if k.get("name") == "anon" and not anon_key:
+                    anon_key = k.get("api_key")
+                elif k.get("name") == "service_role" and not service_key:
+                    service_key = k.get("api_key")
+        print("✓ Successfully retrieved active API keys from Supabase Management API")
+    except Exception as e:
+        print(f"Notice: Could not fetch keys automatically from Management API: {e}")
+
+lines = []
+if os.path.exists(env_file):
+    with open(env_file) as f:
+        lines = f.readlines()
+
+new_lines = []
+found_url = False
+found_anon = False
+found_service = False
+
+for line in lines:
+    if line.startswith("SUPABASE_URL=") or line.startswith("NEXT_PUBLIC_SUPABASE_URL="):
+        new_lines.append(f"SUPABASE_URL={supabase_url}\n")
+        found_url = True
+    elif line.startswith("SUPABASE_ANON_KEY=") or line.startswith("NEXT_PUBLIC_SUPABASE_ANON_KEY="):
+        if anon_key:
+            new_lines.append(f"SUPABASE_ANON_KEY={anon_key}\n")
+        else:
+            new_lines.append(line)
+        found_anon = True
+    elif line.startswith("SUPABASE_SERVICE_ROLE_KEY="):
+        if service_key:
+            new_lines.append(f"SUPABASE_SERVICE_ROLE_KEY={service_key}\n")
+        else:
+            new_lines.append(line)
+        found_service = True
+    else:
+        new_lines.append(line)
+
+if not found_url:
+    new_lines.append(f"SUPABASE_URL={supabase_url}\n")
+if not found_anon and anon_key:
+    new_lines.append(f"SUPABASE_ANON_KEY={anon_key}\n")
+if not found_service and service_key:
+    new_lines.append(f"SUPABASE_SERVICE_ROLE_KEY={service_key}\n")
+
+with open(env_file, "w") as f:
+    f.writelines(new_lines)
+print(f"✓ Synchronized {env_file}")
+EOF
+
+# Ensure .env.local exists for local development with restricted permissions
+LOCAL_ENV="${BACKEND_DIR}/.env.local"
+if [ ! -f "$LOCAL_ENV" ]; then
+    cp "$ENV_FILE" "$LOCAL_ENV"
+    chmod 600 "$LOCAL_ENV"
     echo "✓ Created .env.local from .env"
 fi
 
-echo ""
-echo "--- Current Supabase config ---"
-grep -E "^SUPABASE_URL|^SUPABASE_ANON_KEY|ZAI_API_KEY|HIPPU_AI_API_KEY" ".env" | head -10 || echo "(not found)"
+echo "✓ Supabase configuration verified."
