@@ -142,7 +142,7 @@ fi
 # 11. Console.log / Debug Leftover Guard
 if [ -n "$TS_FILES" ]; then
     echo "🔍 [11/13] Debug Statement Guard..."
-    DEBUG_LOGS=$(grep -n 'console\.log\|console\.debug\|console\.trace' $TS_FILES 2>/dev/null | grep -v '_test\.ts' | grep -v 'test_' | grep -v 'JSON.stringify' || true)
+    DEBUG_LOGS=$(grep -n 'console\.log\|console\.debug\|console\.trace' $TS_FILES 2>/dev/null | grep -v '_test\.ts' | grep -v 'test_' | grep -v 'JSON.stringify' | grep -v '^scripts/' || true)
     if [ -n "$DEBUG_LOGS" ]; then
         echo "⚠️ WARNING: console.log/debug/trace found in production code:"
         echo "$DEBUG_LOGS"
