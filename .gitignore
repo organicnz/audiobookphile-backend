@@ -12,3 +12,5 @@ node_modules/
 
 # local data-repair snapshots
 reports/backups/
+backup_export/
+

@@ -53,7 +53,7 @@ testing procedures, and rollback procedures.
 Create a `.env.local` file with the following:
 
 ```env
-SUPABASE_URL=postgresql://postgres:[YOUR-PASSWORD]@db.iambzzclljayqdxkeepy.supabase.co:5432/postgres
+SUPABASE_URL=postgresql://postgres:[YOUR-PASSWORD]@db.kfidobawnbziftwxavyl.supabase.co:5432/postgres
 SUPABASE_ANON_KEY=your-anon-key
 SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
 ```

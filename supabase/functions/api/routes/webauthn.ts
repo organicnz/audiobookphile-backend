@@ -234,11 +234,35 @@ const passkeysRemoveRoute = {
 
 const CHALLENGE_TTL_MS = 5 * 60 * 1000;
 
-function getRpConfig() {
-  const origin = Deno.env.get("WEBAUTHN_ORIGIN") ||
+function getRpConfig(c?: any) {
+  let origin = Deno.env.get("WEBAUTHN_ORIGIN") ||
     Deno.env.get("NEXT_PUBLIC_SITE_URL") ||
     "https://audiobookphile.vercel.app";
-  const rpId = Deno.env.get("WEBAUTHN_RP_ID") || new URL(origin).hostname;
+  let rpId = Deno.env.get("WEBAUTHN_RP_ID") || new URL(origin).hostname;
+
+  if (c) {
+    const rawOrigin = c.req.header("origin") || c.req.header("referer");
+    const forwardedHost = c.req.header("x-forwarded-host");
+    if (rawOrigin) {
+      try {
+        const u = new URL(rawOrigin);
+        if (u.hostname === "localhost") {
+          origin = `${u.protocol}//${u.host}`;
+          rpId = u.hostname;
+        }
+      } catch {
+        // ignore malformed URL
+      }
+    } else if (forwardedHost) {
+      const hostname = forwardedHost.split(":")[0];
+      if (hostname === "localhost") {
+        const proto = c.req.header("x-forwarded-proto") || "http";
+        origin = `${proto}://${forwardedHost}`;
+        rpId = hostname;
+      }
+    }
+  }
+
   return {
     origin: origin.replace(/\/+$/, ""),
     rpId,
@@ -301,7 +325,7 @@ webauthnRouter.openapi(registerOptionsRoute, async (c) => {
   try {
     const body = await c.req.json().catch(() => ({}));
     const { deviceName } = RegisterOptionsSchema.parse(body);
-    const { rpId, rpName } = getRpConfig();
+    const { rpId, rpName } = getRpConfig(c);
     void deviceName; // accepted for future per-device labels
     const challenge = generateChallenge();
     await storeChallenge(adminSupabase, user.id, challenge, "register");
@@ -357,7 +381,7 @@ webauthnRouter.openapi(registerVerifyRoute, async (c) => {
   try {
     const body = await c.req.json();
     const payload = RegisterVerifySchema.parse(body);
-    const { origin, rpId } = getRpConfig();
+    const { origin, rpId } = getRpConfig(c);
 
     const { data: pending } = await adminSupabase.from(
       "webauthn_challenges",
@@ -500,7 +524,7 @@ webauthnRouter.openapi(loginOptionsRoute, async (c) => {
       return c.json({ error: "No passkeys registered for this account" }, 404);
     }
 
-    const { origin, rpId } = getRpConfig();
+    const { origin, rpId } = getRpConfig(c);
     const challenge = generateChallenge();
     await storeChallenge(adminSupabase, userId, challenge, "login");
 
@@ -539,7 +563,7 @@ webauthnRouter.openapi(loginVerifyRoute, async (c) => {
   try {
     const body = await c.req.json();
     const payload = LoginVerifySchema.parse(body);
-    const { origin, rpId } = getRpConfig();
+    const { origin, rpId } = getRpConfig(c);
 
     const tokenPayload = await verify2FAChallengeToken(
       payload.tempToken,

@@ -6,7 +6,7 @@ ENV_FILE=".env"
 if grep -q "^SUPABASE_URL=" "$ENV_FILE"; then
     echo "✓ SUPABASE_URL already present in .env"
 else
-    sed -i '/^SUPABASE_PROJECT_ID=/a SUPABASE_URL=https://iambzzclljayqdxkeepy.supabase.co\nSUPABASE_ANON_KEY=your_anon_key_here' "$ENV_FILE"
+    sed -i '/^SUPABASE_PROJECT_ID=/a SUPABASE_URL=https://kfidobawnbziftwxavyl.supabase.co\nSUPABASE_ANON_KEY=your_anon_key_here' "$ENV_FILE"
     echo "✓ Added SUPABASE_URL and SUPABASE_ANON_KEY to .env"
 fi
 

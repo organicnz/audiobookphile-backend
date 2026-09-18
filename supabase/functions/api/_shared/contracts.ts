@@ -21,6 +21,7 @@ const HealthSchema = z.object({
   services: z.object({
     database: z.string(),
     zai: z.string(),
+    sentry: z.string().optional(),
   }),
   tables: z.record(z.string(), z.string()),
 });

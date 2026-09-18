@@ -37,6 +37,9 @@ import { ApiError, serviceRoleMiddleware } from "./_shared/errors.ts";
 import { authMiddleware } from "./_shared/auth.ts";
 import { runContractChecks } from "./_shared/contracts.ts";
 import { HealthResponseSchema } from "./_shared/openapi.ts";
+import { mountRouter } from "./_shared/router.ts";
+import { rateLimitMiddleware } from "./_shared/rate-limit.ts";
+import { errorEnvelope, getRequestId, withTimeout } from "./_shared/http.ts";
 
 // Global error listeners — capture errors that escape the Hono middleware chain
 // (background tasks, timers, unawaited promises) so they land in Sentry instead
@@ -66,11 +69,17 @@ addEventListener("error", (event) => {
 });
 
 const app = new OpenAPIHono<{ Variables: Variables }>({
-  defaultHook: (result, c) => {
+  defaultHook: (result, c: Context<{ Variables: Variables }>) => {
     if (!result.success) {
       const message = result.error?.issues?.[0]?.message ||
         "Validation error";
-      return c.json({ error: message, code: "VALIDATION_ERROR" }, 400);
+      return c.json(
+        {
+          error: message,
+          code: "VALIDATION_ERROR",
+        },
+        400,
+      );
     }
   },
 });
@@ -84,11 +93,13 @@ const app = new OpenAPIHono<{ Variables: Variables }>({
 // allowed — CORS is a browser enforcement mechanism only.
 const ALLOWED_ORIGINS = [
   "https://audiobookphile.vercel.app",
-  "https://audiobookphile.vercel.app/",
+  "https://audiobookphile.foodshare.club",
 ];
 const ALLOWED_ORIGIN_PATTERNS = [
   /^https:\/\/audiobookphile-[a-z0-9-]+\.vercel\.app$/i, // preview deployments
+  /^https:\/\/audiobookphile-[a-z0-9-]+\.foodshare\.club$/i,
   /^http:\/\/localhost:\d+$/i,
+  /^http:\/\/127\.0\.0\.1:\d+$/i,
 ];
 app.use(
   "*",
@@ -107,7 +118,11 @@ app.use(
       "apikey",
       "content-type",
       "x-refresh-token",
+      "x-request-id",
     ],
+    exposeHeaders: ["X-Request-ID"],
+    maxAge: 86400,
+    credentials: true,
   }),
 );
 
@@ -147,6 +162,15 @@ app.use("/api/*", async (c, next) => {
 });
 
 // 3. Health check (before auth so it's always accessible)
+// 30s cache + 2s per-table timeouts keep uptime probes cheap and fast.
+const HEALTH_CACHE_MS = 30_000;
+const healthCache: {
+  at: number;
+  payload: { tables: Record<string, string> } | null;
+} = {
+  at: 0,
+  payload: null,
+};
 const healthDoc = {
   method: "get" as const,
   path: "/api/health",
@@ -175,18 +199,34 @@ const healthHandler = async (c: Context<{ Variables: Variables }>) => {
     "book_insights",
     "authors",
   ];
+  // 30s in-memory cache — /health is polled by uptime monitors and would
+  // otherwise fan out 6 DB round trips per probe.
+  const now = Date.now();
+  const cached = healthCache.payload && (now - healthCache.at < HEALTH_CACHE_MS)
+    ? healthCache.payload.tables as Record<string, string>
+    : null;
   const tableStatus: Record<string, string> = {};
-  if (url && serviceRoleKey) {
+  if (cached && !c.req.query("fresh")) {
+    Object.assign(tableStatus, cached);
+  } else if (url && serviceRoleKey) {
     const client = createClient(url, serviceRoleKey);
     await Promise.all(
       tables.map(async (table) => {
-        const { error } = await client.from(table).select("id", {
+        // 2s per-table budget — one slow table must not hang the probe.
+        const probe = client.from(table).select("id", {
           count: "exact",
           head: true,
         });
-        tableStatus[table] = error ? "error" : "ok";
+        const res = await withTimeout(
+          probe as unknown as Promise<{ error: unknown }>,
+          2000,
+          `health:${table}`,
+        );
+        tableStatus[table] = !res ? "timeout" : res.error ? "error" : "ok";
       }),
     );
+    healthCache.payload = { tables: { ...tableStatus } };
+    healthCache.at = now;
   } else {
     for (const table of tables) tableStatus[table] = "unconfigured";
   }
@@ -231,15 +271,21 @@ const healthHandler = async (c: Context<{ Variables: Variables }>) => {
 };
 app.openapi(healthDoc, healthHandler as any);
 
-// 4. Structured Logging Middleware
+// 4. Structured Logging + Request-ID Middleware
+// NOTE: `c.res.headers.set()` before `next()` is lost — Hono swaps the
+// Response object downstream. The id is stored in context pre-next (so error
+// envelopes can read it) and stamped onto the final response via `c.header()`
+// post-next, which is the API that survives the swap.
 app.use(async (c, next) => {
   const start = Date.now();
-  // Set the request id BEFORE next() so error envelopes thrown by handlers
-  // (serialised by handleApiError) always carry requestId.
-  const requestId = crypto.randomUUID();
-  c.res.headers.set("X-Request-ID", requestId);
-  c.set("requestId", requestId);
+  getRequestId(c);
+  // Propagate an incoming X-Request-ID (mobile/web tracing) when present.
+  const incoming = c.req.header("x-request-id");
+  if (incoming && incoming.length <= 128) {
+    c.set("requestId", incoming);
+  }
   await next();
+  c.header("X-Request-ID", c.get("requestId") as string);
   const duration = Date.now() - start;
 
   // Only log in production
@@ -247,14 +293,14 @@ app.use(async (c, next) => {
     const log = {
       level: "info",
       timestamp: new Date().toISOString(),
-      requestId,
+      requestId: c.get("requestId"),
       method: c.req.method,
       path: c.req.path,
       url: c.req.url,
       headers: { "x-client-info": c.req.header("x-client-info") },
       statusCode: c.res.status,
       durationMs: duration,
-      user: c.get("user")?.email,
+      user: (c.get("user") as { email?: string } | null)?.email,
       ip: c.req.header("x-forwarded-for") || c.req.header("x-real-ip") ||
         "unknown",
     };
@@ -262,6 +308,37 @@ app.use(async (c, next) => {
 
     // Track API Application Metrics via Sentry (safe: no-ops when uninitialized)
     trackRequestMetrics(c.req.method, c.res.status, duration);
+  }
+});
+
+// 4b. Rate limiting (in-memory token bucket; fails open, exempts health).
+app.use(rateLimitMiddleware);
+
+// 4c. Request timeout — a hung DB/storage call must never pin an isolate.
+// 25s stays under the Edge 60s wall while giving slow queries room.
+app.use(async (c, next) => {
+  const timeoutMs = 25_000;
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+  }, timeoutMs);
+  try {
+    await Promise.race([
+      next(),
+      new Promise((_, reject) =>
+        setTimeout(
+          () => reject(new ApiError("Request timeout", "TIMEOUT", 504)),
+          timeoutMs,
+        )
+      ),
+    ]);
+  } finally {
+    clearTimeout(timer);
+    if (timedOut) {
+      console.warn(
+        `[API] request exceeded ${timeoutMs}ms: ${c.req.method} ${c.req.path}`,
+      );
+    }
   }
 });
 
@@ -284,20 +361,17 @@ const handleApiError = async (
 ) => {
   const apiErr = err as ApiError;
   if (apiErr?.statusCode) {
-    return c.json(
+    return errorEnvelope(
+      c,
+      apiErr.code || "ERROR",
+      apiErr.message || "Request failed",
+      apiErr.statusCode,
       {
-        error: {
-          code: apiErr.code,
-          message: apiErr.message,
-          ...(apiErr.field ? { field: apiErr.field } : {}),
-          ...(apiErr.validationErrors
-            ? { validationErrors: apiErr.validationErrors }
-            : {}),
-        },
-        requestId: c.get("requestId"),
-        timestamp: new Date().toISOString(),
+        ...(apiErr.field ? { field: apiErr.field } : {}),
+        ...(apiErr.validationErrors
+          ? { validationErrors: apiErr.validationErrors }
+          : {}),
       },
-      apiErr.statusCode as any,
     );
   } else if (err instanceof Response && err.status >= 500) {
     return err;
@@ -335,7 +409,11 @@ const handleApiError = async (
       // the response, and a buffered envelope would be lost.
       await Sentry.flush(2000);
     }
-    return c.json({ error: "Internal Server Error" }, 500);
+    // Standard envelope (was a bare `{ error: string }` — clients parsing
+    // `{ error: { code, message }, requestId }` broke on 500s).
+    return errorEnvelope(c, "INTERNAL_ERROR", "Internal Server Error", 500, {
+      errorId,
+    });
   }
 };
 
@@ -358,62 +436,78 @@ app.use(serviceRoleMiddleware);
 app.use("*", authMiddleware);
 
 // === NATIVE HONO ROUTERS ===
-// mountRouter registers each router under BOTH its full path (/api/...) AND
-// its path with the /api prefix stripped (/...). This is required because:
-//   - Local/direct requests arrive as /api/libraries, /api/items, etc.
-//   - Supabase Edge Runtime strips the function name prefix (/functions/v1/api)
-//     before the request reaches this handler, so the router sees /libraries,
-//     /items, etc. — without the /api segment.
-// DO NOT remove the double-mount. The app will break for one of those two
-// call paths if you do. If you add a new router, use mountRouter — not app.route directly.
-const mountRouter = (path: string, router: any) => {
-  app.route(path, router);
-  if (path.startsWith("/api/")) {
-    app.route(path.substring(4), router);
-  } else if (path === "/api") {
-    app.route("/", router);
-  }
-};
-
-mountRouter("/api", settingsRouter);
-mountRouter("/api/debug", debugRouter);
-mountRouter("/api", metadataRouter);
-mountRouter("/api/authors", authorsRouter);
-mountRouter("/api/users", usersRouter);
-mountRouter("/api/libraries", librariesRouter);
-mountRouter("/api/items", itemsRouter);
-mountRouter("/api", playbackRouter);
-mountRouter("/api", progressRouter);
-mountRouter("/api/playlists", playlistsRouter);
-mountRouter("/api/collections", collectionsRouter);
-mountRouter("/api/auth", authRouter);
-mountRouter("/api", authRouter);
-mountRouter("/api/auth/2fa", twoFactorRouter);
-mountRouter("/api/2fa", twoFactorRouter);
-mountRouter("/api/auth/2fa/webauthn", webauthnRouter);
-mountRouter("/api/2fa/webauthn", webauthnRouter);
-mountRouter("/api/migrate-batch", migrateBatchRouter);
-mountRouter("/api/items", downloadsRouter);
-mountRouter("/api", downloadsRouter);
-mountRouter("/api/me/bookmarks", bookmarksRouter);
-mountRouter("/api/me/search", searchRouter);
-mountRouter("/api/search", searchRouter);
-mountRouter("/api", searchRouter);
+// Dual-mount invariant lives in ./_shared/router.ts (single source of truth).
+// Local/direct requests arrive as /api/*; Supabase Edge Runtime strips the
+// /functions/v1/api prefix so handlers see /*. Both shapes must work.
+mountRouter(app, "/api", settingsRouter);
+mountRouter(app, "/api/debug", debugRouter);
+mountRouter(app, "/api", metadataRouter);
+mountRouter(app, "/api/authors", authorsRouter);
+mountRouter(app, "/api/users", usersRouter);
+mountRouter(app, "/api/libraries", librariesRouter);
+mountRouter(app, "/api/items", itemsRouter);
+mountRouter(app, "/api", playbackRouter);
+mountRouter(app, "/api", progressRouter);
+mountRouter(app, "/api/playlists", playlistsRouter);
+mountRouter(app, "/api/collections", collectionsRouter);
+mountRouter(app, "/api/auth", authRouter);
+mountRouter(app, "/api", authRouter);
+mountRouter(app, "/api/auth/2fa", twoFactorRouter);
+mountRouter(app, "/api/2fa", twoFactorRouter);
+mountRouter(app, "/api/auth/2fa/webauthn", webauthnRouter);
+mountRouter(app, "/api/2fa/webauthn", webauthnRouter);
+mountRouter(app, "/api/migrate-batch", migrateBatchRouter);
+mountRouter(app, "/api/items", downloadsRouter);
+mountRouter(app, "/api", downloadsRouter);
+mountRouter(app, "/api/me/bookmarks", bookmarksRouter);
+mountRouter(app, "/api/me/search", searchRouter);
+mountRouter(app, "/api/search", searchRouter);
+mountRouter(app, "/api", searchRouter);
 // Sentry monitoring and health check endpoints (no auth required)
-mountRouter("/api/sentry", sentryRouter);
-mountRouter("/api/me", meRouter);
-mountRouter("/api/admin/analytics", adminRouter);
-mountRouter("/api/admin-analytics", adminRouter);
-mountRouter("/api/ai", aiRouter);
+mountRouter(app, "/api/sentry", sentryRouter);
+mountRouter(app, "/api/me", meRouter);
+mountRouter(app, "/api/admin/analytics", adminRouter);
+mountRouter(app, "/api/admin-analytics", adminRouter);
+mountRouter(app, "/api/ai", aiRouter);
 
 const chapterAiRouter = new Hono<{ Variables: Variables }>();
 chapterAiRouter.post("/chapter-ai", handleChapterAI);
 chapterAiRouter.post("/ai/chapter", handleChapterAI);
-mountRouter("/api", chapterAiRouter);
+mountRouter(app, "/api", chapterAiRouter);
 
-// Fallback 404
+// Live OpenAPI document — single source of truth for typed clients,
+// Schemathesis fuzzing, and on-call debugging (no deploy needed).
+app.get("/api/openapi.json", (c) => {
+  const doc = app.getOpenAPIDocument({
+    openapi: "3.1.0",
+    info: {
+      title: "Audiobookphile API",
+      description: "Schema-first Audiobookshelf-compatible edge API.",
+      version: "2026.07.24",
+    },
+  });
+  return c.json(doc);
+});
+app.get("/openapi.json", (c) => {
+  const doc = app.getOpenAPIDocument({
+    openapi: "3.1.0",
+    info: {
+      title: "Audiobookphile API",
+      description: "Schema-first Audiobookshelf-compatible edge API.",
+      version: "2026.07.24",
+    },
+  });
+  return c.json(doc);
+});
+
+// Fallback 404 — standard envelope so clients never branch on shape.
 app.all("*", (c) => {
-  return c.json({ error: "Endpoint not found or method not supported" }, 404);
+  return errorEnvelope(
+    c,
+    "NOT_FOUND",
+    "Endpoint not found or method not supported",
+    404,
+  );
 });
 
 export { app };

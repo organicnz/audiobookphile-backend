@@ -180,7 +180,7 @@ async function listSupabaseAudio(prefix?: string) {
           "The project owner must temporarily remove spend caps in the Supabase Dashboard:",
         );
         console.error(
-          "👉 https://supabase.com/dashboard/project/iambzzclljayqdxkeepy/settings/billing\n",
+          "👉 https://supabase.com/dashboard/project/kfidobawnbziftwxavyl/settings/billing\n",
         );
       }
     }

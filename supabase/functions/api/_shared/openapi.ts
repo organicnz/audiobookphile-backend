@@ -51,9 +51,11 @@ export function createOpenApiRouter() {
   });
 }
 
-// === Shared response schemas ==============================================
-// These are what Schemathesis validates live responses against, so they must
-// match the payload builders exactly (see _shared/payloads.ts).
+// ============================================================================
+// Shared response schemas — these are what Schemathesis validates live
+// responses against, so they must match the payload builders exactly
+// (see _shared/payloads.ts).
+// ============================================================================
 
 /** Flat validation/auth error envelope used by the auth-family routes. */
 export const FlatErrorSchema = z.object({
@@ -148,7 +150,30 @@ export const HealthResponseSchema = z.object({
   services: z.object({
     database: z.string(),
     zai: z.string(),
+    sentry: z.string().optional(),
   }),
   tables: z.record(z.string(), z.string()),
-  contracts: z.array(ContractResultSchema),
+  contracts: z.array(ContractResultSchema).optional(),
+  sentryTestEvent: z.string().optional(),
 });
+
+/**
+ * Server error shape returned by handlers when query/fetch operations fail.
+ * Used as a catch-all for 500 responses where the exact error shape varies.
+ */
+export const ServerErrorSchema = z.object({
+  error: z.string(),
+  message: z.string().optional(),
+  stack: z.string().optional(),
+  details: z.union([z.string(), z.array(z.any())]).optional(),
+  hint: z.string().optional(),
+});
+
+/** Forbidden response shape (admin-only routes). */
+export const ForbiddenSchema = z.object({ error: z.string() });
+
+/** Simple success response for operations that don't return data. */
+export const SimpleSuccessSchema = z.object({ success: z.boolean() });
+
+/** Empty/null data response. */
+export const EmptySchema = z.null();

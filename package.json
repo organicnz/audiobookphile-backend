@@ -7,7 +7,7 @@
     "start": "bunx supabase start",
     "stop": "bunx supabase stop",
     "status": "bunx supabase status",
-    "deploy": "bunx supabase link --project-ref iambzzclljayqdxkeepy && bunx supabase db push --include-all",
+    "deploy": "bunx supabase link --project-ref kfidobawnbziftwxavyl && bunx supabase db push --include-all",
     "gen:types": "bunx supabase gen types typescript --linked --schema public > src/types/supabase.ts && cp src/types/supabase.ts ../audiobookphile-web/src/types/supabase.ts",
     "sync:schemas": "cp src/types/schemas.ts ../audiobookphile-web/src/types/schemas.ts",
     "sync": "bun run gen:types && bun run sync:schemas",
