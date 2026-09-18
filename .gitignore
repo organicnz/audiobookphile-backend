@@ -14,3 +14,7 @@ node_modules/
 reports/backups/
 backup_export/
 
+# Rust
+target/
+crates/**/target/
+

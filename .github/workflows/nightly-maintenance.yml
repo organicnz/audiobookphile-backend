@@ -1,0 +1,93 @@
+name: Nightly Maintenance & Integrity Suite
+
+on:
+  schedule:
+    - cron: "0 3 * * *" # Daily 03:00 UTC
+  workflow_dispatch: {}
+
+concurrency:
+  group: nightly-maintenance
+  cancel-in-progress: false
+
+jobs:
+  backup:
+    name: Database Snapshot Backup
+    runs-on: [self-hosted, macOS]
+    timeout-minutes: 15
+    steps:
+      - name: Trigger Automated Backup
+        env:
+          SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          KEY="${CRON_SECRET:-$SUPABASE_SERVICE_ROLE_KEY}"
+          if [ -z "$SUPABASE_PROJECT_ID" ] || [ -z "$KEY" ]; then
+            echo "::warning::Missing SUPABASE_PROJECT_ID or authorization key; skipping backup trigger."
+            exit 0
+          fi
+          echo "Triggering backup edge function on $SUPABASE_PROJECT_ID..."
+          response=$(curl -s -w "\n%{http_code}" -X POST "https://${SUPABASE_PROJECT_ID}.supabase.co/functions/v1/api/backup-database" \
+            -H "Authorization: Bearer $KEY" \
+            -H "Content-Type: application/json")
+          http_code=$(echo "$response" | tail -n1)
+          body=$(echo "$response" | sed '$d')
+          echo "Status: $http_code"
+          echo "Body: $body"
+          if [ "$http_code" -ne 200 ] && [ "$http_code" -ne 201 ]; then
+            echo "::error::Backup invocation failed with status $http_code"
+            exit 1
+          fi
+
+  storage-quota:
+    name: Storage Quota & Capacity Check
+    needs: backup
+    runs-on: [self-hosted, macOS]
+    timeout-minutes: 10
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v7
+
+      - name: Build & Run Rust Storage Health
+        env:
+          SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          cargo run --manifest-path crates/cli/Cargo.toml --release -- storage-health
+
+  integrity-audit:
+    name: Detect Corrupted Library Items
+    needs: storage-quota
+    runs-on: [self-hosted, macOS]
+    timeout-minutes: 20
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v7
+
+      - name: Setup Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Run Item Integrity Detector
+        id: detect
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          cd supabase/functions
+          deno run --allow-all detect_merged_books.ts --json "$RUNNER_TEMP/audit_report.json" 2>&1 | tee audit_output.txt
+          SUSPECTS=$(grep -oE "SUSPECT_MERGED: [0-9]+" audit_output.txt | grep -oE "[0-9]+" || echo 0)
+          echo "suspect_count=$SUSPECTS" >> "$GITHUB_OUTPUT"
+          echo "Suspected merged items: $SUSPECTS"
+
+      - name: Upload Report Artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: library-integrity-report-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/audit_report.json
+          if-no-files-found: warn
+          retention-days: 30
