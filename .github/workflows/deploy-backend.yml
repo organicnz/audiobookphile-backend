@@ -103,9 +103,15 @@ jobs:
 
       - name: Setup Supabase CLI
         id: cli
-        uses: supabase/setup-cli@v1
-        with:
-          version: latest
+        run: |
+          . .github/scripts/step-tree.sh
+          step_tree "Deploy to Supabase Production" cli \
+            "checkout:Checkout Repository|cli:Setup Supabase CLI|repair:Repair Migration History|migrations:Push Database Migrations|config:Apply Auth & Email Configuration|email:Ensure Email Provider Enabled|signing:Ensure 2FA Challenge Signing Key Secret|vault:Provision Sentry Vault Secret|secrets:Ensure Edge Function Secrets|deploy:Deploy Unified Edge API Function" \
+            "checkout=${{ steps.checkout.outcome }}"
+          echo "/opt/homebrew/bin" >> "$GITHUB_PATH"
+          export PATH="/opt/homebrew/bin:$PATH"
+          which supabase >/dev/null 2>&1 || brew install supabase/tap/supabase
+          supabase --version
 
       - name: Repair Migration History
         id: repair
