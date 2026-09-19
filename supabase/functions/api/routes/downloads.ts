@@ -517,14 +517,16 @@ downloadsRouter.openapi(downloadFileRoute, async (c) => {
   const { id: libraryItemId, fileId } = c.req.valid("param");
 
   const { data: item, error: itemError } = await supabase.from("library_items")
-    .select("audio_files").eq("id", libraryItemId).maybeSingle();
+    .select("audio_files, library_files").eq("id", libraryItemId).maybeSingle();
 
   if (itemError || !item) {
     return c.json({ error: "Item not found" }, 404);
   }
 
   const audioFiles = (item.audio_files as any[]) || [];
-  const file = audioFiles.find((f: any) =>
+  const libraryFiles = (item.library_files as any[]) || [];
+  const allFiles = [...audioFiles, ...libraryFiles];
+  const file = allFiles.find((f: any) =>
     String(f.ino) === fileId || String(f.id) === fileId
   );
 

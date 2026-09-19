@@ -48,7 +48,11 @@ const SyncResultSchema = z.object({
   message: z.string().optional(),
   error: z.string().optional(),
 });
-const CoverUploadResultSchema = z.object({ updated: z.boolean() });
+const CoverUploadResultSchema = z.object({
+  updated: z.boolean(),
+  success: z.boolean().optional(),
+  cover: z.string().optional(),
+});
 const ServerErrorSchema = z.object({
   error: z.string(),
   message: z.string().optional(),
@@ -165,7 +169,10 @@ const uploadItemCoverRoute = {
       content: {
         "multipart/form-data": { schema: z.any() },
         "application/json": {
-          schema: z.object({ url: z.string().optional() }),
+          schema: z.object({
+            url: z.string().optional(),
+            path: z.string().optional(),
+          }),
         },
         "application/octet-stream": { schema: z.any() },
       },
@@ -740,6 +747,9 @@ const handleCoverUpload = async (
   const supabaseUrl = c.get("supabaseUrl");
   const serviceRoleKey = c.get("serviceRoleKey");
   const itemId = c.req.param("id");
+  if (!itemId) {
+    return c.json({ error: "Item ID required" }, 400);
+  }
 
   const adminClient = createClient(supabaseUrl, serviceRoleKey);
   let fileData: ArrayBuffer | null = null;
@@ -776,6 +786,80 @@ const handleCoverUpload = async (
         fileData = await res.arrayBuffer();
         contentType = res.headers.get("content-type") || "image/jpeg";
         extension = contentType.split("/")[1]?.split("+")[0] || "jpg";
+        if (extension === "jpeg") extension = "jpg";
+      }
+    } else if (body.path) {
+      // Find matching file in library_items (library_files or audio_files)
+      const { data: item } = await adminClient.from("library_items")
+        .select("library_files, audio_files")
+        .eq("id", itemId)
+        .maybeSingle();
+
+      const allFiles = [
+        ...((item?.library_files as any[]) || []),
+        ...((item?.audio_files as any[]) || []),
+      ];
+
+      const matchingFile = allFiles.find((f: any) =>
+        f.metadata?.path === body.path ||
+        f.path === body.path ||
+        f.storage_path === body.path ||
+        String(f.ino) === body.path ||
+        String(f.id) === body.path ||
+        f.metadata?.filename === body.path
+      );
+
+      const targetPath = matchingFile?.metadata?.path ||
+        matchingFile?.storage_path ||
+        matchingFile?.path ||
+        body.path;
+
+      const storage = new StorageRouter(adminClient);
+      let signedUrl: string | null = null;
+      try {
+        if (
+          targetPath.startsWith("/") ||
+          (!targetPath.includes("://") && targetPath.length > 0)
+        ) {
+          const resolved = await storage.resolveAndSign(
+            targetPath,
+            itemId,
+            300,
+          );
+          signedUrl = resolved.signedUrl;
+        } else {
+          signedUrl = await storage.getSignedUrl(targetPath, 300);
+        }
+      } catch (_e) {
+        const filename = targetPath.split("/").pop() || "";
+        const clean = targetPath.replace(/^[a-z0-9-_]+:\/\//i, "").replace(
+          /^\/+/,
+          "",
+        );
+        const candidates = [
+          `${itemId}/${filename}`,
+          clean,
+          clean.replace(/^audiobooks\//, ""),
+          filename,
+        ].filter(Boolean);
+        const resolved = await storage.signFirstExisting(
+          Array.from(new Set(candidates)),
+          300,
+        );
+        if (resolved) {
+          signedUrl = resolved.signedUrl;
+        }
+      }
+
+      if (signedUrl) {
+        const res = await fetch(signedUrl);
+        if (res.ok) {
+          fileData = await res.arrayBuffer();
+          contentType = res.headers.get("content-type") || "image/jpeg";
+          extension = contentType.split("/")[1]?.split("+")[0] ||
+            targetPath.split(".").pop() || "jpg";
+          if (extension === "jpeg") extension = "jpg";
+        }
       }
     }
   } else {
@@ -819,7 +903,7 @@ const handleCoverUpload = async (
   await adminClient.from("library_items").update({ cover_path: storagePath })
     .eq("id", itemId);
 
-  return c.json({ updated: true }, 200);
+  return c.json({ updated: true, success: true, cover: storagePath }, 200);
 };
 
 const uploadItemCoverPatchRoute = {
