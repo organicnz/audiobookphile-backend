@@ -58,16 +58,20 @@ DO $$
 DECLARE
   v_ignored bigint;
 BEGIN
-  BEGIN
-    SELECT cron.unschedule('invoke-deduplicate-library-items-hourly') INTO v_ignored;
-  EXCEPTION WHEN OTHERS THEN
-    NULL; -- not currently scheduled; nothing to remove
-  END;
-  PERFORM cron.schedule(
-    'invoke-deduplicate-library-items-hourly',
-    '15 * * * *',
-    $cmd$SELECT public.deduplicate_library_items_guarded()$cmd$
-  );
+  IF EXISTS (SELECT 1 FROM information_schema.schemata WHERE schema_name = 'cron') THEN
+    BEGIN
+      EXECUTE 'SELECT cron.unschedule(''invoke-deduplicate-library-items-hourly'')' INTO v_ignored;
+    EXCEPTION WHEN OTHERS THEN
+      NULL; -- not currently scheduled; nothing to remove
+    END;
+    EXECUTE $cmd$
+      SELECT cron.schedule(
+        'invoke-deduplicate-library-items-hourly',
+        '15 * * * *',
+        'SELECT public.deduplicate_library_items_guarded()'
+      )
+    $cmd$;
+  END IF;
 END;
 $$;
 
