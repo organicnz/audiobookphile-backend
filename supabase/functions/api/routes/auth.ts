@@ -871,7 +871,7 @@ authRouter.openapi(magicLinkRoute, async (c) => {
     const { error } = await anonSupabase.auth.signInWithOtp({
       email,
       options: {
-        shouldCreateUser: false,
+        shouldCreateUser: true,
         emailRedirectTo: target,
       },
     });
