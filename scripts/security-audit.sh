@@ -4,6 +4,11 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
+if command -v audiobookphile >/dev/null 2>&1; then
+    audiobookphile audit --path "$REPO_ROOT"
+    exit 0
+fi
+
 if [ -f "$REPO_ROOT/crates/cli/target/release/audiobookphile" ]; then
     "$REPO_ROOT/crates/cli/target/release/audiobookphile" audit --path "$REPO_ROOT"
     exit 0

@@ -38,6 +38,16 @@ pub fn run_audit(options: AuditOptions) -> Result<bool> {
 
     let unpinned_branch_regex = Regex::new(r#"branch:\s*["'][^"']+["']"#)?;
 
+    let sql_injection_regex = Regex::new(r"(\.query\([^)]*\+|from\([^)]*\+)")?;
+
+    let sql_drop_table_regex = Regex::new(r"(?i)\bDROP\s+TABLE\b")?;
+
+    let sql_truncate_regex = Regex::new(r"(?i)\bTRUNCATE\b")?;
+
+    let dangerously_html_regex = Regex::new(r"dangerouslySetInnerHTML")?;
+
+    let deprecated_deno_std_regex = Regex::new(r"https://deno\.land/std@0\.[0-9]{2}\.")?;
+
     let bloat_extensions = ["m4b", "mp3", "flac", "aac", "wav", "ogg", "zip", "tar.gz", "iso"];
 
     let mut violations: Vec<AuditViolation> = Vec::new();
@@ -247,6 +257,88 @@ pub fn run_audit(options: AuditOptions) -> Result<bool> {
                         line: idx + 1,
                         rule: "SPM_UNPINNED_BRANCH".to_string(),
                         message: format!("Unpinned git branch dependency in Package.swift: {}", line.trim()),
+                    });
+                }
+            }
+        }
+
+        // 7. SQL Injection Risk Scanner (Raw String Concatenation in SQL)
+        if !is_test_or_mock && !is_audit_script && (path_str.ends_with(".ts") || path_str.ends_with(".js")) {
+            for (idx, line) in content.lines().enumerate() {
+                if sql_injection_regex.is_match(line) {
+                    violations.push(AuditViolation {
+                        file: path.to_path_buf(),
+                        line: idx + 1,
+                        rule: "SQL_INJECTION_RISK".to_string(),
+                        message: format!("Potential SQL injection or string concatenation in query: {}", line.trim()),
+                    });
+                }
+            }
+        }
+
+        // 8. SQL Migration Safety Scanner (Destructive DROP TABLE or TRUNCATE)
+        if path_str.ends_with(".sql") && (path_str.contains("/migrations/") || path_str.contains("/supabase/")) {
+            let is_data_backup = path_str.contains("data_backup")
+                || path_str.contains("backup_export")
+                || path_str.contains("09_restore_data");
+            if !is_data_backup {
+                for (idx, line) in content.lines().enumerate() {
+                    let trimmed = line.trim();
+                    if trimmed.starts_with("--") {
+                        continue;
+                    }
+                    if sql_drop_table_regex.is_match(line) {
+                        let upper = line.to_uppercase();
+                        if !upper.contains("IF EXISTS") {
+                            violations.push(AuditViolation {
+                                file: path.to_path_buf(),
+                                line: idx + 1,
+                                rule: "UNSAFE_SQL_DROP_TABLE".to_string(),
+                                message: format!("DROP TABLE without IF EXISTS in migration: {}", trimmed),
+                            });
+                        }
+                    }
+                    if sql_truncate_regex.is_match(line) {
+                        violations.push(AuditViolation {
+                            file: path.to_path_buf(),
+                            line: idx + 1,
+                            rule: "UNSAFE_SQL_TRUNCATE".to_string(),
+                            message: format!("Destructive TRUNCATE found in migration — prefer DELETE with WHERE: {}", trimmed),
+                        });
+                    }
+                }
+            }
+        }
+
+        // 9. Unsanitized HTML Rendering / XSS
+        if !is_test_or_mock && (path_str.ends_with(".tsx") || path_str.ends_with(".jsx")) {
+            let is_approved_html_widget = path_str.contains("ExpandableHtml")
+                || path_str.contains("ViewEpisodeModal")
+                || path_str.contains("EpisodeRow")
+                || path_str.contains("SlateEditorExamples");
+            if !is_approved_html_widget {
+                for (idx, line) in content.lines().enumerate() {
+                    if dangerously_html_regex.is_match(line) {
+                        violations.push(AuditViolation {
+                            file: path.to_path_buf(),
+                            line: idx + 1,
+                            rule: "UNSANITIZED_HTML_XSS".to_string(),
+                            message: format!("dangerouslySetInnerHTML found outside approved widget components: {}", line.trim()),
+                        });
+                    }
+                }
+            }
+        }
+
+        // 10. Outdated Deno std library version below std@0.200.0
+        if !is_test_or_mock && !is_audit_script && path_str.ends_with(".ts") {
+            for (idx, line) in content.lines().enumerate() {
+                if deprecated_deno_std_regex.is_match(line) {
+                    violations.push(AuditViolation {
+                        file: path.to_path_buf(),
+                        line: idx + 1,
+                        rule: "DEPRECATED_DENO_STD".to_string(),
+                        message: format!("Outdated Deno std library version below std@0.200.0: {}", line.trim()),
                     });
                 }
             }

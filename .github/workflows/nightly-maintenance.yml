@@ -59,7 +59,13 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: |
-          cargo run --manifest-path crates/cli/Cargo.toml --release -- storage-health
+          if command -v audiobookphile >/dev/null 2>&1; then
+            audiobookphile storage-health
+          elif [ -f crates/cli/target/release/audiobookphile ]; then
+            crates/cli/target/release/audiobookphile storage-health
+          else
+            cargo run --manifest-path crates/cli/Cargo.toml --release -- storage-health
+          fi
 
   integrity-audit:
     name: Detect Corrupted Library Items
