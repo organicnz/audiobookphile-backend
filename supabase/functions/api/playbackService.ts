@@ -197,240 +197,324 @@ export class PlaybackService {
     // Get Storage Provider
     const storage = new StorageRouter(supabase);
 
-    // Sign audio files concurrently
-    const signedTrackResults = await Promise.all(
-      sortedAudioFiles.map(async (af, i) => {
-        const metadata = ((af as any).metadata as Record<string, unknown>) ||
-          {};
-        const storagePath = String(
-          metadata.path ||
-            (af as any).storage_path ||
-            (af as any).path ||
-            (af as any).relPath ||
-            (af as any).rel_path ||
-            metadata.relPath ||
-            metadata.rel_path ||
-            metadata.filename ||
-            (af as any).filename ||
-            "",
-        );
+    const mediaId = String((item as any).media_id || "");
+    const rawItemPath = String((item as any).path || "").replace(/^\/+/, "");
 
-        let duration = af.duration;
-        if (needsDurationEstimation && duration === 0) {
-          if (totalBookDuration > 0 && af.size > 0 && totalFilesSize > 0) {
-            duration = (af.size / totalFilesSize) * totalBookDuration;
-          } else if (totalBookDuration > 0) {
-            duration = totalBookDuration / sortedAudioFiles.length;
-          } else {
-            duration = af.size / 12000;
+    // Helper to build candidate storage keys for a track's file
+    const buildCandidates = (
+      storagePath: string,
+      filename: string,
+    ): string[] => {
+      const cleanStoragePath = storagePath
+        .replace(/^[a-z0-9-_]+:\/\//i, "")
+        .replace(/^\/+/, "");
+      const recordedPrefix = cleanStoragePath.includes("/")
+        ? cleanStoragePath.split("/").slice(0, -1).join("/")
+        : "";
+
+      const candidateList = [
+        `${libraryItemId}/${filename}`,
+        mediaId && mediaId !== libraryItemId ? `${mediaId}/${filename}` : "",
+        recordedPrefix && recordedPrefix !== libraryItemId &&
+          recordedPrefix !== mediaId
+          ? `${recordedPrefix}/${filename}`
+          : "",
+        rawItemPath ? `${rawItemPath}/${filename}` : "",
+        rawItemPath
+          ? `${rawItemPath.replace(/^audiobooks\//, "")}/${filename}`
+          : "",
+        cleanStoragePath,
+        cleanStoragePath.replace(/^audiobooks\//, ""),
+        filename,
+      ].filter(Boolean);
+
+      return Array.from(new Set(candidateList));
+    };
+
+    // Prepare metadata for all sorted audio files
+    interface PreparedTrack {
+      af: (typeof sortedAudioFiles)[0];
+      index: number;
+      duration: number;
+      storagePath: string;
+      filename: string;
+      metadata: Record<string, unknown>;
+      finalSignedUrl: string;
+      resolvedCanonicalPath: string | null;
+      isMissing: boolean;
+    }
+
+    const preparedTracks: PreparedTrack[] = sortedAudioFiles.map((af, i) => {
+      const metadata = ((af as any).metadata as Record<string, unknown>) || {};
+      const storagePath = String(
+        metadata.path ||
+          (af as any).storage_path ||
+          (af as any).path ||
+          (af as any).relPath ||
+          (af as any).rel_path ||
+          metadata.relPath ||
+          metadata.rel_path ||
+          metadata.filename ||
+          (af as any).filename ||
+          "",
+      );
+
+      let duration = af.duration;
+      if (needsDurationEstimation && duration === 0) {
+        if (totalBookDuration > 0 && af.size > 0 && totalFilesSize > 0) {
+          duration = (af.size / totalFilesSize) * totalBookDuration;
+        } else if (totalBookDuration > 0) {
+          duration = totalBookDuration / sortedAudioFiles.length;
+        } else {
+          duration = af.size / 12000;
+        }
+      }
+
+      const rawFilename = String(
+        metadata.filename || (af as any).filename || metadata.relPath || "",
+      );
+      const cleanStorage = storagePath.replace(/^[a-z0-9-_]+:\/\//i, "")
+        .replace(/^\/+/, "");
+      const filename =
+        (rawFilename || cleanStorage.split("/").pop() || `Track ${i + 1}`)
+          .trim()
+          .replace(/^\/+/, "")
+          .split("/")
+          .pop() || `Track ${i + 1}`;
+
+      return {
+        af,
+        index: af.index ?? i,
+        duration,
+        storagePath,
+        filename,
+        metadata,
+        finalSignedUrl: "",
+        resolvedCanonicalPath: null,
+        isMissing: false,
+      };
+    });
+
+    // --- Single-Probe Folder Template Derivation ---
+    // All audio tracks in an audiobook reside in the same bucket tier under the same prefix.
+    // Probing track 0 (with fallback to track 1) discovers the canonical tier and prefix in <200ms,
+    // allowing all remaining tracks to be presigned locally via HMAC in <5ms without network calls.
+    const firstTrack = preparedTracks[0];
+    const isFirstLegacy = firstTrack.storagePath.startsWith("/") ||
+      (!firstTrack.storagePath.includes("://") &&
+        firstTrack.storagePath.length > 0);
+
+    let winningPrefix: string | null = null;
+
+    if (isFirstLegacy) {
+      try {
+        const resolved = await storage.resolveAndSign(
+          firstTrack.storagePath,
+          libraryItemId,
+          604800,
+        );
+        firstTrack.finalSignedUrl = resolved.signedUrl;
+        firstTrack.resolvedCanonicalPath = resolved.canonicalPath;
+        const lastSlash = resolved.canonicalPath.lastIndexOf("/");
+        winningPrefix = lastSlash !== -1
+          ? resolved.canonicalPath.slice(0, lastSlash + 1)
+          : "";
+      } catch {
+        // resolveAndSign failed, fall through to candidate probe
+      }
+    } else {
+      const exists = await storage.fileExists(firstTrack.storagePath).catch(
+        () => false,
+      );
+      if (exists) {
+        try {
+          firstTrack.finalSignedUrl = await storage.getSignedUrl(
+            firstTrack.storagePath,
+            604800,
+          );
+          const lastSlash = firstTrack.storagePath.lastIndexOf("/");
+          winningPrefix = lastSlash !== -1
+            ? firstTrack.storagePath.slice(0, lastSlash + 1)
+            : "";
+        } catch {
+          // presign threw, fall through to candidate probe
+        }
+      }
+    }
+
+    // If first track couldn't be presigned / verified, probe cross-tier candidate keys
+    if (!firstTrack.finalSignedUrl) {
+      const candidates0 = buildCandidates(
+        firstTrack.storagePath,
+        firstTrack.filename,
+      );
+      const resolved0 = await storage.signFirstExisting(candidates0, 604800);
+      if (resolved0) {
+        firstTrack.finalSignedUrl = resolved0.signedUrl;
+        firstTrack.resolvedCanonicalPath = resolved0.canonicalPath;
+        const lastSlash = resolved0.canonicalPath.lastIndexOf("/");
+        winningPrefix = lastSlash !== -1
+          ? resolved0.canonicalPath.slice(0, lastSlash + 1)
+          : "";
+      } else {
+        // Track 0 is missing; mark it and try track 1 fallback
+        firstTrack.isMissing = true;
+        firstTrack.finalSignedUrl = "";
+
+        if (preparedTracks.length > 1) {
+          const secondTrack = preparedTracks[1];
+          const candidates1 = buildCandidates(
+            secondTrack.storagePath,
+            secondTrack.filename,
+          );
+          const resolved1 = await storage.signFirstExisting(
+            candidates1,
+            604800,
+          );
+          if (resolved1) {
+            secondTrack.finalSignedUrl = resolved1.signedUrl;
+            secondTrack.resolvedCanonicalPath = resolved1.canonicalPath;
+            const lastSlash = resolved1.canonicalPath.lastIndexOf("/");
+            winningPrefix = lastSlash !== -1
+              ? resolved1.canonicalPath.slice(0, lastSlash + 1)
+              : "";
           }
         }
+      }
+    }
 
-        let finalSignedUrl = "";
-        let isMissing = false;
-        let resolvedCanonicalPath: string | null = null;
+    // Fast-fail: if neither Track 0 nor Track 1 exists in any tier, the book does not exist in storage!
+    if (
+      !winningPrefix &&
+      !preparedTracks.some((t) => t.finalSignedUrl && !t.isMissing)
+    ) {
+      throw new Error(
+        `All audio files are missing from B2 for item ${libraryItemId} ` +
+          `(${preparedTracks.length} track(s) not found, probed tiers: ` +
+          `${getConfiguredTiers().join(", ") || "none configured"}). ` +
+          `The book may need to be re-uploaded.`,
+      );
+    }
+
+    // Sign remaining tracks locally using the winning prefix (pure local HMAC-SHA256, 0 network requests)
+    await Promise.all(
+      preparedTracks.map(async (track, idx) => {
+        if (track.finalSignedUrl || track.isMissing) {
+          return;
+        }
+
+        const isTrackLegacy = track.storagePath.startsWith("/") ||
+          (!track.storagePath.includes("://") && track.storagePath.length > 0);
+
+        const targetPath = winningPrefix
+          ? `${winningPrefix}${track.filename}`
+          : (!isTrackLegacy && track.storagePath
+            ? track.storagePath
+            : `${libraryItemId}/${track.filename}`);
 
         try {
-          const isLegacyPath = storagePath.startsWith("/") ||
-            (!storagePath.includes("://") && storagePath.length > 0);
-
-          if (isLegacyPath) {
-            const resolved = await storage.resolveAndSign(
-              storagePath,
-              libraryItemId,
-              604800,
-            );
-            finalSignedUrl = resolved.signedUrl;
-            resolvedCanonicalPath = resolved.canonicalPath;
-          } else {
-            finalSignedUrl = await storage.getSignedUrl(storagePath, 604800);
+          track.finalSignedUrl = await storage.getSignedUrl(targetPath, 604800);
+          if (winningPrefix || targetPath !== track.storagePath) {
+            track.resolvedCanonicalPath = targetPath;
           }
-        } catch (e: unknown) {
-          const signErr = e as Error;
+        } catch (signErr) {
           console.warn(
-            `[PlaybackService] Missing storage file at "${storagePath}": ${signErr.message}. Skipping track.`,
+            `[PlaybackService] Failed to presign track ${idx} at "${targetPath}":`,
+            signErr,
           );
-          isMissing = true;
+          track.isMissing = true;
+          track.finalSignedUrl = "";
         }
-
-        return {
-          af,
-          index: af.index ?? i,
-          duration,
-          finalSignedUrl,
-          isMissing,
-          storagePath,
-          resolvedCanonicalPath,
-          metadata,
-          filename: String(
-            metadata.filename || (af as any).filename || `Track ${i + 1}`,
-          ),
-        };
       }),
     );
+
+    // Patch DB in background with resolved canonical paths if any were recovered
+    const hasAnyResolvedCanonical = preparedTracks.some(
+      (r) => r.resolvedCanonicalPath,
+    );
+    if (hasAnyResolvedCanonical) {
+      (async () => {
+        try {
+          const { data: currentItem } = await supabase
+            .from("library_items")
+            .select("audio_files")
+            .eq("id", libraryItemId)
+            .single();
+
+          if (currentItem?.audio_files) {
+            const resolvedMap = new Map<string, string>();
+            for (const r of preparedTracks) {
+              if (r.resolvedCanonicalPath) {
+                if (r.storagePath) {
+                  resolvedMap.set(r.storagePath, r.resolvedCanonicalPath);
+                }
+                if (r.filename) {
+                  resolvedMap.set(r.filename, r.resolvedCanonicalPath);
+                }
+              }
+            }
+
+            const updatedFiles = (
+              currentItem.audio_files as Record<string, unknown>[]
+            ).map((af: Record<string, unknown>) => {
+              const afMeta = (af.metadata as Record<string, unknown>) || {};
+              const currentPath = String(
+                afMeta.path || (af as any).storage_path || (af as any).path ||
+                  "",
+              );
+              const currentFilename = String(
+                afMeta.filename || (af as any).filename || "",
+              );
+              const newCanonical = resolvedMap.get(currentPath) ||
+                resolvedMap.get(currentFilename);
+              if (newCanonical) {
+                return {
+                  ...af,
+                  storage_path: newCanonical,
+                  metadata: {
+                    ...afMeta,
+                    path: newCanonical,
+                  },
+                };
+              }
+              return af;
+            });
+
+            await supabase
+              .from("library_items")
+              .update({ audio_files: updatedFiles as any })
+              .eq("id", libraryItemId);
+          }
+        } catch (patchErr) {
+          console.warn(
+            `[PlaybackService] Failed to patch canonical paths for item ${libraryItemId}:`,
+            patchErr,
+          );
+        }
+      })();
+    }
 
     let currentOffset = 0;
     const audioTracks: Record<string, unknown>[] = [];
     const missingTracks: string[] = [];
 
-    // --- Self-heal: verify tracks and recover any dead or missing paths ---
-    // Presigning is a purely local computation — it never contacts storage —
-    // so a stale or mis-recorded path yields URLs that 404 only when the
-    // player fetches them. On missing tracks or when the first live track's
-    // HEAD probe fails, re-resolve every track across all tiers and candidate
-    // prefixes (itemId, mediaId, recorded prefix, item path, filename).
-    const MAX_SELF_HEAL_TRACKS = 60;
-    let selfHealedCount = 0;
-    const firstLive = signedTrackResults.find((r) =>
-      !r.isMissing && r.finalSignedUrl
-    );
-    const firstLiveWasVerified = !!firstLive?.resolvedCanonicalPath;
-    let firstLiveExists = true;
-    if (firstLive && !firstLiveWasVerified) {
-      firstLiveExists = await storage.fileExists(firstLive.storagePath).catch(
-        () => false,
-      );
-      if (!firstLiveExists) {
-        console.warn(
-          `[PlaybackService] Recorded path for first track no longer exists: "${firstLive.storagePath}" — probing alternate tiers/prefixes for ${libraryItemId}`,
-        );
-      }
-    }
-
-    const hasMissingTracks = signedTrackResults.some((r) =>
-      r.isMissing || !r.finalSignedUrl
-    );
-    const mediaId = String((item as any).media_id || "");
-    const rawItemPath = String((item as any).path || "").replace(/^\/+/, "");
-
-    if (!firstLiveExists || hasMissingTracks) {
-      for (const res of signedTrackResults) {
-        // If first live track didn't exist, all tracks need re-resolution; otherwise heal missing tracks
-        if (!firstLiveExists || res.isMissing || !res.finalSignedUrl) {
-          if (selfHealedCount >= MAX_SELF_HEAL_TRACKS) {
-            console.warn(
-              `[PlaybackService] Self-heal budget (${MAX_SELF_HEAL_TRACKS}) exhausted for ${libraryItemId}; remaining tracks marked missing`,
-            );
-            res.isMissing = true;
-            res.finalSignedUrl = "";
-            continue;
-          }
-
-          const filename = res.storagePath.split("/").pop() ||
-            String(res.metadata.filename || res.filename);
-          const recordedPrefix = res.storagePath.includes("://")
-            ? res.storagePath.replace(/^[a-z0-9-_]+:\/\//i, "").split("/")
-              .slice(0, -1).join("/")
-            : res.storagePath.split("/").slice(0, -1).join("/");
-
-          const cleanStoragePath = res.storagePath.replace(
-            /^[a-z0-9-_]+:\/\//i,
-            "",
-          ).replace(/^\/+/, "");
-
-          const candidateList = [
-            `${libraryItemId}/${filename}`,
-            mediaId && mediaId !== libraryItemId
-              ? `${mediaId}/${filename}`
-              : "",
-            recordedPrefix && recordedPrefix !== libraryItemId &&
-              recordedPrefix !== mediaId
-              ? `${recordedPrefix}/${filename}`
-              : "",
-            rawItemPath ? `${rawItemPath}/${filename}` : "",
-            rawItemPath
-              ? `${rawItemPath.replace(/^audiobooks\//, "")}/${filename}`
-              : "",
-            cleanStoragePath,
-            cleanStoragePath.replace(/^audiobooks\//, ""),
-            filename,
-          ].filter(Boolean);
-
-          const uniqueCandidates = Array.from(new Set(candidateList));
-          const resolved = await storage.signFirstExisting(
-            uniqueCandidates,
-            604800,
-          );
-          if (resolved) {
-            console.info(
-              `[PlaybackService] Self-healed track "${filename}": ${res.storagePath} → ${resolved.canonicalPath}`,
-            );
-            selfHealedCount++;
-            res.finalSignedUrl = resolved.signedUrl;
-            res.resolvedCanonicalPath = resolved.canonicalPath;
-            res.isMissing = false;
-          } else {
-            console.warn(
-              `[PlaybackService] Track "${filename}" not found in any backend under ${
-                uniqueCandidates.join(", ")
-              }`,
-            );
-            res.isMissing = true;
-            res.finalSignedUrl = "";
-          }
-        }
-      }
-    }
-
-    for (const res of signedTrackResults) {
-      if (res.isMissing) {
-        missingTracks.push(res.storagePath);
+    for (const res of preparedTracks) {
+      if (res.isMissing || !res.finalSignedUrl) {
+        missingTracks.push(res.storagePath || res.filename);
         continue;
       }
 
-      if (res.resolvedCanonicalPath) {
-        (async () => {
-          try {
-            const { data: currentItem } = await supabase
-              .from("library_items")
-              .select("audio_files")
-              .eq("id", libraryItemId)
-              .single();
-
-            if (currentItem?.audio_files) {
-              const updatedFiles = (
-                currentItem.audio_files as Record<string, unknown>[]
-              ).map((af: Record<string, unknown>) => {
-                const afMeta = (af.metadata as Record<string, unknown>) || {};
-                if (String(afMeta.path ?? "") === res.storagePath) {
-                  return {
-                    ...af,
-                    metadata: {
-                      ...afMeta,
-                      path: res.resolvedCanonicalPath,
-                    },
-                  };
-                }
-                return af;
-              });
-
-              await supabase
-                .from("library_items")
-                .update({ audio_files: updatedFiles as any })
-                .eq("id", libraryItemId);
-            }
-          } catch (patchErr) {
-            console.warn(
-              `[PlaybackService] Failed to patch legacy path "${res.storagePath}" → "${res.resolvedCanonicalPath}":`,
-              patchErr,
-            );
-          }
-        })();
-      }
-
-      if (res.finalSignedUrl) {
-        audioTracks.push({
-          index: res.index,
-          startOffset: currentOffset,
-          duration: res.duration,
-          title: res.filename,
-          contentUrl: res.finalSignedUrl,
-          mimeType: res.af.mime_type,
-          codec: res.af.codec,
-          isMissing: false,
-        });
-        currentOffset += res.duration;
-      }
+      audioTracks.push({
+        index: res.index,
+        startOffset: currentOffset,
+        duration: res.duration,
+        title: res.filename,
+        contentUrl: res.finalSignedUrl,
+        mimeType: res.af.mime_type,
+        codec: res.af.codec,
+        isMissing: false,
+      });
+      currentOffset += res.duration;
     }
 
     if (audioTracks.length === 0) {

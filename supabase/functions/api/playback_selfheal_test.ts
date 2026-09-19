@@ -369,3 +369,46 @@ Deno.test("self-heal: recovers even when initial presigning threw for all tracks
     "recovered-signed-url",
   );
 });
+
+Deno.test("self-heal: multi-track audiobook derives prefix from track 0 with exactly 1 probe", async () => {
+  let probeCount = 0;
+  stubStorage({
+    fileExists: () => Promise.resolve(false),
+    signFirstExisting: (_keys: string[]) => {
+      probeCount++;
+      return Promise.resolve({
+        signedUrl:
+          "signed:b2-quinta://11111111-2222-3333-4444-555555555555/01.mp3",
+        canonicalPath:
+          `b2-quinta://11111111-2222-3333-4444-555555555555/01.mp3`,
+      });
+    },
+    getSignedUrl: (path: string) => Promise.resolve(`signed:${path}`),
+  });
+
+  const fiveTracks = Array.from({ length: 5 }, (_, i) => ({
+    duration: 10,
+    metadata: {
+      filename: `0${i + 1}.mp3`,
+      path: `b2://old-tier/0${i + 1}.mp3`,
+    },
+  }));
+
+  const session = await PlaybackService.startSession(
+    fakeSupabase(itemWith(fiveTracks)),
+    "user-1",
+    ITEM_ID,
+  );
+
+  // Exactly ONE probe across all 5 tracks!
+  assertEquals(probeCount, 1);
+  assertEquals(session.missingTrackCount, 0);
+  assertEquals(session.audioTracks.length, 5);
+  for (let i = 0; i < 5; i++) {
+    const track = session.audioTracks[i] as Record<string, unknown>;
+    assertEquals(
+      track.contentUrl,
+      `signed:b2-quinta://11111111-2222-3333-4444-555555555555/0${i + 1}.mp3`,
+    );
+  }
+});
