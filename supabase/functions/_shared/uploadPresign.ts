@@ -1,11 +1,11 @@
 /* ============================================================================
  * UPLOAD PRESIGN — WITH SINGLE CONFIG SOURCE OF TRUTH
  *
- * PURPOSE: Presigns uploads to the intelligent B2 bucket pool (primary →
- * secondary → tertiary → quartet → quinta). All bucket configuration now
- * comes from the single source of truth in b2-config.ts, eliminating the
- * scattered env-read pattern that previously existed in import_missing_books.ts
- * and other scripts.
+ * PURPOSE: Presigns uploads to the intelligent B2 bucket pool (quinta →
+ * tertiary → primary → secondary → quartet, same order as selectBucket()).
+ * All bucket configuration now comes from the single source of truth in
+ * b2-config.ts, eliminating the scattered env-read pattern that previously
+ * existed in import_missing_books.ts and other scripts.
  *
  * KEY IMPROVEMENTS vs previous version:
  *   - Config from b2-config.ts single source (not scattered TIER_ENV maps)
@@ -23,6 +23,7 @@ import {
   healthCheckBuckets,
   selectBucket,
 } from "./b2-bucket-pool.ts";
+import { isTierConfigured } from "./b2-config.ts";
 import type { BucketHealth, BucketTier } from "./b2-types.ts";
 import { tierToPrefix } from "./storage-router.ts";
 
@@ -39,11 +40,11 @@ function getOrCreateClient(tier: BucketTier): S3Client {
 
 /* -------------------------------------------------------------------------
  * Presign an upload using the intelligent bucket pool selection.
- * Automatically selects the best available bucket from the pool (primary →
- * secondary → tertiary → quartet → quinta) using health-aware strategy.
+ * Automatically selects the best available bucket from the pool (quinta →
+ * tertiary → primary → secondary → quartet) using health-aware strategy.
  *
- * FALLBACK CHAIN (health-gated):
- *   B2_SECONDARY → B2_TERTIARY → B2_QUARTET → B2_QUINTET
+ * FALLBACK CHAIN (health-gated, same order as selectBucket()):
+ *   B2_QUINTET → B2_TERTIARY → B2 → B2_SECONDARY → B2_QUARTET
  *
  * Each tier is checked for health before attempting. If a tier is not
  * configured or is unhealthy, it's skipped automatically.
@@ -95,19 +96,22 @@ export async function presignUpload(
       health,
     };
   } catch (error) {
-    /* If primary (B2) fails, try fallback buckets in health-gated chain */
+    /* If selected tier fails, try fallback buckets in pool-priority order */
     const fallbackChain: BucketTier[] = [
-      "B2_SECONDARY",
-      "B2_TERTIARY",
-      "B2_QUARTET",
       "B2_QUINTET",
+      "B2_TERTIARY",
+      "B2",
+      "B2_SECONDARY",
+      "B2_QUARTET",
     ];
     let lastError: Error | string = error instanceof Error
       ? error
       : new Error(String(error));
 
     for (const fallbackTier of fallbackChain) {
-      /* Health gate: skip unhealthy or unconfigured tiers */
+      if (fallbackTier === tier) continue;
+      if (!isTierConfigured(fallbackTier)) continue;
+      /* Health gate: skip unhealthy tiers */
       const fallbackHealth = bucketHealth.getHealth(fallbackTier);
       if (!fallbackHealth.isHealthy) {
         // @ts-ignore — runtime log suppression
@@ -136,7 +140,7 @@ export async function presignUpload(
           url,
           provider_prefix: tierToPrefix(fallbackTier),
           bucketTier: fallbackTier as BucketTier,
-          bucketName,
+          bucketName: fallbackBucketName,
           health: bucketHealth.getHealth(fallbackTier),
         };
       } catch (fallbackError) {

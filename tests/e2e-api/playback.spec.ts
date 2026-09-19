@@ -84,7 +84,7 @@ test("dead scheme'd track yields honest 'all missing' failure, not broken URLs",
   const res = await play(request, item.id);
   expect(res.status()).toBe(404);
   const raw = JSON.stringify(await res.json());
-  expect(raw).toContain("missing from storage");
+  expect(raw).toContain("missing from B2");
 });
 
 test("partial book surfaces missingTrackCount for surviving tracks", async ({ request }) => {

@@ -184,10 +184,19 @@ function runFinalize(
   supabase: MockSupabase,
   body: unknown,
   fileExists: (path: string) => Promise<boolean> = async () => true,
+  deletedPaths: string[] = [],
 ) {
   return executeFinalize(makeC(body), {
     supabase,
-    storageRouter: { fileExists },
+    // Audio is B2-only: orphan cleanup goes through deletePath (B2 delete),
+    // never supabase.storage.from("audio-files").remove.
+    storageRouter: {
+      fileExists,
+      deletePath: async (p: string) => {
+        deletedPaths.push(p);
+        return true;
+      },
+    },
   });
 }
 
@@ -266,22 +275,27 @@ Deno.test("finalize: duplicate book with overwrite=false returns 409 and cleans 
       duration: 0,
     }],
   });
-  const res = await runFinalize(sb, {
-    bookId: "11111111-2222-3333-4444-555555555555",
-    title: "Brand New Book",
-    library: LIB_ID,
-    mediaType: "book",
-    files: OK_FILES,
-    overwrite: false,
-  });
+  const deletedPaths: string[] = [];
+  const res = await runFinalize(
+    sb,
+    {
+      bookId: "11111111-2222-3333-4444-555555555555",
+      title: "Brand New Book",
+      library: LIB_ID,
+      mediaType: "book",
+      files: OK_FILES,
+      overwrite: false,
+    },
+    async () => true,
+    deletedPaths,
+  );
   assertEquals(res.status, 409);
   assertEquals((res.json as { existingId: string }).existingId, existingId);
   assertEquals((sb.tables["library_items"] ?? []).length, 1);
-  assertEquals(sb.storageRemoveCalls.length, 1);
-  assertEquals(
-    sb.storageRemoveCalls[0],
-    OK_FILES.map((f) => f.storagePath),
-  );
+  // Audio is B2-only: orphans are deleted via StorageRouter.deletePath (B2),
+  // never via Supabase audio-files bucket (covers/light only).
+  assertEquals(deletedPaths, OK_FILES.map((f) => f.storagePath));
+  assertEquals(sb.storageRemoveCalls.length, 0);
 });
 
 Deno.test("finalize: duplicate book with overwrite=true rebinds to existing record and merges files", async () => {

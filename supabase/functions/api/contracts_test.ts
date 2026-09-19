@@ -11,6 +11,18 @@ import { assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import app from "./index.ts";
 import { runContractChecks } from "./_shared/contracts.ts";
 
+// Hermetic: the cover contract check builds an admin Supabase client at
+// handler time. Without these, createClient throws ("supabaseKey is
+// required") and the check 500s instead of 404ing — which made this file
+// pass only when auth_matrix_test.ts happened to load first and set dummy
+// env as a side effect. Dummy values suffice: the query fails gracefully
+// and the handler returns the expected 404 envelope.
+Deno.env.set("SUPABASE_URL", "https://contracts-test.supabase.internal");
+Deno.env.set(
+  "SUPABASE_SERVICE_ROLE_KEY",
+  "service_role_contracts_test",
+);
+
 Deno.test("alias deprecation log fires once per /api path", async () => {
   const warnings: string[] = [];
   const originalWarn = console.warn;

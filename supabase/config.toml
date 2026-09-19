@@ -169,13 +169,18 @@ enabled = true
 # in emails. The magic-link confirmation URL is built from this value, so it
 # MUST be the production web origin or every emailed sign-in link goes dead.
 # (Pushed to the hosted project by the deploy workflow via `supabase config push`.)
-site_url = "https://audiobookphile.vercel.app"
+site_url = "https://audiobookphile.app"
 # The public URL that Auth serves on. Defaults to the API external URL with `/auth/v1` appended.
 # external_url = ""
 # A list of *exact* URLs that auth providers are permitted to redirect to post authentication.
 # The web app (prod + local) and the iOS custom scheme must all be listed or
 # GoTrue falls back to `site_url` when building emailed confirmation links.
+# Canonical domain is audiobookphile.app; vercel.app/foodshare entries are
+# legacy fallbacks (the vercel.app suffix belongs to the old scope).
 additional_redirect_urls = [
+  "https://audiobookphile.app",
+  "https://www.audiobookphile.app",
+  "https://app.audiobookphile.app",
   "https://audiobookphile.vercel.app",
   "https://audiobookphile.foodshare.club",
   "http://127.0.0.1:3000",

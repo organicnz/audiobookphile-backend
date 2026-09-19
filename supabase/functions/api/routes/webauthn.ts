@@ -235,9 +235,13 @@ const passkeysRemoveRoute = {
 const CHALLENGE_TTL_MS = 5 * 60 * 1000;
 
 function getRpConfig(c?: any) {
+  // Canonical domain is audiobookphile.app. rpId derives from the effective
+  // origin hostname at runtime, so WEBAUTHN_ORIGIN / NEXT_PUBLIC_SITE_URL win
+  // when set (Vercel production already uses https://audiobookphile.app).
+  // The literal below is only the fallback for env-less contexts.
   let origin = Deno.env.get("WEBAUTHN_ORIGIN") ||
     Deno.env.get("NEXT_PUBLIC_SITE_URL") ||
-    "https://audiobookphile.vercel.app";
+    "https://audiobookphile.app";
   let rpId = Deno.env.get("WEBAUTHN_RP_ID") || new URL(origin).hostname;
 
   if (c) {

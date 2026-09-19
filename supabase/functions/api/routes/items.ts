@@ -20,6 +20,7 @@ import {
 } from "../_shared/constants.ts";
 import { getErrorMessage } from "../_shared/errors.ts";
 import { sanitizeString } from "../_shared/validation.ts";
+import { StorageRouter } from "../../_shared/storage-router.ts";
 
 export const itemsRouter = createOpenApiRouter();
 
@@ -849,9 +850,16 @@ itemsRouter.openapi(deleteAudioFileRoute, async (c): Promise<Response> => {
   const fileToDelete = audioFiles.find((f) => f.ino === fileIno);
 
   if (fileToDelete?.metadata?.path) {
-    await adminClient.storage.from("audio-files").remove([
-      fileToDelete.metadata.path,
-    ]);
+    // Audio is B2-only (Supabase storage is covers/light only) — delete the
+    // object from its B2 tier. Legacy/supabase:// URIs have nothing B2-side;
+    // dropping the DB row below is sufficient for those.
+    try {
+      await new StorageRouter(adminClient).deletePath(
+        fileToDelete.metadata.path,
+      );
+    } catch {
+      // Best-effort: the DB row removal below is the source of truth.
+    }
   }
 
   const updatedFiles = audioFiles.filter((f) => f.ino !== fileIno);

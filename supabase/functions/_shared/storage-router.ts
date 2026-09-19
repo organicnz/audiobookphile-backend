@@ -1,10 +1,15 @@
 /* ============================================================================
- * STORAGE ROUTER — WITH SINGLE CONFIG SOURCE OF TRUTH
+ * STORAGE ROUTER — AUDIO IS B2-ONLY (Supabase is covers/light only)
  *
- * PURPOSE: Routes storage paths (b2-tertiary://, b2-secondary://, b2-quartet://,
- * b2-quinta://, b2-primary://, b2://, supabase://) to the correct B2 client or
- * Supabase Storage.
- * Probing order: b2-tertiary → b2-secondary → b2-quartet → b2-quinta → b2-primary → supabase.
+ * PURPOSE: Routes AUDIO storage paths (b2-tertiary://, b2-secondary://,
+ * b2-quartet://, b2-quinta://, b2-primary://, b2://) to the correct B2 client.
+ * Supabase Storage is NEVER used for audiobooks — only for light assets
+ * (covers bucket, author avatars) via direct
+ * supabase.storage.from("covers") calls OUTSIDE this router.
+ *
+ * Probing order: b2-quinta → b2-tertiary → b2-primary → b2-secondary →
+ * b2-quartet (matches selectBucket() candidateChain in
+ * b2-bucket-pool.ts so uploads and fetch-time resolution agree on priority).
  *
  * KEY IMPROVEMENTS:
  *   - Config from b2-config.ts single source (not scattered env reads)
@@ -12,52 +17,23 @@
  *   - Support for both hyphenated (b2-secondary://) and underscored (b2_secondary://) schemes
  *   - Proactive multi-candidate legacy path resolution
  *   - Real HEAD probes with health-gated fallbacks
- *   - Graceful degradation to Supabase when all B2 tiers fail
+ *   - supabase:// audio paths fail fast (legacy mis-write, not a backend)
  * ========================================================================== */
 
 import {
+  DeleteObjectCommand,
   GetObjectCommand,
   HeadObjectCommand,
-  S3Client,
 } from "npm:@aws-sdk/client-s3@^3.693.0";
 import { getSignedUrl } from "npm:@aws-sdk/s3-request-presigner@^3.693.0";
 
 import { BucketTier } from "./b2-types.ts";
-import { getConfig, isTierConfigured } from "./b2-config.ts";
-
-// S3Client instances are cached per-process to avoid re-initialising on every
-// request. Within a single invocation (e.g. signing N tracks in parallel), this
-// avoids N allocations.
-const _b2Clients: Map<BucketTier, S3Client> = new Map();
-
-/* -------------------------------------------------------------------------
- * Lazy-initialised B2 clients — one per tier, created on first access.
- * ------------------------------------------------------------------------- */
-
-function getB2Client(tier: BucketTier): S3Client {
-  if (_b2Clients.has(tier)) {
-    return _b2Clients.get(tier)!;
-  }
-
-  const config = getConfig(tier);
-
-  const client = new S3Client({
-    endpoint: config.endpoint,
-    region: config.region,
-    credentials: {
-      accessKeyId: config.keyId,
-      secretAccessKey: config.appKey,
-    },
-    forcePathStyle: true,
-    // @ts-ignore
-    requestChecksumCalculation: "WHEN_REQUIRED",
-    // @ts-ignore
-    responseChecksumValidation: "WHEN_REQUIRED",
-  });
-
-  _b2Clients.set(tier, client);
-  return client;
-}
+import {
+  getConfig,
+  getConfiguredTiers,
+  isTierConfigured,
+} from "./b2-config.ts";
+import { getB2Client } from "./b2-bucket-pool.ts";
 
 /* -------------------------------------------------------------------------
  * Configuration readiness checks.
@@ -117,6 +93,10 @@ export interface ParsedStoragePath {
  * ------------------------------------------------------------------------- */
 
 export class StorageRouter {
+  // supabase is retained for constructor compatibility (callers pass their
+  // client) but audio paths never touch Supabase storage: audio is B2-only,
+  // light assets go through supabase.storage.from("covers") outside this
+  // router. Do not remove the param without updating all call sites + tests.
   constructor(private supabase: any) {}
 
   /**
@@ -187,7 +167,10 @@ export class StorageRouter {
   }
 
   /* -------------------------------------------------------------------
-   * getSignedUrl — returns a presigned URL for the given storage path.
+   * getSignedUrl — returns a presigned URL for the given AUDIO storage path.
+   * Audio is B2-only. supabase:// audio URIs are a legacy mis-write (audio
+   * must never live in Supabase — covers bucket only) and fail fast here
+   * instead of hitting the audio-files bucket.
    * ------------------------------------------------------------------- */
 
   async getSignedUrl(path: string, expiresIn: number): Promise<string> {
@@ -197,14 +180,11 @@ export class StorageRouter {
     }
 
     if (parsed.tier === "SUPABASE") {
-      const { data, error } = await this.supabase.storage
-        .from("audio-files")
-        .createSignedUrl(parsed.key, expiresIn);
-
-      if (error || !data?.signedUrl) {
-        throw new Error(`Supabase presign failed: ${error?.message}`);
-      }
-      return data.signedUrl;
+      throw new Error(
+        `Audio path "${path}" points at Supabase, but audiobooks are B2-only ` +
+          `(Supabase storage is covers/light assets only). Re-upload the file ` +
+          `via B2 presign so its metadata.path becomes b2(-tier)://…`,
+      );
     }
 
     if (!isTierConfigured(parsed.tier)) {
@@ -222,7 +202,7 @@ export class StorageRouter {
 
   /* -------------------------------------------------------------------
    * resolveAndSign — resolves a legacy path or un-schemed path by probing
-   * all candidate keys across all B2 backends and Supabase Storage.
+   * all candidate keys across all B2 buckets (audio is B2-only).
    * ------------------------------------------------------------------- */
 
   async resolveAndSign(
@@ -247,7 +227,9 @@ export class StorageRouter {
     }
 
     throw new Error(
-      `File not found in any storage backend for legacy path "${legacyPath}" (itemId: ${itemId})`,
+      `File not found in any B2 bucket for legacy path "${legacyPath}" (itemId: ${itemId}, probed tiers: ${
+        getConfiguredTiers().join(", ") || "none configured"
+      })`,
     );
   }
 
@@ -272,14 +254,16 @@ export class StorageRouter {
   }
 
   /* -------------------------------------------------------------------
-   * probeKey — HEAD-probes one canonical key across every backend, signing on
-   * first hit. Probe order:
-   *   1. b2-tertiary
-   *   2. b2-secondary
-   *   3. b2-quartet
-   *   4. b2-quinta
-   *   5. b2-primary
-   *   6. Supabase Storage
+   * probeKey — HEAD-probes one canonical key across every B2 backend, signing
+   * on first hit. Probe order matches selectBucket() candidateChain:
+   *   1. b2-quinta (B2_QUINTET)
+   *   2. b2-tertiary
+   *   3. b2-primary (B2)
+   *   4. b2-secondary
+   *   5. b2-quartet
+   * NOTE: no Supabase fallback — audio is B2-only by design (Supabase storage
+   * is covers/light assets only, served from the "covers" bucket outside
+   * this router).
    * ------------------------------------------------------------------- */
 
   private async probeKey(
@@ -289,11 +273,11 @@ export class StorageRouter {
     const cleanKey = key.replace(/^\/+/, "");
 
     const b2Tiers: BucketTier[] = [
+      "B2_QUINTET",
       "B2_TERTIARY",
+      "B2",
       "B2_SECONDARY",
       "B2_QUARTET",
-      "B2_QUINTET",
-      "B2",
     ];
 
     for (const tier of b2Tiers) {
@@ -325,37 +309,17 @@ export class StorageRouter {
       }
     }
 
-    // Try Supabase Storage — last resort
-    try {
-      const folder = cleanKey.split("/").slice(0, -1).join("/");
-      const filename = cleanKey.split("/").pop()!;
-      const { data: listed, error: listErr } = await this.supabase.storage
-        .from("audio-files")
-        .list(folder, { search: filename });
-
-      if (!listErr && listed && listed.some((f: any) => f.name === filename)) {
-        const { data, error } = await this.supabase.storage
-          .from("audio-files")
-          .createSignedUrl(cleanKey, expiresIn);
-
-        if (!error && data?.signedUrl) {
-          return {
-            signedUrl: data.signedUrl,
-            canonicalPath: `supabase://${cleanKey}`,
-          };
-        }
-      }
-    } catch {
-      // Supabase storage check failed
-    }
-
     throw new Error(
-      `File not found in any storage backend for key "${cleanKey}"`,
+      `File not found in any B2 bucket for key "${cleanKey}" (probed tiers: ${
+        getConfiguredTiers().join(", ") || "none configured"
+      })`,
     );
   }
 
   /* -------------------------------------------------------------------------
-   * fileExists — checks if a file exists at the given path.
+   * fileExists — checks if an AUDIO file exists at the given path (B2-only).
+   * supabase:// audio URIs always return false: audio never lives in
+   * Supabase (covers bucket only).
    * ------------------------------------------------------------------------- */
 
   async fileExists(path: string): Promise<boolean> {
@@ -365,16 +329,7 @@ export class StorageRouter {
     }
 
     if (parsed.tier === "SUPABASE") {
-      try {
-        const folder = parsed.key.split("/").slice(0, -1).join("/");
-        const filename = parsed.key.split("/").pop()!;
-        const { data, error } = await this.supabase.storage
-          .from("audio-files")
-          .list(folder, { search: filename });
-        return !error && !!(data && data.some((f: any) => f.name === filename));
-      } catch {
-        return false;
-      }
+      return false;
     }
 
     if (!isTierConfigured(parsed.tier)) {
@@ -385,6 +340,36 @@ export class StorageRouter {
       const client = getB2Client(parsed.tier);
       await client.send(
         new HeadObjectCommand({
+          Bucket: getConfig(parsed.tier).bucketName,
+          Key: parsed.key,
+        }),
+      );
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /* -------------------------------------------------------------------------
+   * deletePath — deletes an AUDIO object from its B2 tier.
+   * Audio is B2-only: supabase:// and legacy/bare paths are NOT deleted from
+   * Supabase (audio-files bucket must stay empty; covers live in "covers").
+   * Returns true when a B2 delete was issued, false when there was nothing
+   * B2-side to delete (legacy/supabase URI — DB row cleanup is enough).
+   * ------------------------------------------------------------------------- */
+
+  async deletePath(path: string): Promise<boolean> {
+    const parsed = this.parsePath(path);
+    if (!parsed || parsed.tier === "SUPABASE" || parsed.isLegacy) {
+      return false;
+    }
+    if (!isTierConfigured(parsed.tier)) {
+      return false;
+    }
+    try {
+      const client = getB2Client(parsed.tier);
+      await client.send(
+        new DeleteObjectCommand({
           Bucket: getConfig(parsed.tier).bucketName,
           Key: parsed.key,
         }),

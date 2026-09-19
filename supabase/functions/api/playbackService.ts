@@ -1,6 +1,7 @@
 import { SupabaseClient } from "npm:@supabase/supabase-js@2.44.0";
 import { Database } from "../../../src/types/supabase.ts";
 import { StorageRouter } from "../_shared/storage-router.ts";
+import { getConfiguredTiers } from "../_shared/b2-config.ts";
 import {
   bulkUpsertMediaProgress,
   upsertMediaProgress,
@@ -643,7 +644,10 @@ export class PlaybackService {
 
     if (audioTracks.length === 0) {
       throw new Error(
-        "All audio files are missing from storage. The book may need to be re-uploaded.",
+        `All audio files are missing from B2 for item ${libraryItemId} ` +
+          `(${missingTracks.length} track(s) not found, probed tiers: ` +
+          `${getConfiguredTiers().join(", ") || "none configured"}). ` +
+          `The book may need to be re-uploaded.`,
       );
     }
 

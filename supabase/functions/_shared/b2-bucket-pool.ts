@@ -14,14 +14,13 @@
  *   - Type-safe tier operations via isBucketTier / isTierConfigured
  * ========================================================================== */
 
-import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
-import { getSignedUrl as _getSignedUrl } from "@aws-sdk/s3-request-presigner";
-import { createClient as _createClient } from "npm:@supabase/supabase-js@2.44.0";
+import { S3Client } from "@aws-sdk/client-s3";
 
 import {
   BUCKET_CONFIGS,
   BUCKET_Tiers,
   getConfig,
+  getConfiguredTiers,
   isTierConfigured,
 } from "./b2-config.ts";
 import type { BucketConfig, BucketHealth, BucketTier } from "./b2-types.ts";
@@ -166,22 +165,37 @@ export function selectBucket(
     }
   }
 
-  const primaryHealth = allHealth.get("B2")!;
-  return { tier: "B2", config: getConfig("B2"), health: primaryHealth };
+  // No tier configured at all: fail fast with an actionable message instead
+  // of getConfig("B2")'s misleading single-tier error. Fetching cannot work
+  // without at least one B2_* secret set (see b2-config.ts).
+  throw new Error(
+    `No B2 bucket tier is configured — books cannot be fetched from Backblaze. ` +
+      `Configured tiers: [${getConfiguredTiers().join(", ") || "none"}]. ` +
+      `Set at least one tier in Supabase secrets or .env.local ` +
+      `(B2_KEY_ID/B2_APP_KEY/B2_BUCKET_NAME, B2_SECONDARY_*, B2_TERTIARY_*, ` +
+      `B2_QUARTET_*, or B2_QUINTA_*).`,
+  );
 }
 
 /* -------------------------------------------------------------------------
- * Get the S3Client for a specific bucket tier.
- * Uses the single config source (getConfig) for type safety and config
- * consistency across all modules. Adds checksum config guards that were
- * critical fixes in the B2_QUINTET refactor.
+ * Get the S3Client for a specific bucket tier — the SINGLE client factory
+ * for all B2 access (storage-router, uploadPresign, and this module share
+ * it). Clients are cached per-process: a single playback session signing N
+ * tracks must not allocate N clients. Uses the single config source
+ * (getConfig) for type safety and config consistency. Checksum guards
+ * (WHEN_REQUIRED) prevent SignatureDoesNotMatch on presigned URLs.
  * ------------------------------------------------------------------------- */
 
+const _b2Clients = new Map<BucketTier, S3Client>();
+
 export function getB2Client(tier: BucketTier): S3Client {
+  const cached = _b2Clients.get(tier);
+  if (cached) return cached;
+
   /* Type-safe config retrieval — throws if tier not configured, fails fast */
   const config = getConfig(tier);
 
-  return new S3Client({
+  const client = new S3Client({
     endpoint: config.endpoint,
     region: config.region,
     credentials: {
@@ -198,6 +212,8 @@ export function getB2Client(tier: BucketTier): S3Client {
     // @ts-ignore
     responseChecksumValidation: "WHEN_REQUIRED",
   });
+  _b2Clients.set(tier, client);
+  return client;
 }
 
 /* -------------------------------------------------------------------------
@@ -265,120 +281,6 @@ export async function healthCheckBuckets(): Promise<
   }
 
   return results;
-}
-
-/* -------------------------------------------------------------------------
- * Upload to the intelligently selected bucket using the pool.
- * Uses selectBucket() for tier selection, getB2Client() for the S3 client,
- * and the health tracker for recording results. Includes automatic fallback
- * to next bucket in chain on upload failure.
- * ------------------------------------------------------------------------- */
-
-export async function uploadToSmartBucket(
-  key: string,
-  fileData: Uint8Array,
-  contentType: string,
-  options: { upsert?: boolean } = {},
-): Promise<
-  {
-    success: boolean;
-    bucket: BucketTier;
-    key: string;
-    etag?: string;
-    error?: string;
-  }
-> {
-  /* Select the best bucket using the pool strategy (health-aware) */
-  const { tier, config: _config, health: _health } = selectBucket();
-
-  const s3Client = getB2Client(tier);
-  const bucketName = getBucketName(tier);
-
-  const command = new PutObjectCommand({
-    Bucket: bucketName,
-    Key: key,
-    Body: fileData,
-    ContentType: contentType,
-    ...options,
-  });
-
-  try {
-    const startTime = Date.now();
-    const { etag: _etag, VersionId: _VersionId } = await s3Client.send(
-      command,
-    ) as { etag?: string; VersionId: string };
-    const latency = Date.now() - startTime;
-
-    /* Record success in health tracker with real latency */
-    bucketHealth.recordSuccess(tier, latency);
-
-    return {
-      success: true,
-      bucket: tier,
-      key,
-      etag: _etag ?? undefined,
-    };
-  } catch (error) {
-    /* Record error in health tracker */
-    bucketHealth.recordError(tier, 0);
-
-    console.error(`Upload to ${tier} bucket failed:`, error);
-
-    /* Try fallback to next bucket in chain */
-    const fallbackChain: BucketTier[] = [
-      "B2_SECONDARY",
-      "B2_TERTIARY",
-      "B2_QUARTET",
-      "B2_QUINTET",
-    ];
-    for (const fallbackTier of fallbackChain) {
-      /* Check health before attempting fallback */
-      const fallbackHealth = bucketHealth.getHealth(fallbackTier);
-      if (!fallbackHealth.isHealthy) {
-        // @ts-ignore — runtime logging
-        // console.log(`Skipping fallback to ${fallbackTier} — bucket unhealthy`);
-        continue;
-      }
-
-      const fallbackClient = getB2Client(fallbackTier);
-      const fallbackBucketName = getBucketName(fallbackTier);
-
-      try {
-        await fallbackClient.send(
-          new PutObjectCommand({
-            Bucket: fallbackBucketName,
-            Key: key,
-            Body: fileData,
-            ContentType: contentType,
-            ...options,
-          }),
-        );
-
-        /* Record success on fallback bucket */
-        bucketHealth.recordSuccess(fallbackTier, 0);
-
-        return {
-          success: true,
-          bucket: fallbackTier as BucketTier,
-          key,
-        };
-      } catch (fallbackError) {
-        console.error(
-          `Upload fallback to ${fallbackTier} also failed:`,
-          fallbackError,
-        );
-        continue;
-      }
-    }
-
-    /* All fallbacks failed — return failure */
-    return {
-      success: false,
-      bucket: tier,
-      key,
-      error: error instanceof Error ? error.message : String(error),
-    };
-  }
 }
 
 /* -------------------------------------------------------------------------

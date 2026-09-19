@@ -37,15 +37,25 @@ export function normalizeAudioFile(
     id: String(raw.id || raw.ino || crypto.randomUUID()),
     index: Number(raw.index ?? raw.track_index ?? index),
     filename: String(
-      raw.filename || metadata.filename || raw.path || `track_${index}`,
+      raw.filename || metadata.filename || metadata.relPath ||
+        metadata.rel_path || raw.path || `track_${index}`,
     ),
+    // Storage path MUST include metadata.* fallbacks: upload-finalize writes
+    // the canonical b2:// URI only into metadata.path, leaving top-level
+    // storage_path/path empty. Dropping metadata here yields "" and every
+    // downstream signed-URL lookup misses (empty manifest contentUrls).
+    // Order matches PlaybackService.startSession's storagePath resolution.
     storagePath: String(
-      raw.storage_path || raw.path || raw.relPath || raw.rel_path || "",
+      metadata.path || raw.storage_path || raw.path || raw.relPath ||
+        raw.rel_path || metadata.relPath || metadata.rel_path ||
+        metadata.filename || raw.filename || "",
     ),
-    duration: Number(raw.duration || 0),
+    duration: Number(raw.duration || metadata.duration || 0),
     size: Number(raw.size || metadata.size || 0),
-    mimeType: String(raw.mime_type || raw.mimeType || "audio/mpeg"),
-    codec: String(raw.codec || "mp3"),
+    mimeType: String(
+      raw.mime_type || raw.mimeType || metadata.mimeType || "audio/mpeg",
+    ),
+    codec: String(raw.codec || metadata.codec || "mp3"),
     bitRate: Number(raw.bit_rate || raw.bitRate || 128000),
   };
 }

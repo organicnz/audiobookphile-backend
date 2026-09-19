@@ -4,9 +4,10 @@ import { createClient } from "@supabase/supabase-js";
  * Shared fixtures for API e2e: throwaway user + library items wired to REAL
  * storage objects so playback resolution exercises actual tiers.
  *
- * KNOWN_GOOD_B2_PATH points at an object verified to exist in the primary B2
- * bucket (Art of War's preface track). If that object is ever removed, replace
- * the reference - the suite fails loudly either way.
+ * KNOWN_GOOD points at an object verified to exist in B2 (Art of War's
+ * preface track, tertiary tier). Resolution probes every configured tier, so
+ * the exact tier doesn't matter — but if the object is ever removed, replace
+ * the reference. The suite fails loudly either way.
  */
 
 const SUPABASE_URL = process.env.SUPABASE_URL ?? "";
@@ -22,7 +23,7 @@ export const admin = createClient(SUPABASE_URL, SERVICE_ROLE, {
   auth: { persistSession: false, autoRefreshToken: false },
 });
 
-/** Item whose media_id prefix holds real audio objects in B2 primary. */
+/** Item whose media_id prefix holds a real audio object in B2. */
 export const KNOWN_GOOD = {
   itemId: "029bb772-cea8-4d3f-882a-1bf9f54198d8", // Art of War (prod)
   b2Prefix: "14f87e3d-c1eb-42ef-b6f7-292838b0a225", // its media_id prefix
@@ -57,18 +58,46 @@ export async function createTestUser(prefix: string): Promise<TestUser> {
 
 export async function loginUser(
   email: string,
-  password: string,
+  _password: string,
 ): Promise<string> {
-  const res = await fetch(`${SUPABASE_URL}/functions/v1/api/auth/login`, {
+  void _password;
+  // Production GoTrue has password logins disabled (magic-link-only), so the
+  // custom /auth/login password path 401s by design. Mint a magic-link OTP
+  // via the admin API and verify it — no inbox required, exercises the real
+  // Supabase JWT session path the edge API authenticates.
+  const gen = await fetch(`${SUPABASE_URL}/auth/v1/admin/generate_link`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ username: email, password }),
+    headers: {
+      apikey: SERVICE_ROLE,
+      Authorization: `Bearer ${SERVICE_ROLE}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ type: "magiclink", email }),
   });
-  if (!res.ok) throw new Error(`loginUser failed: ${res.status}`);
-  const body = await res.json();
-  const token = body?.user?.token ?? body?.access_token;
-  if (!token) throw new Error(`loginUser: no token in response`);
-  return token as string;
+  if (!gen.ok) {
+    throw new Error(`loginUser generate_link failed: ${gen.status}`);
+  }
+  const { properties, email_otp: topLevelOtp } = (await gen.json()) as {
+    properties?: { email_otp?: string };
+    email_otp?: string;
+  };
+  // GoTrue version-dependent: newer returns email_otp nested in properties,
+  // this project returns it top-level.
+  const otp = properties?.email_otp ?? topLevelOtp;
+  if (!otp) throw new Error("loginUser: no email_otp in generate_link");
+
+  const ver = await fetch(`${SUPABASE_URL}/auth/v1/verify`, {
+    method: "POST",
+    headers: {
+      apikey: SERVICE_ROLE,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ type: "magiclink", email, token: otp }),
+  });
+  if (!ver.ok) throw new Error(`loginUser verify failed: ${ver.status}`);
+  const session = (await ver.json()) as { access_token?: string };
+  if (!session.access_token) throw new Error("loginUser: no token in session");
+  return session.access_token;
 }
 
 export async function deleteTestUser(userId: string): Promise<void> {

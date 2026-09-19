@@ -5,12 +5,12 @@ import { Context } from "hono";
  * proxy headers set by Vercel or other reverse proxies.
  *
  * @param c The Hono context
- * @returns The resolved origin string (e.g. "https://audiobookphile-server.vercel.app")
+ * @returns The resolved origin string (e.g. "https://audiobookphile.app")
  */
 export function getProxyOrigin(c: Context): string {
   // First check x-forwarded-host, then fallback to host header
   const host = c.req.header("x-forwarded-host") || c.req.header("host") ||
-    "audiobookphile-server.vercel.app";
+    "audiobookphile.app";
 
   // Similarly check x-forwarded-proto, then fallback to https
   const protocol = c.req.header("x-forwarded-proto") || "https";
@@ -30,7 +30,7 @@ export function getProxyOrigin(c: Context): string {
  * known production web origin.
  *
  * @param c The Hono context
- * @returns The canonical web origin (e.g. "https://audiobookphile.vercel.app")
+ * @returns The canonical web origin (e.g. "https://audiobookphile.app")
  */
 export function getWebOrigin(c: Context): string {
   const env = Deno.env.get("SITE_URL");
@@ -44,5 +44,5 @@ export function getWebOrigin(c: Context): string {
     return derived;
   }
 
-  return "https://audiobookphile.vercel.app";
+  return "https://audiobookphile.app";
 }

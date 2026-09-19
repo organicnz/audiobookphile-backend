@@ -16,8 +16,8 @@ import {
   verifyRegistration,
 } from "./_shared/webauthn.ts";
 
-const RP_ID = "audiobookphile.vercel.app";
-const ORIGIN = "https://audiobookphile.vercel.app";
+const RP_ID = "audiobookphile.app";
+const ORIGIN = "https://audiobookphile.app";
 
 // ---------------------------------------------------------------------------
 // Minimal CBOR encoder — just enough for the attestation objects we build in

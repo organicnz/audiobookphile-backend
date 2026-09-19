@@ -43,7 +43,11 @@ const bucketConfigs: Record<BucketTier, BucketConfig> = {
     ),
     region: Deno.env.get("B2_REGION") || "us-west-004",
     bucketName: Deno.env.get("B2_BUCKET_NAME")!,
+    // Require all three: a tier with keyId+bucket but no appKey presigns
+    // SignatureDoesNotMatch at fetch time. Marking it unconfigured forces
+    // the pool/router to skip it instead of serving broken URLs.
     isConfigured: !!Deno.env.get("B2_KEY_ID") &&
+      !!Deno.env.get("B2_APP_KEY") &&
       !!Deno.env.get("B2_BUCKET_NAME"),
   },
   B2_SECONDARY: {
@@ -57,6 +61,7 @@ const bucketConfigs: Record<BucketTier, BucketConfig> = {
     region: Deno.env.get("B2_SECONDARY_REGION") || "us-west-004",
     bucketName: Deno.env.get("B2_SECONDARY_BUCKET_NAME")!,
     isConfigured: !!Deno.env.get("B2_SECONDARY_KEY_ID") &&
+      !!Deno.env.get("B2_SECONDARY_APP_KEY") &&
       !!Deno.env.get("B2_SECONDARY_BUCKET_NAME"),
   },
   B2_TERTIARY: {
@@ -70,6 +75,7 @@ const bucketConfigs: Record<BucketTier, BucketConfig> = {
     region: Deno.env.get("B2_TERTIARY_REGION") || "us-west-004",
     bucketName: Deno.env.get("B2_TERTIARY_BUCKET_NAME")!,
     isConfigured: !!Deno.env.get("B2_TERTIARY_KEY_ID") &&
+      !!Deno.env.get("B2_TERTIARY_APP_KEY") &&
       !!Deno.env.get("B2_TERTIARY_BUCKET_NAME"),
   },
   B2_QUARTET: {
@@ -83,6 +89,7 @@ const bucketConfigs: Record<BucketTier, BucketConfig> = {
     region: Deno.env.get("B2_QUARTET_REGION") || "us-west-004",
     bucketName: Deno.env.get("B2_QUARTET_BUCKET_NAME")!,
     isConfigured: !!Deno.env.get("B2_QUARTET_KEY_ID") &&
+      !!Deno.env.get("B2_QUARTET_APP_KEY") &&
       !!Deno.env.get("B2_QUARTET_BUCKET_NAME"),
   },
   B2_QUINTET: {
@@ -96,6 +103,7 @@ const bucketConfigs: Record<BucketTier, BucketConfig> = {
     region: Deno.env.get("B2_QUINTA_REGION") || "us-west-004",
     bucketName: Deno.env.get("B2_QUINTA_BUCKET_NAME")!,
     isConfigured: !!Deno.env.get("B2_QUINTA_KEY_ID") &&
+      !!Deno.env.get("B2_QUINTA_APP_KEY") &&
       !!Deno.env.get("B2_QUINTA_BUCKET_NAME"),
   },
 };
@@ -138,6 +146,16 @@ export const isBucketTier = (
 export const isTierConfigured = (
   tier: BucketTier,
 ): boolean => BUCKET_CONFIGS[tier]?.isConfigured ?? false;
+
+/* -------------------------------------------------------------------------
+ * List configured tiers in pool-priority order. Used for diagnostics and
+ * for the selectBucket() no-tier-configured error below so operators see
+ * exactly which B2_* secrets are missing instead of a bare "B2 not
+ * configured" message.
+ * ------------------------------------------------------------------------- */
+
+export const getConfiguredTiers = (): BucketTier[] =>
+  BUCKET_Tiers.filter((tier) => BUCKET_CONFIGS[tier]?.isConfigured);
 
 /* -------------------------------------------------------------------------
  * Safe config retrieval — throws descriptive error if tier not configured.

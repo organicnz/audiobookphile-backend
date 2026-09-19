@@ -1,5 +1,6 @@
 import { createOpenApiRouter, z } from "../_shared/openapi.ts";
 import { StorageRouter } from "../../_shared/storage-router.ts";
+import { getConfiguredTiers } from "../../_shared/b2-config.ts";
 import { requireAdminRole } from "../_shared/auth.ts";
 import { presignUpload } from "../../_shared/uploadPresign.ts";
 import { assertStorageQuota } from "../../_shared/storage-quota.ts";
@@ -572,7 +573,10 @@ downloadsRouter.openapi(downloadItemRoute, async (c) => {
 
   if (tracks.length === 0) {
     return c.json({
-      error: "All audio files are missing from storage. Cannot download.",
+      error:
+        `All audio files are missing from B2 for item ${libraryItemId} (${missingTracks.length} track(s) not found, probed tiers: ${
+          getConfiguredTiers().join(", ") || "none configured"
+        }). Cannot download.`,
     }, 404);
   }
 
@@ -855,23 +859,23 @@ export async function executeFinalize(
   let libraryItemId = crypto.randomUUID();
   if (existingItem) {
     if (!overwrite) {
-      // Clean up orphaned files that were just uploaded to the new UUID folder
+      // Clean up orphaned files just uploaded to B2 under the new UUID folder.
+      // Audio is B2-only (Supabase storage is covers/light only), so delete
+      // via the StorageRouter's B2 delete — never via audio-files bucket.
       if (bookId !== existingItem.id && bookId !== existingItem.media_id) {
         try {
           const filePathsToDelete = validFiles.map((f: any) => f.storagePath);
           if (filePathsToDelete.length > 0) {
-            const { error: delErr } = await supabase.storage.from(
-              "audio-files",
-            )
-              .remove(filePathsToDelete);
-            if (delErr) {
-              console.warn(
-                "[upload-finalize] Failed to clean up orphaned files:",
-                delErr,
+            if (
+              storageRouter && typeof storageRouter.deletePath === "function"
+            ) {
+              await Promise.all(
+                filePathsToDelete.map((p: string) =>
+                  storageRouter.deletePath(p).catch(() => false)
+                ),
               );
-            } else {
               console.info(
-                `[upload-finalize] Cleaned up ${filePathsToDelete.length} orphaned files for ${bookId}`,
+                `[upload-finalize] Cleaned up ${filePathsToDelete.length} orphaned B2 objects for ${bookId}`,
               );
             }
           }

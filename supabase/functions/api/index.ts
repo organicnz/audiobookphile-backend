@@ -89,13 +89,20 @@ const app = new OpenAPIHono<{ Variables: Variables }>({
 
 // 1. CORS (must run first so preflight OPTIONS requests get proper headers)
 // Restricted to the web app, Vercel preview deployments and local dev.
+// Canonical domain is audiobookphile.app; the vercel.app/foodshare.club
+// entries are legacy fallbacks (vercel.app suffix belongs to the old scope).
 // Requests without an Origin header (native apps, cron, curl) are always
 // allowed — CORS is a browser enforcement mechanism only.
 const ALLOWED_ORIGINS = [
+  "https://audiobookphile.app",
+  "https://www.audiobookphile.app",
+  "https://app.audiobookphile.app",
+  "https://api.audiobookphile.app",
   "https://audiobookphile.vercel.app",
   "https://audiobookphile.foodshare.club",
 ];
 const ALLOWED_ORIGIN_PATTERNS = [
+  /^https:\/\/[a-z0-9-]+\.audiobookphile\.app$/i, // app/www/api subdomains
   /^https:\/\/audiobookphile-[a-z0-9-]+\.vercel\.app$/i, // preview deployments
   /^https:\/\/audiobookphile-[a-z0-9-]+\.foodshare\.club$/i,
   /^http:\/\/localhost:\d+$/i,
