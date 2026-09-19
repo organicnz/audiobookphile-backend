@@ -48,6 +48,13 @@ export async function rateLimitMiddleware(
       return;
     }
     const now = Date.now();
+    if (buckets.size > 2000) {
+      for (const [ip, b] of buckets.entries()) {
+        if (now >= b.resetAt) {
+          buckets.delete(ip);
+        }
+      }
+    }
     const key = clientIp(c);
     const bucket = buckets.get(key);
     if (!bucket || now >= bucket.resetAt) {

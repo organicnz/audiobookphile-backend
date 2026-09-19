@@ -461,115 +461,145 @@ downloadsRouter.openapi(downloadItemRoute, async (c) => {
   // 4 hour signed URLs for downloading
   const DOWNLOAD_EXPIRY_SECONDS = 4 * 3600;
 
-  const tracks = [];
+  type DownloadTrack = {
+    index: number;
+    title: string;
+    url: string;
+    size: number;
+    duration: number;
+    mimeType: string;
+  };
+
+  const resolvedTracks: (DownloadTrack | null)[] = new Array(
+    sortedAudioFiles.length,
+  ).fill(null);
   const missingTracks: string[] = [];
 
-  for (let i = 0; i < sortedAudioFiles.length; i++) {
-    const af = sortedAudioFiles[i];
-    const metadata = ((af as any).metadata as Record<string, unknown>) || {};
-    const storagePath = String(
-      metadata.path ||
-        (af as any).storage_path ||
-        (af as any).path ||
-        (af as any).relPath ||
-        (af as any).rel_path ||
-        metadata.relPath ||
-        metadata.rel_path ||
-        metadata.filename ||
-        (af as any).filename ||
-        "",
+  const CHUNK_SIZE = 8;
+  for (let offset = 0; offset < sortedAudioFiles.length; offset += CHUNK_SIZE) {
+    const chunk = sortedAudioFiles.slice(offset, offset + CHUNK_SIZE);
+    await Promise.all(
+      chunk.map(async (af, chunkIdx) => {
+        const i = offset + chunkIdx;
+        const metadata = ((af as any).metadata as Record<string, unknown>) ||
+          {};
+        const storagePath = String(
+          metadata.path ||
+            (af as any).storage_path ||
+            (af as any).path ||
+            (af as any).relPath ||
+            (af as any).rel_path ||
+            metadata.relPath ||
+            metadata.rel_path ||
+            metadata.filename ||
+            (af as any).filename ||
+            "",
+        );
+
+        let duration = af.duration;
+        if (needsDurationEstimation && duration === 0) {
+          if (totalBookDuration > 0 && af.size > 0 && totalFilesSize > 0) {
+            duration = (af.size / totalFilesSize) * totalBookDuration;
+          } else if (totalBookDuration > 0) {
+            duration = totalBookDuration / sortedAudioFiles.length;
+          } else {
+            duration = af.size / 12000;
+          }
+        }
+
+        let finalSignedUrl = "";
+        let isMissing = false;
+
+        try {
+          const isLegacyPath = storagePath.startsWith("/") ||
+            (!storagePath.includes("://") && storagePath.length > 0);
+
+          if (isLegacyPath) {
+            const resolved = await storage.resolveAndSign(
+              storagePath,
+              libraryItemId,
+              DOWNLOAD_EXPIRY_SECONDS,
+            );
+            finalSignedUrl = resolved.signedUrl;
+          } else {
+            finalSignedUrl = await storage.getSignedUrl(
+              storagePath,
+              DOWNLOAD_EXPIRY_SECONDS,
+            );
+          }
+        } catch (e: unknown) {
+          // Fallback: try resolving candidates across all tiers
+          const filename = storagePath.split("/").pop() ||
+            String(metadata.filename || (af as any).filename);
+          const mediaId = String((item as any).media_id || "");
+          const rawItemPath = String((item as any).path || "").replace(
+            /^\/+/,
+            "",
+          );
+          const recordedPrefix = storagePath.includes("://")
+            ? storagePath.replace(/^[a-z0-9-_]+:\/\//i, "").split("/").slice(
+              0,
+              -1,
+            )
+              .join("/")
+            : storagePath.split("/").slice(0, -1).join("/");
+          const cleanStoragePath = storagePath.replace(/^[a-z0-9-_]+:\/\//i, "")
+            .replace(/^\/+/, "");
+
+          const candidates = [
+            `${libraryItemId}/${filename}`,
+            mediaId && mediaId !== libraryItemId
+              ? `${mediaId}/${filename}`
+              : "",
+            recordedPrefix && recordedPrefix !== libraryItemId &&
+              recordedPrefix !== mediaId
+              ? `${recordedPrefix}/${filename}`
+              : "",
+            rawItemPath ? `${rawItemPath}/${filename}` : "",
+            rawItemPath
+              ? `${rawItemPath.replace(/^audiobooks\//, "")}/${filename}`
+              : "",
+            cleanStoragePath,
+            cleanStoragePath.replace(/^audiobooks\//, ""),
+            filename,
+          ].filter(Boolean);
+
+          const resolved = await storage.signFirstExisting(
+            Array.from(new Set(candidates)),
+            DOWNLOAD_EXPIRY_SECONDS,
+          );
+
+          if (resolved) {
+            finalSignedUrl = resolved.signedUrl;
+          } else {
+            const signErr = e as Error;
+            console.warn(
+              `[DownloadsRoute] Missing storage file at "${storagePath}": ${signErr.message}. Skipping track.`,
+            );
+            missingTracks.push(storagePath);
+            isMissing = true;
+          }
+        }
+
+        if (!isMissing && finalSignedUrl) {
+          resolvedTracks[i] = {
+            index: af.index ?? i,
+            title: String(
+              metadata.filename || (af as any).filename || `Track ${i + 1}`,
+            ),
+            url: finalSignedUrl,
+            size: af.size,
+            duration: duration,
+            mimeType: af.mime_type,
+          };
+        }
+      }),
     );
-
-    let duration = af.duration;
-    if (needsDurationEstimation && duration === 0) {
-      if (totalBookDuration > 0 && af.size > 0 && totalFilesSize > 0) {
-        duration = (af.size / totalFilesSize) * totalBookDuration;
-      } else if (totalBookDuration > 0) {
-        duration = totalBookDuration / sortedAudioFiles.length;
-      } else {
-        duration = af.size / 12000;
-      }
-    }
-
-    let finalSignedUrl = "";
-    let isMissing = false;
-
-    try {
-      const isLegacyPath = storagePath.startsWith("/") ||
-        (!storagePath.includes("://") && storagePath.length > 0);
-
-      if (isLegacyPath) {
-        const resolved = await storage.resolveAndSign(
-          storagePath,
-          libraryItemId,
-          DOWNLOAD_EXPIRY_SECONDS,
-        );
-        finalSignedUrl = resolved.signedUrl;
-      } else {
-        finalSignedUrl = await storage.getSignedUrl(
-          storagePath,
-          DOWNLOAD_EXPIRY_SECONDS,
-        );
-      }
-    } catch (e: unknown) {
-      // Fallback: try resolving candidates across all tiers
-      const filename = storagePath.split("/").pop() ||
-        String(metadata.filename || (af as any).filename);
-      const mediaId = String((item as any).media_id || "");
-      const rawItemPath = String((item as any).path || "").replace(/^\/+/, "");
-      const recordedPrefix = storagePath.includes("://")
-        ? storagePath.replace(/^[a-z0-9-_]+:\/\//i, "").split("/").slice(0, -1)
-          .join("/")
-        : storagePath.split("/").slice(0, -1).join("/");
-      const cleanStoragePath = storagePath.replace(/^[a-z0-9-_]+:\/\//i, "")
-        .replace(/^\/+/, "");
-
-      const candidates = [
-        `${libraryItemId}/${filename}`,
-        mediaId && mediaId !== libraryItemId ? `${mediaId}/${filename}` : "",
-        recordedPrefix && recordedPrefix !== libraryItemId &&
-          recordedPrefix !== mediaId
-          ? `${recordedPrefix}/${filename}`
-          : "",
-        rawItemPath ? `${rawItemPath}/${filename}` : "",
-        rawItemPath
-          ? `${rawItemPath.replace(/^audiobooks\//, "")}/${filename}`
-          : "",
-        cleanStoragePath,
-        cleanStoragePath.replace(/^audiobooks\//, ""),
-        filename,
-      ].filter(Boolean);
-
-      const resolved = await storage.signFirstExisting(
-        Array.from(new Set(candidates)),
-        DOWNLOAD_EXPIRY_SECONDS,
-      );
-
-      if (resolved) {
-        finalSignedUrl = resolved.signedUrl;
-      } else {
-        const signErr = e as Error;
-        console.warn(
-          `[DownloadsRoute] Missing storage file at "${storagePath}": ${signErr.message}. Skipping track.`,
-        );
-        missingTracks.push(storagePath);
-        isMissing = true;
-      }
-    }
-
-    if (!isMissing && finalSignedUrl) {
-      tracks.push({
-        index: af.index ?? i,
-        title: String(
-          metadata.filename || (af as any).filename || `Track ${i + 1}`,
-        ),
-        url: finalSignedUrl,
-        size: af.size,
-        duration: duration,
-        mimeType: af.mime_type,
-      });
-    }
   }
+
+  const tracks: DownloadTrack[] = resolvedTracks.filter(
+    (t): t is DownloadTrack => t !== null,
+  );
 
   if (tracks.length === 0) {
     return c.json({
