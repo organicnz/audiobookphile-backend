@@ -32,9 +32,15 @@ export const itemsRouter = createOpenApiRouter();
 // honest without pinning every field of the evolving book shape.
 const BookPayloadSchema = z.any();
 const MediaIdSchema = z.object({ mediaId: z.string().nullable() });
-const SimilarItemsSchema = z.any();
-const BatchItemsSchema = z.any();
-const InsightsSchema = z.any();
+const SimilarItemsSchema = z.object({
+  similarItems: z.array(z.record(z.string(), z.unknown())),
+});
+const BatchItemsSchema = z.object({
+  items: z.array(z.record(z.string(), z.unknown())),
+});
+const InsightsSchema = z.object({
+  insights: z.string().nullable().optional(),
+});
 const SyncResultSchema = z.object({
   success: z.boolean(),
   updated: z.number().optional(),
@@ -47,7 +53,7 @@ const ServerErrorSchema = z.object({
   error: z.string(),
   message: z.string().optional(),
   stack: z.string().optional(),
-  details: z.union([z.string(), z.array(z.any())]).optional(),
+  details: z.union([z.string(), z.array(z.unknown())]).optional(),
   hint: z.string().optional(),
 });
 const ForbiddenSchema = z.object({ error: z.string() });
