@@ -13,6 +13,10 @@ import {
   findDuplicateBook as checkDuplicateBook,
   resolveTitleAndAuthor,
 } from "../_shared/domain/downloads.ts";
+import {
+  isAudioFileName,
+  resolveAudioMediaInfo,
+} from "../_shared/domain/playback.ts";
 
 // ===== Zod schemas for /upload/finalize =====
 const UploadCheckSchema = z.object({
@@ -268,148 +272,26 @@ downloadsRouter.openapi(downloadItemRoute, async (c) => {
   ) {
     const libraryFiles = (item as Record<string, unknown>)
       .library_files as Record<string, unknown>[];
-    const audioExtensions = [
-      ".mp3",
-      ".m4b",
-      ".m4a",
-      ".aac",
-      ".flac",
-      ".ogg",
-      ".oga",
-      ".ogv",
-      ".opus",
-      ".wav",
-      ".webm",
-      ".webma",
-      ".wma",
-      ".aiff",
-      ".aif",
-      ".caf",
-      ".awb",
-      ".mka",
-      ".mkv",
-      ".mp4",
-      ".m4v",
-    ];
     audioFilesList = libraryFiles
       .filter((lf) => {
         const metadata = (lf.metadata as Record<string, unknown>) || {};
-        const ext = String(metadata.ext || "").toLowerCase();
+        const ext = String(metadata.ext || "");
         const relPath = String(
           metadata.relPath || metadata.filename || lf.path || "",
-        ).toLowerCase();
-        return audioExtensions.some((e) =>
-          ext.endsWith(e) || relPath.endsWith(e)
         );
+        return isAudioFileName(ext) || isAudioFileName(relPath);
       })
       .map((lf, idx) => {
         const metadata = (lf.metadata as Record<string, unknown>) || {};
-        const ext = String(metadata.ext || "").toLowerCase().replace(/^\./, "");
-        let mimeType = String(metadata.mimeType || "");
-        if (
-          !mimeType || mimeType === "audio/mpeg" ||
-          mimeType === "application/octet-stream"
-        ) {
-          switch (ext) {
-            case "m4b":
-            case "m4a":
-            case "mp4":
-            case "m4v":
-              mimeType = "audio/mp4";
-              break;
-            case "mp3":
-            case "mpeg":
-            case "mpg":
-              mimeType = "audio/mpeg";
-              break;
-            case "flac":
-              mimeType = "audio/flac";
-              break;
-            case "opus":
-              mimeType = "audio/opus";
-              break;
-            case "ogg":
-            case "oga":
-            case "ogv":
-              mimeType = "audio/ogg";
-              break;
-            case "aac":
-              mimeType = "audio/aac";
-              break;
-            case "wav":
-              mimeType = "audio/wav";
-              break;
-            case "webm":
-            case "webma":
-              mimeType = "audio/webm";
-              break;
-            case "wma":
-            case "wmv":
-            case "asf":
-              mimeType = "audio/x-ms-wma";
-              break;
-            case "aiff":
-            case "aif":
-              mimeType = "audio/aiff";
-              break;
-            case "caf":
-              mimeType = "audio/x-caf";
-              break;
-            case "awb":
-            case "3gp":
-              mimeType = "audio/amr-wb";
-              break;
-            case "mka":
-            case "mkv":
-              mimeType = "audio/x-matroska";
-              break;
-            default:
-              mimeType = metadata.mimeType
-                ? String(metadata.mimeType)
-                : "audio/mpeg";
-          }
-        }
-
-        let codec = String(metadata.codec || "");
-        if (!codec || codec === "mp3") {
-          switch (ext) {
-            case "m4b":
-            case "m4a":
-            case "mp4":
-            case "m4v":
-            case "aac":
-            case "caf":
-              codec = "aac";
-              break;
-            case "flac":
-              codec = "flac";
-              break;
-            case "opus":
-              codec = "opus";
-              break;
-            case "ogg":
-            case "oga":
-            case "ogv":
-              codec = "vorbis";
-              break;
-            case "wav":
-            case "aiff":
-            case "aif":
-              codec = "pcm";
-              break;
-            case "wma":
-            case "wmv":
-            case "asf":
-              codec = "wma";
-              break;
-            case "awb":
-            case "3gp":
-              codec = "amr-wb";
-              break;
-            default:
-              codec = metadata.codec ? String(metadata.codec) : "mp3";
-          }
-        }
+        const filename = String(
+          metadata.filename || metadata.relPath || lf.path || "",
+        );
+        const { mimeType, codec } = resolveAudioMediaInfo({
+          filename,
+          ext: String(metadata.ext || ""),
+          mimeType: String(metadata.mimeType || ""),
+          codec: String(metadata.codec || ""),
+        });
 
         return {
           ino: lf.ino,
@@ -943,104 +825,11 @@ export async function executeFinalize(
   const audioFilesJson = validFiles.map((file: any, i: number) => {
     const extRaw = file.name.split(".").pop()?.toLowerCase() ?? "";
     const ext = "." + extRaw;
-    let mimeType = file.type;
-    if (!mimeType || mimeType === "application/octet-stream") {
-      switch (extRaw) {
-        case "m4b":
-        case "m4a":
-        case "mp4":
-        case "m4v":
-          mimeType = "audio/mp4";
-          break;
-        case "mp3":
-        case "mpeg":
-        case "mpg":
-          mimeType = "audio/mpeg";
-          break;
-        case "flac":
-          mimeType = "audio/flac";
-          break;
-        case "opus":
-          mimeType = "audio/opus";
-          break;
-        case "ogg":
-        case "oga":
-        case "ogv":
-          mimeType = "audio/ogg";
-          break;
-        case "aac":
-          mimeType = "audio/aac";
-          break;
-        case "wav":
-          mimeType = "audio/wav";
-          break;
-        case "webm":
-        case "webma":
-          mimeType = "audio/webm";
-          break;
-        case "wma":
-        case "wmv":
-        case "asf":
-          mimeType = "audio/x-ms-wma";
-          break;
-        case "aiff":
-        case "aif":
-          mimeType = "audio/aiff";
-          break;
-        case "caf":
-          mimeType = "audio/x-caf";
-          break;
-        case "awb":
-        case "3gp":
-          mimeType = "audio/amr-wb";
-          break;
-        case "mka":
-        case "mkv":
-          mimeType = "audio/x-matroska";
-          break;
-        default:
-          mimeType = file.type || "audio/mpeg";
-      }
-    }
-
-    let codec = "mp3";
-    switch (extRaw) {
-      case "m4b":
-      case "m4a":
-      case "mp4":
-      case "m4v":
-      case "aac":
-      case "caf":
-        codec = "aac";
-        break;
-      case "flac":
-        codec = "flac";
-        break;
-      case "opus":
-        codec = "opus";
-        break;
-      case "ogg":
-      case "oga":
-      case "ogv":
-        codec = "vorbis";
-        break;
-      case "wav":
-      case "aiff":
-      case "aif":
-        codec = "pcm";
-        break;
-      case "wma":
-      case "wmv":
-      case "asf":
-        codec = "wma";
-        break;
-      case "awb":
-      case "3gp":
-        codec = "amr-wb";
-        break;
-      default:
-        codec = "mp3";
-    }
+    const { mimeType, codec } = resolveAudioMediaInfo({
+      filename: file.name,
+      ext: extRaw,
+      mimeType: file.type,
+    });
 
     return {
       index: baseIndex + i + 1,

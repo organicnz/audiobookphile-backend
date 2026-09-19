@@ -10,8 +10,13 @@ import {
   parseSortParams,
 } from "./_shared/domain/libraries.ts";
 import {
+  extractExtension,
   generateManifest,
+  inferAudioCodec,
+  inferMimeType,
+  isAudioFileName,
   normalizeAudioFile,
+  resolveAudioMediaInfo,
   resolveSyncConflict,
   type SyncInput,
 } from "./_shared/domain/playback.ts";
@@ -204,4 +209,38 @@ Deno.test("Playback Domain: generateManifest calculates cumulative offsets", () 
   assertEquals(manifest.tracks[0].startOffset, 0);
   assertEquals(manifest.tracks[1].startOffset, 100);
   assertEquals(manifest.tracks[2].startOffset, 250);
+});
+
+Deno.test("Playback Domain: audio utilities correctly detect formats and infer MIME/codecs", () => {
+  // Extension extraction
+  assertEquals(extractExtension("track01.m4b"), "m4b");
+  assertEquals(extractExtension("/var/media/audio/book.part.mp3"), "mp3");
+  assertEquals(extractExtension("noextension"), "");
+
+  // Audio file recognition
+  assertEquals(isAudioFileName("audio.m4b"), true);
+  assertEquals(isAudioFileName("audio.FLAC"), true);
+  assertEquals(isAudioFileName("cover.jpg"), false);
+  assertEquals(isAudioFileName("info.txt"), false);
+
+  // MIME type inference
+  assertEquals(inferMimeType("m4b"), "audio/mp4");
+  assertEquals(inferMimeType("book.flac"), "audio/flac");
+  assertEquals(inferMimeType("speech.opus"), "audio/opus");
+  assertEquals(inferMimeType("stream.unknown", "custom/mime"), "custom/mime");
+
+  // Codec inference
+  assertEquals(inferAudioCodec("m4b"), "aac");
+  assertEquals(inferAudioCodec("book.opus"), "opus");
+  assertEquals(inferAudioCodec("track.wav"), "pcm");
+  assertEquals(inferAudioCodec("speech.ogg"), "vorbis");
+
+  // Full media info resolution
+  const resolved = resolveAudioMediaInfo({
+    filename: "sample_track.m4b",
+    mimeType: "application/octet-stream",
+    codec: "",
+  });
+  assertEquals(resolved.mimeType, "audio/mp4");
+  assertEquals(resolved.codec, "aac");
 });

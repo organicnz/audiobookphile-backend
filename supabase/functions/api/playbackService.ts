@@ -8,16 +8,26 @@ import {
 } from "../_shared/progress.ts";
 import { getErrorMessage } from "./_shared/errors.ts";
 import {
+  AUDIO_EXTENSIONS,
   generateManifest,
+  inferAudioCodec,
+  inferMimeType,
+  isAudioFileName,
   normalizeAudioFile,
   normalizeAudioFiles,
+  resolveAudioMediaInfo,
   resolveSyncConflict,
 } from "./_shared/domain/playback.ts";
 
 export {
+  AUDIO_EXTENSIONS,
   generateManifest,
+  inferAudioCodec,
+  inferMimeType,
+  isAudioFileName,
   normalizeAudioFile,
   normalizeAudioFiles,
+  resolveAudioMediaInfo,
   resolveSyncConflict,
 };
 
@@ -90,149 +100,26 @@ export class PlaybackService {
           string,
           unknown
         >[];
-      const audioExts = [
-        ".mp3",
-        ".m4b",
-        ".m4a",
-        ".aac",
-        ".flac",
-        ".ogg",
-        ".oga",
-        ".ogv",
-        ".opus",
-        ".wav",
-        ".webm",
-        ".webma",
-        ".wma",
-        ".aiff",
-        ".aif",
-        ".caf",
-        ".awb",
-        ".mka",
-        ".mkv",
-        ".mp4",
-        ".m4v",
-      ];
       const extracted = libraryFiles
         .filter((lf) => {
           const metadata = (lf.metadata as Record<string, unknown>) || {};
-          const ext = String(metadata.ext || "").toLowerCase();
+          const ext = String(metadata.ext || "");
           const relPath = String(
             metadata.relPath || metadata.filename || lf.path || "",
-          ).toLowerCase();
-          return audioExts.some((e) => ext.endsWith(e) || relPath.endsWith(e));
+          );
+          return isAudioFileName(ext) || isAudioFileName(relPath);
         })
         .map((lf, idx) => {
           const metadata = (lf.metadata as Record<string, unknown>) || {};
-          const ext = String(metadata.ext || "").toLowerCase().replace(
-            /^\./,
-            "",
+          const filename = String(
+            metadata.filename || metadata.relPath || `Track ${idx + 1}`,
           );
-          let mimeType = String(metadata.mimeType || "");
-          if (
-            !mimeType || mimeType === "audio/mpeg" ||
-            mimeType === "application/octet-stream"
-          ) {
-            switch (ext) {
-              case "m4b":
-              case "m4a":
-              case "mp4":
-              case "m4v":
-                mimeType = "audio/mp4";
-                break;
-              case "mp3":
-              case "mpeg":
-              case "mpg":
-                mimeType = "audio/mpeg";
-                break;
-              case "flac":
-                mimeType = "audio/flac";
-                break;
-              case "opus":
-                mimeType = "audio/opus";
-                break;
-              case "ogg":
-              case "oga":
-              case "ogv":
-                mimeType = "audio/ogg";
-                break;
-              case "aac":
-                mimeType = "audio/aac";
-                break;
-              case "wav":
-                mimeType = "audio/wav";
-                break;
-              case "webm":
-              case "webma":
-                mimeType = "audio/webm";
-                break;
-              case "wma":
-              case "wmv":
-              case "asf":
-                mimeType = "audio/x-ms-wma";
-                break;
-              case "aiff":
-              case "aif":
-                mimeType = "audio/aiff";
-                break;
-              case "caf":
-                mimeType = "audio/x-caf";
-                break;
-              case "awb":
-              case "3gp":
-                mimeType = "audio/amr-wb";
-                break;
-              case "mka":
-              case "mkv":
-                mimeType = "audio/x-matroska";
-                break;
-              default:
-                mimeType = metadata.mimeType
-                  ? String(metadata.mimeType)
-                  : "audio/mpeg";
-            }
-          }
-
-          let codec = String(metadata.codec || "");
-          if (!codec || codec === "mp3") {
-            switch (ext) {
-              case "m4b":
-              case "m4a":
-              case "mp4":
-              case "m4v":
-              case "aac":
-              case "caf":
-                codec = "aac";
-                break;
-              case "flac":
-                codec = "flac";
-                break;
-              case "opus":
-                codec = "opus";
-                break;
-              case "ogg":
-              case "oga":
-              case "ogv":
-                codec = "vorbis";
-                break;
-              case "wav":
-              case "aiff":
-              case "aif":
-                codec = "pcm";
-                break;
-              case "wma":
-              case "wmv":
-              case "asf":
-                codec = "wma";
-                break;
-              case "awb":
-              case "3gp":
-                codec = "amr-wb";
-                break;
-              default:
-                codec = metadata.codec ? String(metadata.codec) : "mp3";
-            }
-          }
+          const { mimeType, codec } = resolveAudioMediaInfo({
+            filename,
+            ext: String(metadata.ext || ""),
+            mimeType: String(metadata.mimeType || ""),
+            codec: String(metadata.codec || ""),
+          });
 
           return {
             index: idx,
@@ -242,9 +129,7 @@ export class PlaybackService {
             duration: Number(lf.duration) || Number(metadata.duration) || 0,
             mime_type: mimeType,
             codec: codec,
-            filename: String(
-              metadata.filename || metadata.relPath || `Track ${idx + 1}`,
-            ),
+            filename,
             path: String(
               lf.path || metadata.path || metadata.relPath ||
                 metadata.filename || "",
