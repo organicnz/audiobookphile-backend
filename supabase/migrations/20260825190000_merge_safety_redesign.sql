@@ -51,6 +51,8 @@ DROP FUNCTION IF EXISTS public.deduplicate_library_items();
 -- ---------------------------------------------------------------------------
 -- 2. Planner (read-only)
 -- ---------------------------------------------------------------------------
+CREATE EXTENSION IF NOT EXISTS pg_trgm WITH SCHEMA extensions;
+
 CREATE OR REPLACE FUNCTION public.plan_library_item_merges()
 RETURNS TABLE (
   primary_id    uuid,
@@ -62,6 +64,7 @@ RETURNS TABLE (
 )
 LANGUAGE sql
 STABLE
+SET search_path = public, extensions
 AS $$
 WITH pairs AS (
     -- PASS 1: same normalized title within a library
@@ -134,7 +137,7 @@ WITH pairs AS (
       ON i1.library_id = i2.library_id AND i1.id < i2.id
     WHERE public.normalize_book_title(i1.title) != ''
       AND public.normalize_book_title(i2.title) != ''
-      AND similarity(public.normalize_book_title(i1.title), public.normalize_book_title(i2.title)) > 0.85
+      AND extensions.similarity(public.normalize_book_title(i1.title), public.normalize_book_title(i2.title)) > 0.85
       AND (
         i1.author_names_first_last IS NULL OR i2.author_names_first_last IS NULL
         OR i1.author_names_first_last = 'Unknown Author' OR i2.author_names_first_last = 'Unknown Author'

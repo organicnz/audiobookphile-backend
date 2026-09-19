@@ -446,11 +446,10 @@ itemsRouter.openapi(checkExistingRoute, async (c) => {
     if (zaiApiKey && title) {
       const { data: allLibItems } = await supabase
         .from("library_items")
-        .select(
-          "id, title, author_names_first_last, duration, size, library_files, audio_files",
-        )
+        .select("id, title, author_names_first_last")
         .eq("library_id", libraryId)
-        .eq("media_type", mediaType);
+        .eq("media_type", mediaType)
+        .limit(250);
 
       if (allLibItems?.length) {
         const matchedId = await matchExistingBookWithZAI(
