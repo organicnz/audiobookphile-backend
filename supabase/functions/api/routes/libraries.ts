@@ -56,7 +56,7 @@ const ServerErrorSchema = z.object({
   error: z.string(),
   message: z.string().optional(),
   stack: z.string().optional(),
-  details: z.array(z.any()).optional(),
+  details: z.union([z.string(), z.array(z.unknown())]).optional(),
   hint: z.string().optional(),
 });
 const ForbiddenSchema = z.object({ error: z.string() });

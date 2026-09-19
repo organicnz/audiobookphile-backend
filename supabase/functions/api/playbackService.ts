@@ -163,111 +163,17 @@ export class PlaybackService {
         const size = Number(af.size) || Number(metadata.size) || 0;
         totalFilesSize += size;
 
-        let mimeType = String(
-          af.mime_type || af.mimeType || metadata.mimeType || "",
+        const filename = String(
+          (af as any).filename || metadata.filename || metadata.relPath || "",
         );
-        if (
-          !mimeType || mimeType === "audio/mpeg" ||
-          mimeType === "application/octet-stream"
-        ) {
-          switch (ext) {
-            case "m4b":
-            case "m4a":
-            case "mp4":
-            case "m4v":
-              mimeType = "audio/mp4";
-              break;
-            case "mp3":
-            case "mpeg":
-            case "mpg":
-              mimeType = "audio/mpeg";
-              break;
-            case "flac":
-              mimeType = "audio/flac";
-              break;
-            case "opus":
-              mimeType = "audio/opus";
-              break;
-            case "ogg":
-            case "oga":
-            case "ogv":
-              mimeType = "audio/ogg";
-              break;
-            case "aac":
-              mimeType = "audio/aac";
-              break;
-            case "wav":
-              mimeType = "audio/wav";
-              break;
-            case "webm":
-            case "webma":
-              mimeType = "audio/webm";
-              break;
-            case "wma":
-            case "wmv":
-            case "asf":
-              mimeType = "audio/x-ms-wma";
-              break;
-            case "aiff":
-            case "aif":
-              mimeType = "audio/aiff";
-              break;
-            case "caf":
-              mimeType = "audio/x-caf";
-              break;
-            case "awb":
-            case "3gp":
-              mimeType = "audio/amr-wb";
-              break;
-            case "mka":
-            case "mkv":
-              mimeType = "audio/x-matroska";
-              break;
-            default:
-              mimeType = af.mime_type ? String(af.mime_type) : "audio/mpeg";
-          }
-        }
-
-        let codec = String(af.codec || metadata.codec || "");
-        if (!codec || codec === "mp3") {
-          switch (ext) {
-            case "m4b":
-            case "m4a":
-            case "mp4":
-            case "m4v":
-            case "aac":
-            case "caf":
-              codec = "aac";
-              break;
-            case "flac":
-              codec = "flac";
-              break;
-            case "opus":
-              codec = "opus";
-              break;
-            case "ogg":
-            case "oga":
-            case "ogv":
-              codec = "vorbis";
-              break;
-            case "wav":
-            case "aiff":
-            case "aif":
-              codec = "pcm";
-              break;
-            case "wma":
-            case "wmv":
-            case "asf":
-              codec = "wma";
-              break;
-            case "awb":
-            case "3gp":
-              codec = "amr-wb";
-              break;
-            default:
-              codec = af.codec ? String(af.codec) : "mp3";
-          }
-        }
+        const { mimeType, codec } = resolveAudioMediaInfo({
+          filename,
+          ext,
+          mimeType: String(
+            af.mime_type || af.mimeType || metadata.mimeType || "",
+          ),
+          codec: String(af.codec || metadata.codec || ""),
+        });
 
         return {
           ...af,
