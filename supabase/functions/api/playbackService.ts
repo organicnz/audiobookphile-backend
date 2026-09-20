@@ -199,6 +199,10 @@ export class PlaybackService {
 
     const mediaId = String((item as any).media_id || "");
     const rawItemPath = String((item as any).path || "").replace(/^\/+/, "");
+    const relPath = String((item as any).rel_path || "").replace(/^\/+/, "");
+    const strippedItemPath = rawItemPath
+      .replace(/^[0-9a-fA-F-]{36}\/?/, "")
+      .replace(/^audiobooks\//, "");
 
     // Helper to build candidate storage keys for a track's file
     const buildCandidates = (
@@ -212,13 +216,17 @@ export class PlaybackService {
         ? cleanStoragePath.split("/").slice(0, -1).join("/")
         : "";
 
-      const candidateList = [
+      const rawCandidates = [
         `${libraryItemId}/${filename}`,
         mediaId && mediaId !== libraryItemId ? `${mediaId}/${filename}` : "",
         recordedPrefix && recordedPrefix !== libraryItemId &&
           recordedPrefix !== mediaId
           ? `${recordedPrefix}/${filename}`
           : "",
+        relPath ? `${relPath}/${filename}` : "",
+        relPath ? `audiobooks/${relPath}/${filename}` : "",
+        strippedItemPath ? `${strippedItemPath}/${filename}` : "",
+        strippedItemPath ? `audiobooks/${strippedItemPath}/${filename}` : "",
         rawItemPath ? `${rawItemPath}/${filename}` : "",
         rawItemPath
           ? `${rawItemPath.replace(/^audiobooks\//, "")}/${filename}`
@@ -228,7 +236,18 @@ export class PlaybackService {
         filename,
       ].filter(Boolean);
 
-      return Array.from(new Set(candidateList));
+      const candidateSet = new Set<string>();
+      for (const cand of rawCandidates) {
+        candidateSet.add(cand);
+        try {
+          const decoded = decodeURIComponent(cand);
+          if (decoded !== cand) candidateSet.add(decoded);
+        } catch {
+          // ignore malformed URI components
+        }
+      }
+
+      return Array.from(candidateSet);
     };
 
     // Prepare metadata for all sorted audio files
