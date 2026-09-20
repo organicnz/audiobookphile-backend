@@ -110,7 +110,11 @@ Deno.test({
       return;
     }
 
-    const itemId = items[0].id;
+    // Prefer an item that has audio files and is not flagged missing
+    const playableItem = items.find(
+      (it: any) => !it.isMissing && it.isMissing !== true && !it.is_missing,
+    );
+    const itemId = playableItem ? playableItem.id : items[0].id;
 
     // 5. Fetch Item Details (/items/:id)
     const itemDetailResponse = await fetch(`${API_BASE_URL}/items/${itemId}`, {

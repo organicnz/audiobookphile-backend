@@ -406,10 +406,14 @@ export class PlaybackService {
     // If standard probes failed, attempt intelligent multi-tier AI/index resolution
     if (
       !winningPrefix &&
-      !preparedTracks.some((t) => t.finalSignedUrl && !t.isMissing)
+      !preparedTracks.some((t) => t.finalSignedUrl && !t.isMissing) &&
+      !item.is_missing
     ) {
       try {
-        const intelligentMatch = await resolveBookStorage(item, firstTrack);
+        const intelligentMatch = await Promise.race([
+          resolveBookStorage(item, firstTrack),
+          new Promise<null>((resolve) => setTimeout(() => resolve(null), 3500)),
+        ]);
         if (intelligentMatch) {
           firstTrack.isMissing = false;
           firstTrack.finalSignedUrl = intelligentMatch.signedUrl;

@@ -65,7 +65,6 @@ export async function refreshStorageIndex(
     return cachedIndex;
   }
 
-  const entries: StorageIndexEntry[] = [];
   const tiers: BucketTier[] = [
     "B2",
     "B2_SECONDARY",
@@ -74,47 +73,54 @@ export async function refreshStorageIndex(
     "B2_QUINTET",
   ];
 
-  for (const tier of tiers) {
-    if (!isTierConfigured(tier)) continue;
+  const configuredTiers = tiers.filter((t) => isTierConfigured(t));
+  const results = await Promise.all(
+    configuredTiers.map(async (tier) => {
+      const tierEntries: StorageIndexEntry[] = [];
+      try {
+        const client = getB2Client(tier);
+        const bucket = getConfig(tier).bucketName;
+        let continuationToken: string | undefined = undefined;
 
-    try {
-      const client = getB2Client(tier);
-      const bucket = getConfig(tier).bucketName;
-      let continuationToken: string | undefined = undefined;
+        do {
+          const res: ListObjectsV2CommandOutput = await client.send(
+            new ListObjectsV2Command({
+              Bucket: bucket,
+              ContinuationToken: continuationToken,
+            }),
+          );
 
-      do {
-        const res: ListObjectsV2CommandOutput = await client.send(
-          new ListObjectsV2Command({
-            Bucket: bucket,
-            ContinuationToken: continuationToken,
-          }),
-        );
+          if (res.Contents) {
+            for (const item of res.Contents) {
+              if (!item.Key) continue;
+              const parts = item.Key.split("/");
+              const filename = parts[parts.length - 1] || "";
+              const prefix = parts.length > 1
+                ? parts.slice(0, -1).join("/")
+                : "";
 
-        if (res.Contents) {
-          for (const item of res.Contents) {
-            if (!item.Key) continue;
-            const parts = item.Key.split("/");
-            const filename = parts[parts.length - 1] || "";
-            const prefix = parts.length > 1 ? parts.slice(0, -1).join("/") : "";
-
-            entries.push({
-              tier,
-              prefix,
-              key: item.Key,
-              filename,
-              size: item.Size,
-            });
+              tierEntries.push({
+                tier,
+                prefix,
+                key: item.Key,
+                filename,
+                size: item.Size,
+              });
+            }
           }
-        }
-        continuationToken = res.NextContinuationToken;
-      } while (continuationToken);
-    } catch (err: unknown) {
-      console.warn(
-        `[IntelligentStorageResolver] Failed to index tier ${tier}:`,
-        err instanceof Error ? err.message : String(err),
-      );
-    }
-  }
+          continuationToken = res.NextContinuationToken;
+        } while (continuationToken);
+      } catch (err: unknown) {
+        console.warn(
+          `[IntelligentStorageResolver] Failed to index tier ${tier}:`,
+          err instanceof Error ? err.message : String(err),
+        );
+      }
+      return tierEntries;
+    }),
+  );
+
+  const entries: StorageIndexEntry[] = results.flat();
 
   cachedIndex = entries;
   indexExpiresAt = Date.now() + INDEX_TTL_MS;
