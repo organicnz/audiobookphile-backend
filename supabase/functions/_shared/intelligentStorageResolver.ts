@@ -24,7 +24,7 @@ import { getSignedUrl } from "npm:@aws-sdk/s3-request-presigner@^3.693.0";
 import { BucketTier } from "./b2-types.ts";
 import { getConfig, isTierConfigured } from "./b2-config.ts";
 import { getB2Client } from "./b2-bucket-pool.ts";
-import { tierToPrefix } from "./storage-router.ts";
+import { StorageRouter, tierToPrefix } from "./storage-router.ts";
 import { titlesLikelySameWork } from "./titleMatch.ts";
 import { ZAI_CHAT_MODEL } from "./zai.ts";
 
@@ -327,7 +327,19 @@ export async function resolveBookStorage(
     return null;
   }
 
-  // 1. Try deterministic match using firstTrack filename
+  // 0. Try existing storage path if already specified on firstTrack
+  const router = new StorageRouter(null);
+  const parsedFirst = firstTrack.storagePath
+    ? router.parsePath(firstTrack.storagePath)
+    : null;
+  let matchedEntry: StorageIndexEntry | null = null;
+  if (parsedFirst && parsedFirst.tier !== "SUPABASE") {
+    matchedEntry = index.find(
+      (e) => e.tier === parsedFirst.tier && e.key === parsedFirst.key,
+    ) || null;
+  }
+
+  // 1. Try deterministic match using candidate filenames
   const rawAudioFiles = Array.isArray(item.audio_files) ? item.audio_files : [];
   const candidateFilenames = [
     firstTrack.filename,
@@ -336,10 +348,11 @@ export async function resolveBookStorage(
     ),
   ].filter(Boolean);
 
-  let matchedEntry: StorageIndexEntry | null = null;
-  for (const fn of candidateFilenames) {
-    matchedEntry = findBestDeterministicMatch(fn, index);
-    if (matchedEntry) break;
+  if (!matchedEntry) {
+    for (const fn of candidateFilenames) {
+      matchedEntry = findBestDeterministicMatch(fn, index);
+      if (matchedEntry) break;
+    }
   }
 
   let matchedBy: "deterministic" | "ai_semantic" = "deterministic";

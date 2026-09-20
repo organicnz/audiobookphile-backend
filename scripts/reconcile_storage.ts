@@ -15,7 +15,10 @@ import {
   matchStorageFolderWithAI,
   refreshStorageIndex,
 } from "../supabase/functions/_shared/intelligentStorageResolver.ts";
-import { tierToPrefix } from "../supabase/functions/_shared/storage-router.ts";
+import {
+  StorageRouter,
+  tierToPrefix,
+} from "../supabase/functions/_shared/storage-router.ts";
 
 interface ReconciledEntry {
   id: string;
@@ -106,6 +109,8 @@ const reconciled: ReconciledEntry[] = [];
 const missing: MissingEntry[] = [];
 const alreadyValid: ValidEntry[] = [];
 
+const router = new StorageRouter(supabase);
+
 for (const book of books) {
   const rawAudioFiles = (
     Array.isArray(book.audio_files) ? book.audio_files : []
@@ -125,6 +130,32 @@ for (const book of books) {
     continue;
   }
 
+  // 1. Verify if book's current audio path is already valid in B2
+  const firstAf = rawAudioFiles[0];
+  const existingPath = String(
+    firstAf?.metadata?.path || firstAf?.storage_path || "",
+  );
+  const parsedExisting = existingPath ? router.parsePath(existingPath) : null;
+  if (parsedExisting && parsedExisting.tier !== "SUPABASE") {
+    const foundInIndex = index.some(
+      (e) => e.tier === parsedExisting.tier && e.key === parsedExisting.key,
+    );
+    if (foundInIndex) {
+      if (apply && book.is_missing) {
+        await supabase
+          .from("library_items")
+          .update({ is_missing: false })
+          .eq("id", book.id);
+      }
+      alreadyValid.push({
+        id: book.id,
+        title: book.title || "Untitled",
+        prefix: existingPath,
+      });
+      continue;
+    }
+  }
+
   const candidateFilenames = rawAudioFiles.map((af) =>
     af.metadata?.filename || af.metadata?.relPath || af.filename || ""
   ).filter(Boolean);
@@ -136,6 +167,33 @@ for (const book of books) {
   }
 
   let method = "deterministic";
+
+  // 2. Exact track list signature matching for unreferenced folders
+  if (!matchedEntry) {
+    const trackFilenames = new Set(
+      rawAudioFiles.map((af) =>
+        String(
+          af?.metadata?.filename || af?.filename || af?.metadata?.relPath || "",
+        ).toLowerCase()
+      ).filter(Boolean),
+    );
+    const candidateFolders = availableFolders.filter((f) =>
+      f.fileCount === rawAudioFiles.length
+    );
+    for (const cf of candidateFolders) {
+      const filesInFolder = index.filter((e) =>
+        e.tier === cf.tier && e.prefix === cf.prefix
+      );
+      const matchingCount = filesInFolder.filter((f) =>
+        trackFilenames.has(f.filename.toLowerCase())
+      ).length;
+      if (matchingCount === rawAudioFiles.length && rawAudioFiles.length > 0) {
+        matchedEntry = filesInFolder[0] || null;
+        method = "track_signature_match";
+        break;
+      }
+    }
+  }
 
   if (!matchedEntry && zaiApiKey) {
     const aiFolder = await matchStorageFolderWithAI(

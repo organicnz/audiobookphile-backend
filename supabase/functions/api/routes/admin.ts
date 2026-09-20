@@ -8,7 +8,7 @@ import {
   matchStorageFolderWithAI,
   refreshStorageIndex,
 } from "../../_shared/intelligentStorageResolver.ts";
-import { tierToPrefix } from "../../_shared/storage-router.ts";
+import { StorageRouter, tierToPrefix } from "../../_shared/storage-router.ts";
 
 export const adminRouter = createOpenApiRouter();
 
@@ -233,6 +233,8 @@ adminRouter.openapi(reconcileStorageRoute, async (c) => {
     const missing: Array<{ id: string; title: string; tracks: number }> = [];
     const alreadyValid: Array<{ id: string; title: string }> = [];
 
+    const router = new StorageRouter(adminSupabase);
+
     for (const book of books) {
       const rawAudioFiles = Array.isArray(book.audio_files)
         ? book.audio_files
@@ -250,7 +252,31 @@ adminRouter.openapi(reconcileStorageRoute, async (c) => {
         continue;
       }
 
-      // Check if first track's filename matches in B2
+      // 1. Verify if book's current audio path is already valid in B2
+      const firstAf = rawAudioFiles[0];
+      const existingPath = String(
+        firstAf?.metadata?.path || firstAf?.storage_path || "",
+      );
+      const parsedExisting = existingPath
+        ? router.parsePath(existingPath)
+        : null;
+      if (parsedExisting && parsedExisting.tier !== "SUPABASE") {
+        const foundInIndex = index.some(
+          (e) => e.tier === parsedExisting.tier && e.key === parsedExisting.key,
+        );
+        if (foundInIndex) {
+          if (!dryRun && book.is_missing) {
+            await adminSupabase
+              .from("library_items")
+              .update({ is_missing: false })
+              .eq("id", book.id);
+          }
+          alreadyValid.push({ id: book.id, title: book.title || "Untitled" });
+          continue;
+        }
+      }
+
+      // 2. Check if first track's filename matches in B2
       const candidateFilenames = rawAudioFiles.map((af: any) =>
         af.metadata?.filename || af.metadata?.relPath || af.filename || ""
       ).filter(Boolean);
@@ -263,7 +289,37 @@ adminRouter.openapi(reconcileStorageRoute, async (c) => {
 
       let matchedMethod = "deterministic";
 
-      // If deterministic failed, invoke AI semantic matcher
+      // 3. Exact track list signature matching for unreferenced folders
+      if (!matchedEntry) {
+        const trackFilenames = new Set(
+          rawAudioFiles.map((af: any) =>
+            String(
+              af?.metadata?.filename || af?.filename || af?.metadata?.relPath ||
+                "",
+            ).toLowerCase()
+          ).filter(Boolean),
+        );
+        const candidateFolders = availableFolders.filter((f) =>
+          f.fileCount === rawAudioFiles.length
+        );
+        for (const cf of candidateFolders) {
+          const filesInFolder = index.filter((e) =>
+            e.tier === cf.tier && e.prefix === cf.prefix
+          );
+          const matchingCount = filesInFolder.filter((f) =>
+            trackFilenames.has(f.filename.toLowerCase())
+          ).length;
+          if (
+            matchingCount === rawAudioFiles.length && rawAudioFiles.length > 0
+          ) {
+            matchedEntry = filesInFolder[0] || null;
+            matchedMethod = "track_signature_match";
+            break;
+          }
+        }
+      }
+
+      // 4. If deterministic failed, invoke AI semantic matcher
       if (!matchedEntry && zaiApiKey) {
         const aiFolder = await matchStorageFolderWithAI(
           book.title || "",

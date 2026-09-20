@@ -526,13 +526,30 @@ export class PlaybackService {
 
             await supabase
               .from("library_items")
-              .update({ audio_files: updatedFiles as any })
+              .update({
+                audio_files: updatedFiles as any,
+                is_missing: false,
+              })
               .eq("id", libraryItemId);
           }
         } catch (patchErr) {
           console.warn(
             `[PlaybackService] Failed to patch canonical paths for item ${libraryItemId}:`,
             patchErr,
+          );
+        }
+      })();
+    } else if ((item as any).is_missing) {
+      (async () => {
+        try {
+          await supabase
+            .from("library_items")
+            .update({ is_missing: false })
+            .eq("id", libraryItemId);
+        } catch (e) {
+          console.warn(
+            `[PlaybackService] Failed to reset is_missing for ${libraryItemId}:`,
+            e,
           );
         }
       })();
