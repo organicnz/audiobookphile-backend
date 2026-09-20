@@ -47,8 +47,9 @@ Deno.test({
 
     assertEquals(meResponse.status, 200, "/me should return 200 OK");
     const meBody = await meResponse.json();
+    const userEmail = meBody.email || meBody.user?.email;
     assertEquals(
-      meBody.email,
+      userEmail,
       TEST_EMAIL,
       "/me response should contain the test email",
     );

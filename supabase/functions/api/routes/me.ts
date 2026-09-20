@@ -59,15 +59,22 @@ meRouter.openapi(meProfileRoute, async (c) => {
     const authorization = c.req.header("authorization") || "";
     const accessToken = authorization.replace(/^Bearer\s+/i, "");
 
+    const userPayload = buildUserPayload(profile as any, {
+      access_token: accessToken,
+      refresh_token: null,
+    }, {
+      id: user.id,
+      email: user.email,
+      created_at: user.created_at,
+    });
+
     return c.json(
-      buildUserPayload(profile as any, {
-        access_token: accessToken,
-        refresh_token: null,
-      }, {
-        id: user.id,
+      {
+        ...userPayload.user,
+        ...userPayload,
         email: user.email,
-        created_at: user.created_at,
-      }),
+        id: user.id,
+      },
       200,
     );
   } catch (err: any) {
