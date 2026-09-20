@@ -343,7 +343,20 @@ jobs:
           step_tree "Deploy to Supabase Production" deploy \
             "checkout:Checkout Repository|cli:Setup Supabase CLI|repair:Repair Migration History|migrations:Push Database Migrations|config:Apply Auth & Email Configuration|email:Ensure Email Provider Enabled|signing:Ensure 2FA Challenge Signing Key Secret|vault:Provision Sentry Vault Secret|secrets:Ensure Edge Function Secrets|deploy:Deploy Unified Edge API Function" \
             "checkout=${{ steps.checkout.outcome }};cli=${{ steps.cli.outcome }};repair=${{ steps.repair.outcome }};migrations=${{ steps.migrations.outcome }};config=${{ steps.config.outcome }};email=${{ steps.email.outcome }};signing=${{ steps.signing.outcome }};vault=${{ steps.vault.outcome }};secrets=${{ steps.secrets.outcome }}"
-          supabase functions deploy api --project-ref $SUPABASE_PROJECT_ID --no-verify-jwt
+          # Resilient deploy with retry to handle transient TLS / network hiccups
+          for attempt in 1 2 3; do
+            echo "Deploy attempt $attempt..."
+            if supabase functions deploy api --project-ref $SUPABASE_PROJECT_ID --no-verify-jwt; then
+              echo "✅ Function api deployed successfully on attempt $attempt."
+              break
+            fi
+            if [ "$attempt" -eq 3 ]; then
+              echo "❌ All 3 deploy attempts failed."
+              exit 1
+            fi
+            echo "⚠️ Deploy attempt $attempt failed with transient network/TLS error. Retrying in 5s..."
+            sleep 5
+          done
 
   sentry-release:
     name: Sentry Release (Backend)
