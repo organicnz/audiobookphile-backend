@@ -473,6 +473,7 @@ mountRouter(app, "/api", searchRouter);
 // Sentry monitoring and health check endpoints (no auth required)
 mountRouter(app, "/api/sentry", sentryRouter);
 mountRouter(app, "/api/me", meRouter);
+mountRouter(app, "/api/admin", adminRouter);
 mountRouter(app, "/api/admin/analytics", adminRouter);
 mountRouter(app, "/api/admin-analytics", adminRouter);
 mountRouter(app, "/api/ai", aiRouter);

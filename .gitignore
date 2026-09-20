@@ -18,3 +18,6 @@ backup_export/
 target/
 crates/**/target/
 
+# Local scratch
+scratch/
+

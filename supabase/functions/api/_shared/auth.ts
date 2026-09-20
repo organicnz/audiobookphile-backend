@@ -30,10 +30,11 @@ export const isRole = (
 export const ADMIN_ROLES = ["admin", "root"] as const;
 
 export function requireAdminRole(
-  user: { type?: string } | undefined | null,
+  user: { type?: string; user_type?: string } | undefined | null,
 ): boolean {
-  return !!user &&
-    ADMIN_ROLES.includes(user.type as (typeof ADMIN_ROLES)[number]);
+  const role = user?.type || user?.user_type;
+  return !!role &&
+    ADMIN_ROLES.includes(role as (typeof ADMIN_ROLES)[number]);
 }
 
 // Auth errors - centralize all auth-related errors

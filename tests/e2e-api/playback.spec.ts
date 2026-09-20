@@ -194,3 +194,18 @@ test("playback progress sync loop succeeds end-to-end", async ({ request }) => {
   const progBody = await progRes.json();
   expect(progBody.currentTime ?? progBody.current_time_pos).toBe(45);
 });
+
+test("reconciled library item (1984) streams real audio bytes", async ({ request }) => {
+  const res = await play(request, "934360c4-3341-41b1-b02d-bc0bde6df779");
+  expect(res.status()).toBe(200);
+  const session = await res.json();
+  expect(session.audioTracks.length).toBeGreaterThan(0);
+  const url = session.audioTracks[0].contentUrl;
+  expect(typeof url).toBe("string");
+  expect(url.startsWith("http")).toBe(true);
+
+  // Range probe
+  const audio = await fetch(url, { headers: { Range: "bytes=0-1023" } });
+  expect([200, 206]).toContain(audio.status);
+  expect(Number(audio.headers.get("content-length"))).toBeGreaterThan(0);
+});

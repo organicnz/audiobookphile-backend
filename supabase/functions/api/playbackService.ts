@@ -2,6 +2,7 @@ import { SupabaseClient } from "npm:@supabase/supabase-js@2.44.0";
 import { Database } from "../../../src/types/supabase.ts";
 import { StorageRouter } from "../_shared/storage-router.ts";
 import { getConfiguredTiers } from "../_shared/b2-config.ts";
+import { resolveBookStorage } from "../_shared/intelligentStorageResolver.ts";
 import {
   bulkUpsertMediaProgress,
   upsertMediaProgress,
@@ -402,7 +403,31 @@ export class PlaybackService {
       }
     }
 
-    // Fast-fail: if neither Track 0 nor Track 1 exists in any tier, the book does not exist in storage!
+    // If standard probes failed, attempt intelligent multi-tier AI/index resolution
+    if (
+      !winningPrefix &&
+      !preparedTracks.some((t) => t.finalSignedUrl && !t.isMissing)
+    ) {
+      try {
+        const intelligentMatch = await resolveBookStorage(item, firstTrack);
+        if (intelligentMatch) {
+          firstTrack.isMissing = false;
+          firstTrack.finalSignedUrl = intelligentMatch.signedUrl;
+          firstTrack.resolvedCanonicalPath = intelligentMatch.canonicalPath;
+          winningPrefix = intelligentMatch.winningPrefix;
+          console.info(
+            `[PlaybackService] Intelligent resolver recovered playback for "${item.title}" (${intelligentMatch.matchedBy}) -> ${winningPrefix}`,
+          );
+        }
+      } catch (intelErr) {
+        console.warn(
+          `[PlaybackService] Intelligent resolver error for item ${libraryItemId}:`,
+          intelErr,
+        );
+      }
+    }
+
+    // Fast-fail: if neither Track 0, Track 1, nor Intelligent Resolver found files, the book does not exist in storage!
     if (
       !winningPrefix &&
       !preparedTracks.some((t) => t.finalSignedUrl && !t.isMissing)

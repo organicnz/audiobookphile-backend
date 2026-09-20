@@ -44,9 +44,40 @@ jobs:
             exit 1
           fi
 
+  storage-reconcile:
+    name: Intelligent Storage Reconciliation & Fixture Purge
+    needs: backup
+    runs-on: [self-hosted, macOS]
+    timeout-minutes: 15
+    steps:
+      - name: Trigger Storage Reconciliation
+        env:
+          SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          KEY="${CRON_SECRET:-$SUPABASE_SERVICE_ROLE_KEY}"
+          if [ -z "$SUPABASE_PROJECT_ID" ] || [ -z "$KEY" ]; then
+            echo "::warning::Missing SUPABASE_PROJECT_ID or authorization key; skipping reconciliation trigger."
+            exit 0
+          fi
+          echo "Triggering intelligent storage reconciliation on $SUPABASE_PROJECT_ID..."
+          response=$(curl -s -w "\n%{http_code}" -X POST "https://${SUPABASE_PROJECT_ID}.supabase.co/functions/v1/api/admin/reconcile-storage" \
+            -H "Authorization: Bearer $KEY" \
+            -H "Content-Type: application/json" \
+            -d '{"dryRun": false, "cleanTestData": true}')
+          http_code=$(echo "$response" | tail -n1)
+          body=$(echo "$response" | sed '$d')
+          echo "Status: $http_code"
+          echo "Body: $body"
+          if [ "$http_code" -ne 200 ] && [ "$http_code" -ne 201 ]; then
+            echo "::error::Storage reconciliation failed with status $http_code"
+            exit 1
+          fi
+
   storage-quota:
     name: Storage Quota & Capacity Check
-    needs: backup
+    needs: [backup, storage-reconcile]
     runs-on: [self-hosted, macOS]
     timeout-minutes: 10
     steps:
