@@ -20,9 +20,7 @@ jobs:
   verify:
     name: Verify Deno Edge Functions
     runs-on: [self-hosted, macOS]
-    defaults:
-      run:
-        working-directory: ./supabase/functions/api
+
     steps:
       - name: Checkout Repository
         id: checkout

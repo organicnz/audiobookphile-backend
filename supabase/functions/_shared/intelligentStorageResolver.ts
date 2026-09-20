@@ -74,53 +74,47 @@ export async function refreshStorageIndex(
   ];
 
   const configuredTiers = tiers.filter((t) => isTierConfigured(t));
-  const results = await Promise.all(
-    configuredTiers.map(async (tier) => {
-      const tierEntries: StorageIndexEntry[] = [];
-      try {
-        const client = getB2Client(tier);
-        const bucket = getConfig(tier).bucketName;
-        let continuationToken: string | undefined = undefined;
+  const entries: StorageIndexEntry[] = [];
 
-        do {
-          const res: ListObjectsV2CommandOutput = await client.send(
-            new ListObjectsV2Command({
-              Bucket: bucket,
-              ContinuationToken: continuationToken,
-            }),
-          );
+  for (const tier of configuredTiers) {
+    try {
+      const client = getB2Client(tier);
+      const bucket = getConfig(tier).bucketName;
+      let continuationToken: string | undefined = undefined;
 
-          if (res.Contents) {
-            for (const item of res.Contents) {
-              if (!item.Key) continue;
-              const parts = item.Key.split("/");
-              const filename = parts[parts.length - 1] || "";
-              const prefix = parts.length > 1
-                ? parts.slice(0, -1).join("/")
-                : "";
-
-              tierEntries.push({
-                tier,
-                prefix,
-                key: item.Key,
-                filename,
-                size: item.Size,
-              });
-            }
-          }
-          continuationToken = res.NextContinuationToken;
-        } while (continuationToken);
-      } catch (err: unknown) {
-        console.warn(
-          `[IntelligentStorageResolver] Failed to index tier ${tier}:`,
-          err instanceof Error ? err.message : String(err),
+      do {
+        const res: ListObjectsV2CommandOutput = await client.send(
+          new ListObjectsV2Command({
+            Bucket: bucket,
+            ContinuationToken: continuationToken,
+          }),
         );
-      }
-      return tierEntries;
-    }),
-  );
 
-  const entries: StorageIndexEntry[] = results.flat();
+        if (res.Contents) {
+          for (const item of res.Contents) {
+            if (!item.Key) continue;
+            const parts = item.Key.split("/");
+            const filename = parts[parts.length - 1] || "";
+            const prefix = parts.length > 1 ? parts.slice(0, -1).join("/") : "";
+
+            entries.push({
+              tier,
+              prefix,
+              key: item.Key,
+              filename,
+              size: item.Size,
+            });
+          }
+        }
+        continuationToken = res.NextContinuationToken;
+      } while (continuationToken);
+    } catch (err: unknown) {
+      console.warn(
+        `[IntelligentStorageResolver] Failed to index tier ${tier}:`,
+        err instanceof Error ? err.message : String(err),
+      );
+    }
+  }
 
   cachedIndex = entries;
   indexExpiresAt = Date.now() + INDEX_TTL_MS;
@@ -237,6 +231,41 @@ export async function matchStorageFolderWithAI(
     return null;
   }
 
+  // Pre-filter candidate folders: only pass folders that have at least some keyword relevance
+  const stopWords = new Set([
+    "the",
+    "and",
+    "for",
+    "with",
+    "that",
+    "this",
+    "from",
+    "part",
+    "vol",
+    "chapter",
+    "audiobook",
+    "edition",
+    "unabridged",
+    "collection",
+  ]);
+  const searchTerms = `${bookTitle} ${bookAuthor || ""}`
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .split(/\s+/)
+    .filter((w) => w.length >= 3 && !stopWords.has(w));
+
+  const candidateFolders = availableFolders.filter((f) => {
+    const text = `${f.prefix} ${f.sampleFilenames.join(" ")}`.toLowerCase();
+    return searchTerms.some((term) => text.includes(term));
+  });
+
+  if (candidateFolders.length === 0) {
+    return null;
+  }
+
+  // Cap candidate folders to top 10 most relevant to keep prompt lean and fast
+  const targetFolders = candidateFolders.slice(0, 10);
+
   try {
     const prompt =
       `You are an authoritative digital audiobook librarian and storage auditor.
@@ -250,7 +279,7 @@ Target Book:
 Available Candidate Folders:
 ${
         JSON.stringify(
-          availableFolders.map((f) => ({
+          targetFolders.map((f) => ({
             tier: f.tier,
             prefix: f.prefix,
             sampleFiles: f.sampleFilenames,
@@ -290,7 +319,7 @@ CRITICAL RULES:
       if (match) {
         const parsed = JSON.parse(match[0]);
         if (parsed.matchedPrefix) {
-          const matchedFolder = availableFolders.find(
+          const matchedFolder = targetFolders.find(
             (f) =>
               f.prefix === parsed.matchedPrefix &&
               (!parsed.matchedTier || f.tier === parsed.matchedTier),

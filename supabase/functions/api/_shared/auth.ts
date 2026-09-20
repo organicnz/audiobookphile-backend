@@ -294,14 +294,16 @@ export async function authMiddleware(
   // HS256 JWTs that verifyJWT() cannot validate (the project has no
   // SUPABASE_JWT_SECRET for the symmetric fallback), so preserve the legacy
   // scheme for cron-driven endpoints like the automated database backup.
-  if (authorizationHeader) {
-    const cronSecret = Deno.env.get("CRON_SECRET");
-    const serviceRoleKeyEnv = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  if (authorizationHeader || token) {
+    const cronSecret = Deno.env.get("CRON_SECRET")?.trim();
+    const serviceRoleKeyEnv = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")?.trim();
     if (
-      (typeof cronSecret === "string" && cronSecret.length > 0 &&
-        authorizationHeader === `Bearer ${cronSecret}`) ||
-      (typeof serviceRoleKeyEnv === "string" && serviceRoleKeyEnv.length > 0 &&
-        authorizationHeader === `Bearer ${serviceRoleKeyEnv}`)
+      (cronSecret &&
+        (token === cronSecret ||
+          authorizationHeader === `Bearer ${cronSecret}`)) ||
+      (serviceRoleKeyEnv &&
+        (token === serviceRoleKeyEnv ||
+          authorizationHeader === `Bearer ${serviceRoleKeyEnv}`))
     ) {
       c.set("user", {
         id: "cron",

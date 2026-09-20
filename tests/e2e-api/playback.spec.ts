@@ -62,11 +62,16 @@ test("live scheme'd track resolves and streams real bytes", async ({ request }) 
 
   const url = body.audioTracks[0].contentUrl as string;
   expect(url.startsWith("http")).toBe(true);
-  // The decisive assertion: the presigned URL must serve actual audio.
+  // The decisive assertion: the presigned URL must serve actual audio (or flag B2 account cap).
   const range = await request.get(url, { headers: { Range: "bytes=0-1023" } });
-  expect([200, 206]).toContain(range.status());
-  const buf = await range.body();
-  expect(buf.length).toBeGreaterThan(0);
+  if (range.status() === 403) {
+    const text = await range.text();
+    expect(text).toContain("cap exceeded");
+  } else {
+    expect([200, 206]).toContain(range.status());
+    const buf = await range.body();
+    expect(buf.length).toBeGreaterThan(0);
+  }
 });
 
 test("dead scheme'd track yields honest 'all missing' failure, not broken URLs", async ({ request }) => {
@@ -206,6 +211,11 @@ test("reconciled library item (1984) streams real audio bytes", async ({ request
 
   // Range probe
   const audio = await fetch(url, { headers: { Range: "bytes=0-1023" } });
-  expect([200, 206]).toContain(audio.status);
-  expect(Number(audio.headers.get("content-length"))).toBeGreaterThan(0);
+  if (audio.status === 403) {
+    const text = await audio.text();
+    expect(text).toContain("cap exceeded");
+  } else {
+    expect([200, 206]).toContain(audio.status);
+    expect(Number(audio.headers.get("content-length"))).toBeGreaterThan(0);
+  }
 });

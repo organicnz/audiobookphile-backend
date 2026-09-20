@@ -4,7 +4,14 @@ import { PlaybackService } from "../../api/playbackService.ts";
 export const playbackRouter = createOpenApiRouter();
 
 const PlaySessionSchema = z.object({
-  deviceInfo: z.record(z.string(), z.any()).optional(),
+  deviceInfo: z.object({
+    name: z.string().optional(),
+    deviceId: z.string().optional(),
+    clientName: z.string().optional(),
+    model: z.string().optional(),
+    os: z.string().optional(),
+    clientVersion: z.string().optional(),
+  }).passthrough().optional(),
   forceDirectPlay: z.boolean().optional(),
   forceTranscode: z.boolean().optional(),
   supportedMimeTypes: z.array(z.string()).optional(),
@@ -29,14 +36,54 @@ const CloseSessionSchema = SyncPayloadSchema.partial();
 
 const ErrorSchema = z.object({
   success: z.boolean(),
-  error: z.record(z.string(), z.any()).or(z.string()),
+  error: z.object({ message: z.string() }).or(z.string()),
 });
 
-const SessionResultSchema = z.record(z.string(), z.any());
+const AudioTrackSchema = z.object({
+  index: z.number(),
+  startOffset: z.number(),
+  duration: z.number(),
+  title: z.string(),
+  contentUrl: z.string(),
+  mimeType: z.string().nullable(),
+  codec: z.string().nullable(),
+  isMissing: z.boolean(),
+});
+
+const ChapterSchema = z.object({
+  id: z.number(),
+  title: z.string(),
+  start: z.number(),
+  end: z.number(),
+});
+
+const SessionResultSchema = z.object({
+  id: z.string(),
+  userId: z.string(),
+  libraryId: z.string().nullable(),
+  libraryItemId: z.string(),
+  episodeId: z.string().optional(),
+  displayTitle: z.string(),
+  displayAuthor: z.string(),
+  coverPath: z.string().nullable(),
+  duration: z.number(),
+  playMethod: z.number(),
+  mediaPlayer: z.string(),
+  mediaType: z.string(),
+  audioTracks: z.array(AudioTrackSchema),
+  chapters: z.array(ChapterSchema),
+  manifestUrl: z.string(),
+  missingTrackCount: z.number(),
+  currentTime: z.number(),
+  playbackRate: z.number(),
+  startedAt: z.number(),
+  updatedAt: z.number(),
+}).passthrough();
 
 const SyncResultSchema = z.object({
   success: z.boolean(),
   error: z.string().optional(),
+  syncedSessionIds: z.array(z.string()).optional(),
 });
 
 const playItemRoute = {
@@ -175,6 +222,16 @@ const itemManifestRoute = {
   },
 };
 
+const LegacyPlayBodySchema = z.object({
+  itemId: z.string().optional(),
+  id: z.string().optional(),
+  episodeId: z.string().optional(),
+  deviceInfo: PlaySessionSchema.shape.deviceInfo,
+  forceDirectPlay: z.boolean().optional(),
+  forceTranscode: z.boolean().optional(),
+  supportedMimeTypes: z.array(z.string()).optional(),
+}).passthrough();
+
 const legacySessionPlayRoute = {
   method: "post" as const,
   path: "/session-play",
@@ -182,7 +239,7 @@ const legacySessionPlayRoute = {
   request: {
     body: {
       content: {
-        "application/json": { schema: z.record(z.string(), z.any()) },
+        "application/json": { schema: LegacyPlayBodySchema },
       },
     },
   },
@@ -205,7 +262,7 @@ const legacyPlaybackStartRoute = {
   request: {
     body: {
       content: {
-        "application/json": { schema: z.record(z.string(), z.any()) },
+        "application/json": { schema: LegacyPlayBodySchema },
       },
     },
   },
@@ -221,6 +278,16 @@ const legacyPlaybackStartRoute = {
   },
 };
 
+const LegacyCloseBodySchema = z.object({
+  sessionId: z.string().optional(),
+  id: z.string().optional(),
+  currentTime: z.number().optional(),
+  timeListened: z.number().optional(),
+  duration: z.number().optional(),
+  progress: z.number().optional(),
+  episodeId: z.string().optional(),
+}).passthrough();
+
 const legacySessionCloseRoute = {
   method: "post" as const,
   path: "/session-close",
@@ -228,7 +295,7 @@ const legacySessionCloseRoute = {
   request: {
     body: {
       content: {
-        "application/json": { schema: z.record(z.string(), z.any()) },
+        "application/json": { schema: LegacyCloseBodySchema },
       },
     },
   },
@@ -244,7 +311,7 @@ const legacySessionCloseRoute = {
   },
 };
 
-playbackRouter.openapi(playItemRoute, async (c) => {
+playbackRouter.openapi(playItemRoute, async (c: any) => {
   const supabase = c.get("supabase");
   const user = c.get("user")!;
   const { id: itemId } = c.req.valid("param");
@@ -294,7 +361,7 @@ playbackRouter.openapi(playItemRoute, async (c) => {
   }
 });
 
-playbackRouter.openapi(playItemEpisodeRoute, async (c) => {
+playbackRouter.openapi(playItemEpisodeRoute, async (c: any) => {
   const supabase = c.get("supabase");
   const user = c.get("user")!;
   const { id: itemId, episodeId } = c.req.valid("param");
@@ -458,7 +525,7 @@ playbackRouter.openapi(closeSessionRoute, async (c) => {
 });
 
 // Aliases for legacy standalone functions
-playbackRouter.openapi(legacySessionPlayRoute, async (c) => {
+playbackRouter.openapi(legacySessionPlayRoute, async (c: any) => {
   const supabase = c.get("supabase");
   const user = c.get("user")!;
   let body;
@@ -495,7 +562,7 @@ playbackRouter.openapi(legacySessionPlayRoute, async (c) => {
   }
 });
 
-playbackRouter.openapi(legacyPlaybackStartRoute, async (c) => {
+playbackRouter.openapi(legacyPlaybackStartRoute, async (c: any) => {
   const supabase = c.get("supabase");
   const user = c.get("user")!;
   let body;

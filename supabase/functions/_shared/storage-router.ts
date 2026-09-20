@@ -24,6 +24,7 @@ import {
   DeleteObjectCommand,
   GetObjectCommand,
   HeadObjectCommand,
+  ListObjectsV2Command,
 } from "npm:@aws-sdk/client-s3@^3.693.0";
 import { getSignedUrl } from "npm:@aws-sdk/s3-request-presigner@^3.693.0";
 
@@ -303,7 +304,43 @@ export class StorageRouter {
             signedUrl,
             canonicalPath: `${tierToPrefix(tier)}${cleanKey}`,
           };
-        } catch {
+        } catch (err: any) {
+          // If B2 returned 403 (Class B cap exceeded), verify existence via Class A ListObjectsV2 probe
+          if (
+            err?.$metadata?.httpStatusCode === 403 ||
+            err?.name === "AccessDenied"
+          ) {
+            try {
+              const client = getB2Client(tier);
+              const bucketName = getConfig(tier).bucketName;
+              const listRes = await client.send(
+                new ListObjectsV2Command({
+                  Bucket: bucketName,
+                  Prefix: cleanKey,
+                  MaxKeys: 1,
+                }),
+              );
+              if (
+                listRes.Contents &&
+                listRes.Contents.some((c) => c.Key === cleanKey)
+              ) {
+                const command = new GetObjectCommand({
+                  Bucket: bucketName,
+                  Key: cleanKey,
+                });
+                // @ts-ignore
+                const signedUrl = await getSignedUrl(client, command, {
+                  expiresIn,
+                });
+                return {
+                  signedUrl,
+                  canonicalPath: `${tierToPrefix(tier)}${cleanKey}`,
+                };
+              }
+            } catch {
+              // proceed to next tier
+            }
+          }
           // not in this tier — continue to next tier
         }
       }
@@ -345,7 +382,28 @@ export class StorageRouter {
         }),
       );
       return true;
-    } catch {
+    } catch (err: any) {
+      // If 403 (e.g. Backblaze B2 Class B cap exceeded), fall back to Class A ListObjectsV2 probe
+      if (
+        err?.$metadata?.httpStatusCode === 403 || err?.name === "AccessDenied"
+      ) {
+        try {
+          const client = getB2Client(parsed.tier);
+          const listRes = await client.send(
+            new ListObjectsV2Command({
+              Bucket: getConfig(parsed.tier).bucketName,
+              Prefix: parsed.key,
+              MaxKeys: 1,
+            }),
+          );
+          return Boolean(
+            listRes.Contents &&
+              listRes.Contents.some((c) => c.Key === parsed.key),
+          );
+        } catch {
+          return false;
+        }
+      }
       return false;
     }
   }

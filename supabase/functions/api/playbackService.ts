@@ -633,7 +633,9 @@ export class PlaybackService {
       .sort((a, b) => Number(a.id) - Number(b.id));
 
     const nowMs = Date.now();
-    const totalDuration = Number((item as any).duration) || currentOffset;
+    const totalDuration = currentOffset > 0
+      ? currentOffset
+      : (Number((item as any).duration) || 0);
     const sessionUuid = crypto.randomUUID();
 
     return {

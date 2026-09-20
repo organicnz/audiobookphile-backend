@@ -169,6 +169,45 @@ export type Database = {
           },
         ];
       };
+      book_insights: {
+        Row: {
+          book_author: string | null;
+          book_id: string;
+          book_title: string;
+          created_at: string;
+          id: string;
+          key_takeaways: string[];
+          mood: string;
+          summary: string;
+          themes: string[];
+          updated_at: string;
+        };
+        Insert: {
+          book_author?: string | null;
+          book_id: string;
+          book_title: string;
+          created_at?: string;
+          id?: string;
+          key_takeaways?: string[];
+          mood?: string;
+          summary: string;
+          themes?: string[];
+          updated_at?: string;
+        };
+        Update: {
+          book_author?: string | null;
+          book_id?: string;
+          book_title?: string;
+          created_at?: string;
+          id?: string;
+          key_takeaways?: string[];
+          mood?: string;
+          summary?: string;
+          themes?: string[];
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
       book_series: {
         Row: {
           created_at: string | null;
@@ -603,6 +642,78 @@ export type Database = {
             referencedColumns: ["id"];
           },
         ];
+      };
+      library_item_deletion_audit: {
+        Row: {
+          audio_count: number | null;
+          deleted_at: string;
+          deleted_by: string;
+          id: number;
+          item_id: string;
+          media_id: string | null;
+          path: string | null;
+          title: string | null;
+        };
+        Insert: {
+          audio_count?: number | null;
+          deleted_at?: string;
+          deleted_by?: string;
+          id?: never;
+          item_id: string;
+          media_id?: string | null;
+          path?: string | null;
+          title?: string | null;
+        };
+        Update: {
+          audio_count?: number | null;
+          deleted_at?: string;
+          deleted_by?: string;
+          id?: never;
+          item_id?: string;
+          media_id?: string | null;
+          path?: string | null;
+          title?: string | null;
+        };
+        Relationships: [];
+      };
+      library_item_merge_audit: {
+        Row: {
+          audio_files_before: Json | null;
+          deleted_by: string;
+          dup_id: string;
+          dup_title: string | null;
+          id: number;
+          merged_at: string;
+          pass: number | null;
+          primary_id: string;
+          primary_title: string | null;
+          reason: string | null;
+        };
+        Insert: {
+          audio_files_before?: Json | null;
+          deleted_by?: string;
+          dup_id: string;
+          dup_title?: string | null;
+          id: number;
+          merged_at?: string;
+          pass?: number | null;
+          primary_id: string;
+          primary_title?: string | null;
+          reason?: string | null;
+        };
+        Update: {
+          audio_files_before?: Json | null;
+          deleted_by?: string;
+          dup_id?: string;
+          dup_title?: string | null;
+          id?: number;
+          merged_at?: string;
+          pass?: number | null;
+          primary_id?: string;
+          primary_title?: string | null;
+          reason?: string | null;
+        };
+        Relationships: [];
       };
       library_items: {
         Row: {
@@ -1176,37 +1287,58 @@ export type Database = {
       };
       profiles: {
         Row: {
+          biometric_device_id: string | null;
+          biometric_enrolled: boolean;
           created_at: string | null;
           default_library_id: string | null;
           id: string;
           is_2fa_enabled: boolean;
           language: string | null;
+          pin_code_hash: string | null;
           theme: string | null;
           totp_secret: string | null;
+          two_factor_challenge_nonce: string | null;
+          two_factor_failed_attempts: number;
+          two_factor_locked_until: string | null;
+          two_factor_methods: string[] | null;
           updated_at: string | null;
           user_type: string | null;
           username: string | null;
         };
         Insert: {
+          biometric_device_id?: string | null;
+          biometric_enrolled?: boolean;
           created_at?: string | null;
           default_library_id?: string | null;
           id: string;
           is_2fa_enabled?: boolean;
           language?: string | null;
+          pin_code_hash?: string | null;
           theme?: string | null;
           totp_secret?: string | null;
+          two_factor_challenge_nonce?: string | null;
+          two_factor_failed_attempts?: number;
+          two_factor_locked_until?: string | null;
+          two_factor_methods?: string[] | null;
           updated_at?: string | null;
           user_type?: string | null;
           username?: string | null;
         };
         Update: {
+          biometric_device_id?: string | null;
+          biometric_enrolled?: boolean;
           created_at?: string | null;
           default_library_id?: string | null;
           id?: string;
           is_2fa_enabled?: boolean;
           language?: string | null;
+          pin_code_hash?: string | null;
           theme?: string | null;
           totp_secret?: string | null;
+          two_factor_challenge_nonce?: string | null;
+          two_factor_failed_attempts?: number;
+          two_factor_locked_until?: string | null;
+          two_factor_methods?: string[] | null;
           updated_at?: string | null;
           user_type?: string | null;
           username?: string | null;
@@ -1313,15 +1445,98 @@ export type Database = {
         };
         Relationships: [];
       };
+      webauthn_challenges: {
+        Row: {
+          challenge: string;
+          created_at: string;
+          expires_at: string;
+          id: string;
+          purpose: string;
+          used: boolean;
+          user_id: string;
+        };
+        Insert: {
+          challenge: string;
+          created_at?: string;
+          expires_at: string;
+          id?: string;
+          purpose?: string;
+          used?: boolean;
+          user_id: string;
+        };
+        Update: {
+          challenge?: string;
+          created_at?: string;
+          expires_at?: string;
+          id?: string;
+          purpose?: string;
+          used?: boolean;
+          user_id?: string;
+        };
+        Relationships: [];
+      };
+      webauthn_credentials: {
+        Row: {
+          counter: number;
+          created_at: string;
+          credential_id: string;
+          device_name: string | null;
+          id: string;
+          last_used_at: string | null;
+          public_key: string;
+          transports: string[];
+          user_id: string;
+        };
+        Insert: {
+          counter?: number;
+          created_at?: string;
+          credential_id: string;
+          device_name?: string | null;
+          id?: string;
+          last_used_at?: string | null;
+          public_key: string;
+          transports?: string[];
+          user_id: string;
+        };
+        Update: {
+          counter?: number;
+          created_at?: string;
+          credential_id?: string;
+          device_name?: string | null;
+          id?: string;
+          last_used_at?: string | null;
+          public_key?: string;
+          transports?: string[];
+          user_id?: string;
+        };
+        Relationships: [];
+      };
     };
     Views: {
       [_ in never]: never;
     };
     Functions: {
       auto_link_series_and_clean_titles: { Args: never; Returns: number };
-      deduplicate_library_items: { Args: never; Returns: number };
+      check_storage_quota: {
+        Args: { p_need_bytes?: number };
+        Returns: undefined;
+      };
+      deduplicate_library_items: {
+        Args: { p_dry_run?: boolean };
+        Returns: number;
+      };
+      deduplicate_library_items_guarded: { Args: never; Returns: number };
       get_library_stats: { Args: { p_library_id: string }; Returns: Json };
       is_admin: { Args: never; Returns: boolean };
+      list_storage_orphans: {
+        Args: { p_bucket?: string };
+        Returns: {
+          created_at: string;
+          name: string;
+          pretty: string;
+          size_bytes: number;
+        }[];
+      };
       match_library_items_hybrid: {
         Args: {
           match_count?: number;
@@ -1353,17 +1568,43 @@ export type Database = {
         Returns: undefined;
       };
       merge_multipart_folder_books: { Args: never; Returns: number };
-      merge_two_library_items: {
-        Args: { p_dup_id: string; p_primary_id: string };
-        Returns: boolean;
-      };
+      merge_two_library_items:
+        | { Args: { p_dup_id: string; p_primary_id: string }; Returns: boolean }
+        | {
+          Args: {
+            p_dup_id: string;
+            p_pass: number;
+            p_primary_id: string;
+            p_reason: string;
+          };
+          Returns: boolean;
+        };
       normalize_book_title: { Args: { p_title: string }; Returns: string };
+      plan_library_item_merges: {
+        Args: never;
+        Returns: {
+          dup_id: string;
+          dup_title: string;
+          pass: number;
+          primary_id: string;
+          primary_title: string;
+          reason: string;
+        }[];
+      };
+      read_secret: { Args: { p_name: string }; Returns: string };
       separate_title_and_author_for_all_books: {
         Args: never;
         Returns: undefined;
       };
-      show_limit: { Args: never; Returns: number };
-      show_trgm: { Args: { "": string }; Returns: string[] };
+      storage_quota_snapshot: {
+        Args: never;
+        Returns: {
+          bucket_id: string;
+          object_count: number;
+          pretty: string;
+          total_bytes: number;
+        }[];
+      };
       sync_author_avatars: { Args: never; Returns: undefined };
     };
     Enums: {
@@ -1384,7 +1625,7 @@ export type Tables<
   DefaultSchemaTableNameOrOptions extends
     | keyof (DefaultSchema["Tables"] & DefaultSchema["Views"])
     | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals;
   } ? keyof (
       & DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]][
@@ -1394,7 +1635,7 @@ export type Tables<
         "Views"
       ]
     )
-    : never = never,
+    : never) = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals;
 } ? (
@@ -1424,12 +1665,12 @@ export type TablesInsert<
   DefaultSchemaTableNameOrOptions extends
     | keyof DefaultSchema["Tables"]
     | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals;
   } ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]][
       "Tables"
     ]
-    : never = never,
+    : never) = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals;
 } ? DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]][
@@ -1449,12 +1690,12 @@ export type TablesUpdate<
   DefaultSchemaTableNameOrOptions extends
     | keyof DefaultSchema["Tables"]
     | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals;
   } ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]][
       "Tables"
     ]
-    : never = never,
+    : never) = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals;
 } ? DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]][
@@ -1474,12 +1715,12 @@ export type Enums<
   DefaultSchemaEnumNameOrOptions extends
     | keyof DefaultSchema["Enums"]
     | { schema: keyof DatabaseWithoutInternals },
-  EnumName extends DefaultSchemaEnumNameOrOptions extends {
+  EnumName extends (DefaultSchemaEnumNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals;
   } ? keyof DatabaseWithoutInternals[DefaultSchemaEnumNameOrOptions["schema"]][
       "Enums"
     ]
-    : never = never,
+    : never) = never,
 > = DefaultSchemaEnumNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals;
 } ? DatabaseWithoutInternals[DefaultSchemaEnumNameOrOptions["schema"]]["Enums"][
@@ -1493,12 +1734,12 @@ export type CompositeTypes<
   PublicCompositeTypeNameOrOptions extends
     | keyof DefaultSchema["CompositeTypes"]
     | { schema: keyof DatabaseWithoutInternals },
-  CompositeTypeName extends PublicCompositeTypeNameOrOptions extends {
+  CompositeTypeName extends (PublicCompositeTypeNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals;
   } ? keyof DatabaseWithoutInternals[
       PublicCompositeTypeNameOrOptions["schema"]
     ]["CompositeTypes"]
-    : never = never,
+    : never) = never,
 > = PublicCompositeTypeNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals;
 } ? DatabaseWithoutInternals[PublicCompositeTypeNameOrOptions["schema"]][

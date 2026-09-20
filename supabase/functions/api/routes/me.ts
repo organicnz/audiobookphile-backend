@@ -5,6 +5,59 @@ export const meRouter = createOpenApiRouter();
 
 const ServerErrorSchema = z.object({ error: z.string() });
 
+const PermissionsSchema = z.object({
+  download: z.boolean(),
+  update: z.boolean(),
+  delete: z.boolean(),
+  upload: z.boolean(),
+  accessAllLibraries: z.boolean(),
+  accessAllTags: z.boolean(),
+  accessExplicitContent: z.boolean(),
+});
+
+const MeProfileSchema = z.object({
+  id: z.string(),
+  username: z.string(),
+  email: z.string().nullable(),
+  type: z.string(),
+  token: z.string(),
+  refreshToken: z.string().nullable(),
+  mediaProgress: z.array(z.unknown()),
+  seriesHideFromContinueListening: z.array(z.unknown()),
+  bookmarks: z.array(z.unknown()),
+  isActive: z.boolean(),
+  isLocked: z.boolean(),
+  lastSeen: z.number(),
+  createdAt: z.number(),
+  permissions: PermissionsSchema,
+  librariesAccessible: z.array(z.unknown()),
+  itemTagsAccessible: z.array(z.unknown()),
+  userDefaultLibraryId: z.string().nullable(),
+  serverSettings: z.object({}).passthrough(),
+  source: z.string(),
+}).passthrough();
+
+const MediaProgressSchema = z.object({
+  id: z.string(),
+  library_item_id: z.string(),
+  duration: z.number().nullable(),
+  progress: z.number().nullable(),
+  is_finished: z.boolean().nullable(),
+  finished_at: z.string().nullable(),
+  last_update: z.string().nullable(),
+  started_at: z.string().nullable(),
+  title: z.string().nullable(),
+});
+
+const RecentSessionSchema = z.object({
+  id: z.string(),
+  display_title: z.string().nullable(),
+  display_author: z.string().nullable(),
+  time_listening: z.number().nullable(),
+  session_date: z.string().nullable(),
+  updated_at: z.string(),
+});
+
 const meProfileRoute = {
   method: "get" as const,
   path: "/",
@@ -12,7 +65,7 @@ const meProfileRoute = {
   responses: {
     200: {
       description: "Current user profile payload",
-      content: { "application/json": { schema: z.record(z.any()) } },
+      content: { "application/json": { schema: MeProfileSchema } },
     },
     500: {
       description: "Profile fetch failure",
@@ -31,8 +84,8 @@ const meStatsRoute = {
       content: {
         "application/json": {
           schema: z.object({
-            mediaProgress: z.array(z.record(z.string(), z.any())),
-            recentSessions: z.array(z.record(z.string(), z.any())),
+            mediaProgress: z.array(MediaProgressSchema),
+            recentSessions: z.array(RecentSessionSchema),
           }),
         },
       },
@@ -44,7 +97,7 @@ const meStatsRoute = {
   },
 };
 
-meRouter.openapi(meProfileRoute, async (c) => {
+meRouter.openapi(meProfileRoute, async (c: any) => {
   const user = c.get("user")!;
   const supabase = c.get("supabase");
 
@@ -83,7 +136,7 @@ meRouter.openapi(meProfileRoute, async (c) => {
   }
 });
 
-meRouter.openapi(meStatsRoute, async (c) => {
+meRouter.openapi(meStatsRoute, async (c: any) => {
   const user = c.get("user")!;
   const supabase = c.get("supabase");
 

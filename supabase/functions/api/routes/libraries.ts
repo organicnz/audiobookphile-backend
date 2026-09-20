@@ -1484,6 +1484,11 @@ librariesRouter.openapi(authorsRoute, async (c) => {
 
   const authors = (authorRows || []).map((a) => {
     const bookAuthorsList = (a.book_authors || []) as Record<string, unknown>[];
+    const uniqueBookCount = new Set(
+      bookAuthorsList
+        .map((ba: any) => ba.library_item_id)
+        .filter(Boolean),
+    ).size;
     return {
       id: a.id,
       name: a.name,
@@ -1493,7 +1498,7 @@ librariesRouter.openapi(authorsRoute, async (c) => {
       libraryId: a.library_id,
       addedAt: new Date(a.created_at).getTime(),
       updatedAt: new Date(a.updated_at || a.created_at).getTime(),
-      numBooks: bookAuthorsList.length,
+      numBooks: uniqueBookCount,
     };
   });
 

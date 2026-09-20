@@ -72,7 +72,7 @@ interface GoogleMetadata {
     }[];
     pageCount?: number;
     language?: string;
-    description?: string;
+    categories?: string[];
     imageLinks?: {
       smallThumbnail?: string;
       thumbnail?: string;
@@ -318,16 +318,16 @@ export async function resolveBookMetadata(
     publisher: metadata.publisher,
     weight: undefined,
     dimensions: undefined,
-    amazon: raw.source === "amazon"
+    amazon: (raw as any)?.source === "amazon"
       ? {
         productUrl: undefined,
         authorPageUrl: undefined,
         reviewUrl: undefined,
       }
       : undefined,
-    google: raw.source === "google"
+    google: (raw as any)?.source === "google"
       ? {
-        googleBooksId: raw.id,
+        googleBooksId: (raw as any)?.id,
       }
       : undefined,
   };
@@ -415,7 +415,6 @@ export async function healthCheck(): Promise<{
 
 export type {
   AmazonMetadata,
-  BookMetadata,
   GoogleMetadata,
   MarketplaceSearchParams,
   MarketplaceSearchResult,

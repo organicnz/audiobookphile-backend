@@ -1045,18 +1045,23 @@ authRouter.openapi(refreshRoute, async (c) => {
     const supabase = c.get("supabase");
     const supabaseUrl = c.get("supabaseUrl");
     const serviceRoleKey = c.get("serviceRoleKey");
-    const refreshToken = c.req.header("x-refresh-token") ||
-      (await c.req.json()).refreshToken;
+    let body: any = {};
+    try {
+      body = await c.req.json();
+    } catch {
+      // Body may be absent or not JSON when header x-refresh-token is used
+    }
+    const rawToken = c.req.header("x-refresh-token") || body?.refreshToken ||
+      "";
+    const parsed = RefreshBodySchema.safeParse({ refreshToken: rawToken });
 
-    const refreshData = RefreshBodySchema.parse({ refreshToken });
-    const { refreshToken: token } = refreshData;
-
-    if (!token) {
+    if (!parsed.success || !parsed.data.refreshToken) {
       return c.json({
         error: authErrorHandlers.VALIDATION_ERROR().message,
         code: authErrorHandlers.VALIDATION_ERROR().code,
       }, authErrorHandlers.VALIDATION_ERROR().statusCode as 400);
     }
+    const token = parsed.data.refreshToken;
 
     const { data: sessionData, error: sessionError } = await supabase.auth
       .refreshSession({
@@ -1134,9 +1139,15 @@ authRouter.openapi(authorizeRoute, async (c) => {
     const jwt = c.req.header("Authorization")?.replace("Bearer ", "").trim() ||
       "";
 
-    const body = await c.req.json();
-    const authorizeData = AuthorizeBodySchema.parse(body);
-    const providedRefreshToken = authorizeData.refreshToken || "";
+    let body: any = {};
+    try {
+      body = await c.req.json();
+    } catch {
+      // Body may be empty in GET/POST /authorize
+    }
+    const authorizeData = AuthorizeBodySchema.safeParse(body).data || {};
+    const providedRefreshToken = c.req.header("x-refresh-token") ||
+      authorizeData.refreshToken || "";
 
     let user = null;
     let activeToken = jwt;
@@ -1147,55 +1158,57 @@ authRouter.openapi(authorizeRoute, async (c) => {
       // Extract payload from verified JWT — critical session-establishment path
       const payload = await verifyJWT(jwt);
 
-      if (!payload) {
+      if (payload) {
+        const userId = payload.sub;
+
+        // Validate user exists and is not banned/locked
+        const { data: profile, error: fetchError } = await adminSupabase.from(
+          "profiles",
+        ).select("*").eq("id", userId).maybeSingle();
+
+        if (fetchError || !profile) {
+          // Check if auth user exists via admin API (auth schema tables are inaccessible)
+          const { data: userData } = await adminSupabase.auth.admin.getUserById(
+            userId,
+          );
+
+          if (userData?.user) {
+            // Check if any admin exists
+            const { count } = await adminSupabase.from("profiles").select("*", {
+              count: "exact",
+              head: true,
+            }).in("user_type", ["admin", "root"]);
+            const defaultRole = (count === 0 || count === null)
+              ? "root"
+              : "user";
+            // User exists in auth but profile is missing — create one
+            await adminSupabase.from("profiles").upsert({
+              id: userId,
+              username: payload.email?.split("@")[0] || "user",
+              user_type: defaultRole,
+            });
+          } else {
+            return c.json({
+              error: authErrorHandlers.USER_NOT_FOUND().message,
+              code: authErrorHandlers.USER_NOT_FOUND().code,
+            }, authErrorHandlers.USER_NOT_FOUND().statusCode as any);
+          }
+        }
+
+        user = {
+          id: userId,
+          email: payload.email || profile?.email || null,
+          username: profile?.username || payload.email?.split("@")[0] || "User",
+          created_at: new Date(profile?.created_at || Date.now()).toISOString(),
+        };
+
+        activeToken = jwt;
+      } else if (!providedRefreshToken) {
         return c.json({
           error: authErrorHandlers.INVALID_TOKEN().message,
           code: authErrorHandlers.INVALID_TOKEN().code,
         }, authErrorHandlers.INVALID_TOKEN().statusCode as 401);
       }
-
-      const userId = payload.sub;
-
-      // Validate user exists and is not banned/locked
-      const { data: profile, error: fetchError } = await adminSupabase.from(
-        "profiles",
-      ).select("*").eq("id", userId).maybeSingle();
-
-      if (fetchError || !profile) {
-        // Check if auth user exists via admin API (auth schema tables are inaccessible)
-        const { data: userData } = await adminSupabase.auth.admin.getUserById(
-          userId,
-        );
-
-        if (userData?.user) {
-          // Check if any admin exists
-          const { count } = await adminSupabase.from("profiles").select("*", {
-            count: "exact",
-            head: true,
-          }).in("user_type", ["admin", "root"]);
-          const defaultRole = (count === 0 || count === null) ? "root" : "user";
-          // User exists in auth but profile is missing — create one
-          await adminSupabase.from("profiles").upsert({
-            id: userId,
-            username: payload.email?.split("@")[0] || "user",
-            user_type: defaultRole,
-          });
-        } else {
-          return c.json({
-            error: authErrorHandlers.USER_NOT_FOUND().message,
-            code: authErrorHandlers.USER_NOT_FOUND().code,
-          }, authErrorHandlers.USER_NOT_FOUND().statusCode as any);
-        }
-      }
-
-      user = {
-        id: userId,
-        email: payload.email || profile?.email || null,
-        username: profile?.username || payload.email?.split("@")[0] || "User",
-        created_at: new Date(profile?.created_at || Date.now()).toISOString(),
-      };
-
-      activeToken = jwt;
     }
 
     // If JWT is invalid, try refresh token

@@ -1012,11 +1012,30 @@ export async function executeFinalize(
         let name = a;
         const dashSplit = name.split(" - ");
         if (dashSplit.length > 1) {
-          name = dashSplit[0];
+          const lowerTitle = (title || "").toLowerCase();
+          if (
+            lowerTitle &&
+            (dashSplit[0].toLowerCase() === lowerTitle ||
+              lowerTitle.includes(dashSplit[0].toLowerCase()))
+          ) {
+            name = dashSplit[1];
+          } else if (
+            lowerTitle &&
+            (dashSplit[1].toLowerCase() === lowerTitle ||
+              lowerTitle.includes(dashSplit[1].toLowerCase()))
+          ) {
+            name = dashSplit[0];
+          } else {
+            name = dashSplit[0];
+          }
         }
         name = name.replace(/\b(Ph\.?D\.?|M\.?D\.?)\b/gi, "");
         name = name.replace(/([A-Za-z])\./g, "$1");
-        return name.replace(/\s+/g, " ").trim();
+        name = name.replace(/\s+/g, " ").trim();
+        if (title && name.toLowerCase() === title.toLowerCase()) {
+          return "";
+        }
+        return name;
       })
       .filter(Boolean);
 

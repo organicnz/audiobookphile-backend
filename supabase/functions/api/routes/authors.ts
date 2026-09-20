@@ -44,6 +44,43 @@ const SyncAuthorsResultSchema = z.object({
   error: z.string().optional(),
 });
 
+const AuthorDetailSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  asin: z.string().nullable().optional(),
+  description: z.string().nullable().optional(),
+  imagePath: z.string().nullable().optional(),
+  libraryId: z.string().nullable().optional(),
+  addedAt: z.number().optional(),
+  updatedAt: z.number().optional(),
+  numBooks: z.number(),
+  libraryItems: z.array(z.record(z.string(), z.any())).optional(),
+  series: z.array(z.record(z.string(), z.any())).optional(),
+}).passthrough();
+
+const getAuthorRoute = {
+  method: "get" as const,
+  path: "/:id",
+  tags: ["authors"],
+  request: {
+    params: z.object({ id: z.string() }),
+  },
+  responses: {
+    200: {
+      description: "Author detail",
+      content: { "application/json": { schema: AuthorDetailSchema } },
+    },
+    404: {
+      description: "Author not found",
+      content: { "application/json": { schema: NotFoundSchema } },
+    },
+    500: {
+      description: "Server error",
+      content: { "application/json": { schema: ServerErrorSchema } },
+    },
+  },
+};
+
 const updateAuthorRoute = {
   method: "patch" as const,
   path: "/:id",
@@ -226,6 +263,47 @@ const syncAuthorsRoute = (path: string) => ({
       content: { "application/json": { schema: SyncAuthorsResultSchema } },
     },
   },
+});
+
+authorsRouter.openapi(getAuthorRoute, async (c: any) => {
+  const supabase = c.get("supabase");
+  const { id: authorId } = c.req.valid("param");
+
+  const { data: author, error } = await supabase
+    .from("authors")
+    .select(
+      "*, book_authors(library_item_id, library_items(id, title, cover_path, duration, updated_at, created_at))",
+    )
+    .eq("id", authorId)
+    .maybeSingle();
+
+  if (error) return c.json({ error: error.message }, 500);
+  if (!author) return c.json({ error: "Author not found" }, 404);
+
+  const bookAuthorsList = (author.book_authors || []) as Record<
+    string,
+    unknown
+  >[];
+  const uniqueBookIds = new Set(
+    bookAuthorsList.map((ba: any) => ba.library_item_id).filter(Boolean),
+  );
+  const libraryItems = bookAuthorsList
+    .map((ba: any) => ba.library_items)
+    .filter(Boolean);
+
+  return c.json({
+    id: author.id,
+    name: author.name || "",
+    asin: author.asin || null,
+    description: author.description || null,
+    imagePath: author.image_path || null,
+    libraryId: author.library_id || null,
+    addedAt: new Date(author.created_at).getTime(),
+    updatedAt: new Date(author.updated_at || author.created_at).getTime(),
+    numBooks: uniqueBookIds.size,
+    libraryItems: libraryItems as any[],
+    series: [] as any[],
+  }, 200);
 });
 
 authorsRouter.openapi(updateAuthorRoute, async (c) => {
@@ -435,17 +513,57 @@ authorsRouter.openapi(getAuthorImageRoute, async (c) => {
   const supabase = c.get("supabase");
   const { id: authorId } = c.req.valid("param");
 
-  const { data: author } = await supabase.from("authors").select("image_path")
-    .eq("id", authorId).single();
+  const { data: author } = await supabase.from("authors").select(
+    "id, name, image_path",
+  )
+    .eq("id", authorId).maybeSingle();
 
-  if (!author || !author.image_path || author.image_path === "missing") {
+  if (!author) {
+    return c.redirect(
+      "https://raw.githubusercontent.com/lucide-icons/lucide/main/icons/user.svg",
+    );
+  }
+
+  let currentImagePath = author.image_path;
+  if (
+    !currentImagePath || currentImagePath === "missing" ||
+    currentImagePath.endsWith(".svg")
+  ) {
+    const serviceRoleKey = c.get("serviceRoleKey");
+    const supabaseUrl = c.get("supabaseUrl");
+    if (serviceRoleKey && supabaseUrl) {
+      try {
+        if (author.name) {
+          const adminClient = createClient(supabaseUrl, serviceRoleKey);
+          const newPhoto = await fetchAuthorAvatar(adminClient, {
+            id: author.id,
+            name: author.name,
+          });
+          if (newPhoto) {
+            currentImagePath = newPhoto;
+            await supabase.from("authors").update({ image_path: newPhoto }).eq(
+              "id",
+              author.id,
+            );
+          }
+        }
+      } catch (err) {
+        console.warn(
+          `[getAuthorImageRoute] Dynamic avatar fetch failed for ${author.name}:`,
+          err,
+        );
+      }
+    }
+  }
+
+  if (!currentImagePath || currentImagePath === "missing") {
     return c.redirect(
       "https://raw.githubusercontent.com/lucide-icons/lucide/main/icons/user.svg",
     );
   }
 
   const { data } = supabase.storage.from("covers").getPublicUrl(
-    author.image_path,
+    currentImagePath,
   );
   return c.redirect(data.publicUrl);
 });

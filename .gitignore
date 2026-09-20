@@ -21,3 +21,7 @@ crates/**/target/
 # Local scratch
 scratch/
 
+# Playwright Test Artifacts
+test-results/
+playwright-report/
+
