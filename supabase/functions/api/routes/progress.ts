@@ -29,6 +29,29 @@ const ProgressResultSchema = z.record(z.string(), z.any());
 const SuccessSchema = z.object({ success: z.boolean() });
 const SuccessDataSchema = z.object({ success: z.boolean(), data: z.any() });
 
+const getProgressRoute = {
+  method: "get" as const,
+  path: "/me/progress/:id",
+  tags: ["progress"],
+  request: {
+    params: z.object({ id: z.string() }),
+  },
+  responses: {
+    200: {
+      description: "Progress record",
+      content: { "application/json": { schema: ProgressResultSchema } },
+    },
+    404: {
+      description: "Progress not found",
+      content: { "application/json": { schema: ServerErrorSchema } },
+    },
+    500: {
+      description: "Database error",
+      content: { "application/json": { schema: ServerErrorSchema } },
+    },
+  },
+};
+
 const updateProgressRoute = {
   method: "patch" as const,
   path: "/me/progress/:id",
@@ -173,6 +196,34 @@ const sessionSyncRoute = {
     },
   },
 };
+
+progressRouter.openapi(getProgressRoute, async (c) => {
+  const supabase = c.get("supabase");
+  const user = c.get("user")!;
+  const { id: libraryItemId } = c.req.valid("param");
+
+  const { data, error } = await supabase
+    .from("media_progress")
+    .select("*")
+    .eq("user_id", user.id)
+    .eq("library_item_id", libraryItemId)
+    .is("episode_id", null)
+    .maybeSingle();
+
+  if (error) {
+    console.error("[progress] get error:", error);
+    return c.json({ error: "Failed to fetch progress" }, 500);
+  }
+
+  if (!data) {
+    return c.json({ error: "Progress not found" }, 404);
+  }
+
+  return c.json({
+    ...data,
+    currentTime: data.current_time_pos,
+  }, 200);
+});
 
 progressRouter.openapi(updateProgressRoute, async (c) => {
   const supabase = c.get("supabase");

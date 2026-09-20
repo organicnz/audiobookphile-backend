@@ -123,8 +123,10 @@ test("multi-track item initiates playback in < 1000ms with all tracks signed", a
   const item = await seedItem({
     title: "PW Multi-Track Benchmark Fixture",
     tracks: Array.from({ length: 10 }, (_, i) => ({
-      filename: `0${i + 1} - Chapter.mp3`,
-      path: `b2://${KNOWN_GOOD.b2Prefix}/0${i + 1} - Chapter.mp3`,
+      filename: i === 0 ? KNOWN_GOOD.filename : `0${i + 1} - Chapter.mp3`,
+      path: `b2://${KNOWN_GOOD.b2Prefix}/${
+        i === 0 ? KNOWN_GOOD.filename : `0${i + 1} - Chapter.mp3`
+      }`,
       duration: 120,
     })),
   });
