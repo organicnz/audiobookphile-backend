@@ -148,6 +148,93 @@ Deno.test({
       true,
       `/me/progress/${itemId} should return 200 or 404, got ${progressResponse.status}`,
     );
+
+    // 7. Start Playback Session (/items/:id/play)
+    const playStartTime = Date.now();
+    const playResponse = await fetch(`${API_BASE_URL}/items/${itemId}/play`, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        deviceInfo: { clientName: "Smoke Test Runner" },
+        mediaPlayer: "smoke-test",
+        forceDirectPlay: true,
+      }),
+    });
+    const playElapsed = Date.now() - playStartTime;
+    console.log(
+      `[Smoke Test] /items/${itemId}/play completed in ${playElapsed}ms (status: ${playResponse.status})`,
+    );
+
+    // Must respond quickly (< 5000ms) without hanging or timing out
+    assertEquals(
+      playElapsed < 5000,
+      true,
+      `Playback initiation must complete in < 5000ms, took ${playElapsed}ms`,
+    );
+
+    // If item has audio files in storage it returns 200; if empty or missing files it returns 404.
+    // In all cases it must NEVER return 500 or hang.
+    const isPlayStatusValid = playResponse.status === 200 ||
+      playResponse.status === 404;
+    assertEquals(
+      isPlayStatusValid,
+      true,
+      `/items/${itemId}/play returned unexpected status ${playResponse.status}`,
+    );
+
+    if (playResponse.status === 200) {
+      const playBody = await playResponse.json();
+      assertEquals(
+        typeof playBody.id,
+        "string",
+        "Playback session must contain session ID",
+      );
+      assertEquals(
+        Array.isArray(playBody.audioTracks),
+        true,
+        "Playback session must contain audioTracks array",
+      );
+      assertEquals(
+        playBody.audioTracks.length > 0,
+        true,
+        "Playback session must contain at least 1 track",
+      );
+      assertEquals(
+        typeof playBody.audioTracks[0].contentUrl,
+        "string",
+        "Track 0 must have contentUrl",
+      );
+      assertEquals(
+        playBody.audioTracks[0].contentUrl.startsWith("http"),
+        true,
+        "contentUrl must be an HTTP signed URL",
+      );
+
+      // 8. Sync Progress (/session/:id/sync)
+      const syncResponse = await fetch(
+        `${API_BASE_URL}/session/${playBody.id}/sync`,
+        {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            currentTime: 15,
+            timeListened: 15,
+            duration: playBody.duration || 100,
+          }),
+        },
+      );
+      assertEquals(
+        syncResponse.status === 200,
+        true,
+        `/session/${playBody.id}/sync should return 200 OK, got ${syncResponse.status}`,
+      );
+    }
   },
   sanitizeOps: false,
   sanitizeResources: false,
