@@ -174,6 +174,16 @@ export function findBestDeterministicMatch(
   });
   if (caseMatch) return caseMatch;
 
+  // 3. Punctuation-normalized alphanumeric match
+  const normClean = lowerClean.replace(/[^a-z0-9]/g, "");
+  if (normClean.length >= 6) {
+    const normMatch = index.find((e) => {
+      const fnNorm = e.filename.toLowerCase().replace(/[^a-z0-9]/g, "");
+      return fnNorm === normClean;
+    });
+    if (normMatch) return normMatch;
+  }
+
   return null;
 }
 

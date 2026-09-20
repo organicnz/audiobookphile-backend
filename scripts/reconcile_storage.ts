@@ -110,6 +110,7 @@ const missing: MissingEntry[] = [];
 const alreadyValid: ValidEntry[] = [];
 
 const router = new StorageRouter(supabase);
+const claimedPrefixes = new Set<string>();
 
 for (const book of books) {
   const rawAudioFiles = (
@@ -137,10 +138,13 @@ for (const book of books) {
   );
   const parsedExisting = existingPath ? router.parsePath(existingPath) : null;
   if (parsedExisting && parsedExisting.tier !== "SUPABASE") {
-    const foundInIndex = index.some(
+    const foundEntry = index.find(
       (e) => e.tier === parsedExisting.tier && e.key === parsedExisting.key,
     );
-    if (foundInIndex) {
+    if (foundEntry) {
+      if (foundEntry.prefix) {
+        claimedPrefixes.add(`${foundEntry.tier}:::${foundEntry.prefix}`);
+      }
       if (apply && book.is_missing) {
         await supabase
           .from("library_items")
@@ -168,24 +172,29 @@ for (const book of books) {
 
   let method = "deterministic";
 
-  // 2. Exact track list signature matching for unreferenced folders
+  // 2. Exact track list signature matching for unreferenced, unclaimed folders
   if (!matchedEntry) {
+    const normPunct = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
     const trackFilenames = new Set(
       rawAudioFiles.map((af) =>
-        String(
-          af?.metadata?.filename || af?.filename || af?.metadata?.relPath || "",
-        ).toLowerCase()
-      ).filter(Boolean),
+        normPunct(
+          String(
+            af?.metadata?.filename || af?.filename || af?.metadata?.relPath ||
+              "",
+          ),
+        )
+      ).filter((s) => s.length > 0),
     );
     const candidateFolders = availableFolders.filter((f) =>
-      f.fileCount === rawAudioFiles.length
+      f.fileCount === rawAudioFiles.length &&
+      !claimedPrefixes.has(`${f.tier}:::${f.prefix}`)
     );
     for (const cf of candidateFolders) {
       const filesInFolder = index.filter((e) =>
         e.tier === cf.tier && e.prefix === cf.prefix
       );
       const matchingCount = filesInFolder.filter((f) =>
-        trackFilenames.has(f.filename.toLowerCase())
+        trackFilenames.has(normPunct(f.filename))
       ).length;
       if (matchingCount === rawAudioFiles.length && rawAudioFiles.length > 0) {
         matchedEntry = filesInFolder[0] || null;
@@ -196,11 +205,14 @@ for (const book of books) {
   }
 
   if (!matchedEntry && zaiApiKey) {
+    const unclaimedFolders = availableFolders.filter(
+      (f) => !claimedPrefixes.has(`${f.tier}:::${f.prefix}`),
+    );
     const aiFolder = await matchStorageFolderWithAI(
       book.title || "",
       book.author_names_first_last || "",
       candidateFilenames,
-      availableFolders,
+      unclaimedFolders,
       zaiApiKey,
     );
     if (aiFolder) {
@@ -213,6 +225,7 @@ for (const book of books) {
   }
 
   if (matchedEntry) {
+    claimedPrefixes.add(`${matchedEntry.tier}:::${matchedEntry.prefix}`);
     const prefixStr = matchedEntry.prefix ? `${matchedEntry.prefix}/` : "";
     const winningPrefix = `${tierToPrefix(matchedEntry.tier)}${prefixStr}`;
 
@@ -230,18 +243,38 @@ for (const book of books) {
       continue;
     }
 
-    const updatedAudioFiles = rawAudioFiles.map((af) => {
+    const inFolder = index.filter(
+      (e) => e.tier === matchedEntry.tier && e.prefix === matchedEntry.prefix,
+    );
+    const updatedAudioFiles = rawAudioFiles.map((af, idx) => {
       const afMeta = (af.metadata as Record<string, unknown>) || {};
       const fname = String(
         afMeta.filename || af.filename || afMeta.relPath || "",
-      ).split("/").pop();
-      const canonical = `${winningPrefix}${fname}`;
+      ).split("/").pop() || "";
+      const normFname = fname.toLowerCase().replace(/[^a-z0-9]/g, "");
+
+      const physicalFile = inFolder.find((e) => e.filename === fname) ||
+        inFolder.find((e) =>
+          e.filename.toLowerCase() === fname.toLowerCase()
+        ) ||
+        (normFname.length >= 6
+          ? inFolder.find(
+            (e) =>
+              e.filename.toLowerCase().replace(/[^a-z0-9]/g, "") === normFname,
+          )
+          : null) ||
+        inFolder[idx];
+
+      const physicalName = physicalFile ? physicalFile.filename : fname;
+      const canonical = `${winningPrefix}${physicalName}`;
       return {
         ...af,
         storage_path: canonical,
         metadata: {
           ...afMeta,
           path: canonical,
+          filename: physicalName,
+          ...(physicalFile?.size ? { size: physicalFile.size } : {}),
         },
       };
     });
