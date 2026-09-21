@@ -406,3 +406,170 @@ Deno.test("finalize: same bookId re-upload with overwrite=false is rejected with
   assertEquals(second.status, 409);
   assertEquals(items.length, 1);
 });
+
+Deno.test("finalize: batch spanning two books with colliding chapter names is rejected with MULTIPLE_WORKS_DETECTED", async () => {
+  // Dark Psychology class: 4 books sharing "Chapter N.mp3" must never merge.
+  const sb = new MockSupabase({});
+  const darkId = "22222222-3333-4444-5555-666666666666";
+  const res = await runFinalize(sb, {
+    bookId: darkId,
+    title: "Dark Psychology Audiobook Collection",
+    library: LIB_ID,
+    mediaType: "book",
+    files: [
+      {
+        name: "Chapter 1.mp3",
+        size: 1000,
+        type: "audio/mpeg",
+        storagePath: `b2-test://${darkId}/Daniel Pratt/Chapter 1.mp3`,
+      },
+      {
+        name: "Chapter 1.mp3",
+        size: 1100,
+        type: "audio/mpeg",
+        storagePath: `b2-test://${darkId}/Deborah Weiss/Chapter 1.mp3`,
+      },
+    ],
+    overwrite: false,
+  });
+  assertEquals(res.status, 400);
+  assertEquals(
+    (res.json as { code: string }).code,
+    "MULTIPLE_WORKS_DETECTED",
+  );
+  const splits = (res.json as { splits: { folder: string }[] }).splits;
+  assertEquals(splits.length, 2);
+  assertEquals(
+    (res.json as { collidingFiles: string[] }).collidingFiles,
+    ["chapter 1.mp3"],
+  );
+  // Gate fires before any write: no row is created.
+  assertEquals((sb.tables["library_items"] ?? []).length, 0);
+});
+
+Deno.test("finalize: multi-disc batch with same basenames is kept as distinct tracks", async () => {
+  const sb = new MockSupabase({});
+  const discId = "33333333-4444-5555-6666-777777777777";
+  const discFiles = [
+    "Disc 1/Track 01.mp3",
+    "Disc 1/Track 02.mp3",
+    "Disc 2/Track 01.mp3",
+    "Disc 2/Track 02.mp3",
+  ].map((rel) => ({
+    name: rel.split("/").pop()!,
+    size: 2000,
+    type: "audio/mpeg",
+    storagePath: `b2-test://${discId}/${rel}`,
+  }));
+  const res = await runFinalize(sb, {
+    bookId: discId,
+    title: "Two Disc Book",
+    library: LIB_ID,
+    mediaType: "book",
+    files: discFiles,
+    overwrite: false,
+  });
+  assertEquals(res.status, 200);
+  const item = (sb.tables["library_items"] ?? [])[0];
+  const rows = item.audio_files as any[];
+  assertEquals(rows.length, 4);
+  assertEquals(
+    rows.map((r: any) => r.metadata.relPath).sort(),
+    [
+      "Disc 1/Track 01.mp3",
+      "Disc 1/Track 02.mp3",
+      "Disc 2/Track 01.mp3",
+      "Disc 2/Track 02.mp3",
+    ],
+  );
+  // Folder-aware sort: Disc 1 precedes Disc 2.
+  assertEquals(rows[0].metadata.relPath.startsWith("Disc 1"), true);
+  assertEquals(rows[2].metadata.relPath.startsWith("Disc 2"), true);
+  const warnings = (res.json as { warnings?: { code: string }[] }).warnings ??
+    [];
+  assertEquals(
+    warnings.some((w) => w.code === "MULTI_FOLDER_BATCH"),
+    true,
+  );
+});
+
+Deno.test("finalize: structured re-upload of a flat book rebinds by basename without doubling tracks", async () => {
+  const bookUuid = "44444444-5555-6666-7777-888888888888";
+  const sb = new MockSupabase({
+    library_items: [{
+      id: "existing-item-2",
+      media_id: bookUuid,
+      title: "Structured Book",
+      library_id: LIB_ID,
+      audio_files: [{
+        index: 1,
+        duration: 60,
+        metadata: {
+          filename: "Chapter 01.mp3",
+          relPath: "Chapter 01.mp3",
+          path: "old/path",
+        },
+      }],
+      library_files: [],
+      size: 100,
+      duration: 60,
+    }],
+  });
+  const res = await runFinalize(sb, {
+    bookId: bookUuid,
+    title: "Structured Book",
+    library: LIB_ID,
+    mediaType: "book",
+    files: [
+      {
+        name: "Chapter 01.mp3",
+        size: 1234,
+        type: "audio/mpeg",
+        storagePath: `b2-test://${bookUuid}/Disc 1/Chapter 01.mp3`,
+      },
+      {
+        name: "Chapter 02.mp3",
+        size: 1234,
+        type: "audio/mpeg",
+        storagePath: `b2-test://${bookUuid}/Disc 1/Chapter 02.mp3`,
+      },
+    ],
+    overwrite: true,
+  });
+  assertEquals(res.status, 200);
+  const item = (sb.tables["library_items"] ?? [])[0];
+  const rows = item.audio_files as any[];
+  assertEquals(rows.length, 2);
+  const ch1 = rows.find((r: any) => r.metadata.filename === "Chapter 01.mp3");
+  // Adopts the fresh structured path while preserving the proven duration.
+  assertEquals(
+    ch1.metadata.path,
+    `b2-test://${bookUuid}/Disc 1/Chapter 01.mp3`,
+  );
+  assertEquals(ch1.duration, 60);
+  assertEquals(item.duration, 60);
+});
+
+Deno.test("finalize: path traversal segments in storage keys are neutralized in recorded relPath", async () => {
+  const sb = new MockSupabase({});
+  const travId = "55555555-6666-7777-8888-999999999999";
+  const res = await runFinalize(sb, {
+    bookId: travId,
+    title: "Traversal Book",
+    library: LIB_ID,
+    mediaType: "book",
+    files: [{
+      name: "evil.mp3",
+      size: 100,
+      type: "audio/mpeg",
+      storagePath: `b2-test://${travId}/../../evil.mp3`,
+    }],
+    overwrite: false,
+  });
+  assertEquals(res.status, 200);
+  const rows = ((sb.tables["library_items"] ?? [])[0].audio_files) as any[];
+  assertEquals(rows[0].metadata.relPath, "evil.mp3");
+  // Recorded identity is traversal-free (the verbatim storagePath in
+  // metadata.path is untouched — the object genuinely lives at that key).
+  assertEquals(rows[0].metadata.relPath.includes(".."), false);
+});

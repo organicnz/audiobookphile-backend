@@ -101,6 +101,151 @@ export async function resolveTitleAndAuthor(
 }
 
 /* =========================================================================
+ * Batch Structure Analysis — multi-work (franken-book) detection
+ *
+ * Born from the Dark Psychology incident: a source folder holding 4 distinct
+ * books (Daniel Pratt 111 tracks, Martinez 29, Turner 26, Weiss 15) shares
+ * one generic naming scheme ("Chapter N.mp3"). Merged into a single
+ * library_item, same-named tracks overwrite each other in flat B2 keys
+ * (`bookId/Chapter 1.mp3`) and collapse in filename-keyed dedup — producing
+ * a franken-book with wrong order, wrong chapters, and a corrupt total.
+ *
+ * These helpers are pure string logic (no I/O, no LLM): they recover each
+ * file's folder chain from its already-uploaded storagePath, group the batch
+ * by top-level subfolder, and refuse batches whose basenames collide across
+ * distinct non-disc folders. Multi-disc books (Disc 1 / CD02 …) are exempt.
+ * ========================================================================= */
+
+/** One upload batch entry's observable shape for structure analysis. */
+export interface BatchFileShape {
+  storagePath: string;
+  name?: string;
+}
+
+/** Files sharing one top-level subfolder ("" = uploaded flat, no folder). */
+export interface BatchGroup {
+  folder: string;
+  fileCount: number;
+  sampleFiles: string[];
+}
+
+/** Verdict of the multi-work gate. */
+export interface MultiWorkVerdict {
+  /** True when the batch must be rejected (certain data loss on merge). */
+  isMultiWork: boolean;
+  groups: BatchGroup[];
+  /** Lowercased basenames present in 2+ distinct non-disc folders. */
+  collidingBasenames: string[];
+}
+
+/** Strip a `tier://` scheme prefix and leading slashes → bare storage key. */
+export function stripStorageScheme(path: string): string {
+  return String(path || "")
+    .replace(/^[a-z0-9-_]+:\/\//i, "")
+    .replace(/^\/+/, "");
+}
+
+/**
+ * Recover a file's key relative to its book folder: strip the scheme and a
+ * leading `<bookId>/` segment, drop `.`/`..`/empty segments (path-traversal
+ * hardening), URI-decode the rest for stable grouping. Returns "" when
+ * nothing usable remains. NEVER rewrites the stored storagePath — the object
+ * already lives at that key; this is only the recorded grouping identity.
+ */
+export function deriveRelKey(storagePath: string, bookId = ""): string {
+  let key = stripStorageScheme(storagePath);
+  if (bookId) {
+    if (key === bookId) return "";
+    const prefix = `${bookId}/`;
+    if (key.startsWith(prefix)) key = key.slice(prefix.length);
+  }
+  const segments: string[] = [];
+  for (const raw of key.split("/")) {
+    const trimmed = raw.trim();
+    if (!trimmed || trimmed === "." || trimmed === "..") continue;
+    try {
+      segments.push(decodeURIComponent(trimmed));
+    } catch {
+      segments.push(trimmed);
+    }
+  }
+  return segments.join("/");
+}
+
+/** Top-level subfolder of a relKey ("" when the file sits at the book root). */
+export function topFolderOf(relKey: string): string {
+  const idx = relKey.indexOf("/");
+  return idx === -1 ? "" : relKey.slice(0, idx);
+}
+
+/**
+ * Disc-like folder names belong to ONE multi-disc work ("Disc 1", "CD02",
+ * "Part 3", "Volume 1", "Bonus") — never a signal of distinct books.
+ */
+export function isDiscLikeFolder(name: string): boolean {
+  return /^(disc|disk|cd|part|pt|vol|volume|bonus|side)[\s._-]*\d*$/i.test(
+    name.trim(),
+  );
+}
+
+/**
+ * Gate an upload batch: group files by top-level subfolder and flag basename
+ * collisions across distinct folders. A collision is certain data loss
+ * (flat-key overwrite + dedup collapse), so any basename present in 2+
+ * folders where at least one holder is NOT disc-like ⇒ multi-work.
+ */
+export function detectMultiWorkBatch(
+  files: BatchFileShape[],
+  bookId = "",
+): MultiWorkVerdict {
+  const groupMap = new Map<string, { count: number; samples: string[] }>();
+  const holders = new Map<string, Set<string>>();
+
+  for (const f of files) {
+    const relKey = deriveRelKey(f.storagePath, bookId);
+    const parts = relKey ? relKey.split("/") : [];
+    const rawBase = parts.length > 0
+      ? parts[parts.length - 1]
+      : String(f.name || "").split("/").pop() || "";
+    const basename = rawBase.trim();
+    const folder = topFolderOf(relKey);
+
+    const g = groupMap.get(folder) ?? { count: 0, samples: [] };
+    g.count++;
+    if (g.samples.length < 3 && basename) g.samples.push(basename);
+    groupMap.set(folder, g);
+
+    const key = basename.toLowerCase();
+    if (!key) continue;
+    if (!holders.has(key)) holders.set(key, new Set());
+    holders.get(key)!.add(folder);
+  }
+
+  const collidingBasenames: string[] = [];
+  for (const [base, folders] of holders) {
+    if (folders.size < 2) continue;
+    // Exempt only when EVERY holder is disc-like (true multi-disc book).
+    if ([...folders].every(isDiscLikeFolder)) continue;
+    collidingBasenames.push(base);
+  }
+  collidingBasenames.sort();
+
+  const groups: BatchGroup[] = [...groupMap.entries()].map(
+    ([folder, g]) => ({
+      folder,
+      fileCount: g.count,
+      sampleFiles: g.samples,
+    }),
+  ).sort((a, b) => b.fileCount - a.fileCount);
+
+  return {
+    isMultiWork: collidingBasenames.length > 0,
+    groups,
+    collidingBasenames: collidingBasenames.slice(0, 10),
+  };
+}
+
+/* =========================================================================
  * Duplicate Book Detection
  * ========================================================================= */
 

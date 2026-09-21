@@ -412,3 +412,57 @@ Deno.test("self-heal: multi-track audiobook derives prefix from track 0 with exa
     );
   }
 });
+
+Deno.test("self-heal: structured multi-disc tracks presign inside their own subfolder, not track 0's", async () => {
+  const signedPaths: string[] = [];
+  stubStorage({
+    fileExists: () => Promise.resolve(true),
+    getSignedUrl: (path: string) => {
+      signedPaths.push(path);
+      return Promise.resolve(`signed:${path}`);
+    },
+  });
+  const session = await PlaybackService.startSession(
+    fakeSupabase(itemWith([
+      {
+        duration: 10,
+        size: 120000,
+        metadata: {
+          filename: "Track 1.mp3",
+          path: `b2-tertiary://${ITEM_ID}/Disc 1/Track 1.mp3`,
+        },
+      },
+      {
+        duration: 10,
+        size: 120000,
+        metadata: {
+          filename: "Track 2.mp3",
+          path: `b2-tertiary://${ITEM_ID}/Disc 1/Track 2.mp3`,
+        },
+      },
+      {
+        duration: 10,
+        size: 120000,
+        metadata: {
+          filename: "Track 1.mp3",
+          path: `b2-tertiary://${ITEM_ID}/Disc 2/Track 1.mp3`,
+        },
+      },
+    ])),
+    "user-1",
+    ITEM_ID,
+  );
+  assertEquals(session.missingTrackCount, 0);
+  assertEquals(session.audioTracks.length, 3);
+  assertEquals(session.duration, 30);
+  // The Disc 2 track must be signed at its own folder — the old flat template
+  // would have produced `Disc 1/Track 1.mp3` (wrong disc, silent content swap).
+  assertEquals(
+    signedPaths.includes(`b2-tertiary://${ITEM_ID}/Disc 2/Track 1.mp3`),
+    true,
+  );
+  assertEquals(
+    (session.audioTracks[2] as Record<string, unknown>).contentUrl,
+    `signed:b2-tertiary://${ITEM_ID}/Disc 2/Track 1.mp3`,
+  );
+});

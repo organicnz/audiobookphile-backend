@@ -15,6 +15,8 @@ import { Variables } from "../_shared/types.ts";
 import { getErrorMessage } from "../_shared/errors.ts";
 import { naturalSortFilenames } from "../../_shared/zai.ts";
 import {
+  deriveRelKey,
+  detectMultiWorkBatch,
   findDuplicateBook as checkDuplicateBook,
   resolveTitleAndAuthor,
 } from "../_shared/domain/downloads.ts";
@@ -751,6 +753,36 @@ export async function executeFinalize(
     return { status: 400, json: { error: "Missing title or bookId fields" } };
   }
 
+  // --- Multi-work gate (Dark Psychology class): refuse franken-book batches.
+  // A source folder holding several books shares one generic naming scheme
+  // ("Chapter N.mp3"), so merging them into one item guarantees flat-key
+  // overwrites + dedup collapse. Reject BEFORE duplicate detection: the 409
+  // path deletes just-uploaded orphans, which must not trigger for a batch
+  // that was malformed from the start. Runs on pure string logic (no I/O).
+  const batchVerdict = detectMultiWorkBatch(
+    validFiles.map((f: any) => ({
+      storagePath: String(f.storagePath || ""),
+      name: typeof f.name === "string" ? f.name : undefined,
+    })),
+    bookId ?? "",
+  );
+  if (batchVerdict.isMultiWork) {
+    return {
+      status: 400,
+      json: {
+        error:
+          "Batch contains tracks from multiple books sharing the same filenames. Upload each book (subfolder) as its own item instead.",
+        code: "MULTIPLE_WORKS_DETECTED",
+        splits: batchVerdict.groups.map((g) => ({
+          folder: g.folder || "(book root)",
+          files: g.fileCount,
+          samples: g.sampleFiles,
+        })),
+        collidingFiles: batchVerdict.collidingBasenames,
+      },
+    };
+  }
+
   // --- Check for missing files in storage + duplicate detection in parallel ---
   const [missingFiles, existingItem] = await Promise.all([
     (async () => {
@@ -865,10 +897,20 @@ export async function executeFinalize(
   };
 
   const audioFilesJson = validFiles.map((file: any, i: number) => {
-    const extRaw = file.name.split(".").pop()?.toLowerCase() ?? "";
+    // Basename truth comes from the uploaded storagePath (keys already carry
+    // subfolders when the client preserves structure); file.name is metadata.
+    const relKey = deriveRelKey(
+      String(file.storagePath || ""),
+      bookId ?? "",
+    );
+    const baseFromKey = relKey ? relKey.split("/").pop() || "" : "";
+    const rawName = (typeof file.name === "string" && file.name.trim()
+      ? file.name.trim()
+      : baseFromKey || `Track ${i + 1}`).split("/").pop() || `Track ${i + 1}`;
+    const extRaw = rawName.split(".").pop()?.toLowerCase() ?? "";
     const ext = "." + extRaw;
     const { mimeType, codec } = resolveAudioMediaInfo({
-      filename: file.name,
+      filename: rawName,
       ext: extRaw,
       mimeType: file.type,
     });
@@ -880,10 +922,10 @@ export async function executeFinalize(
       duration: probedDuration,
       codec,
       metadata: {
-        filename: file.name,
+        filename: rawName,
         ext,
         path: file.storagePath,
-        relPath: file.name,
+        relPath: relKey || rawName,
         size: file.size,
         duration: probedDuration,
         codec,
@@ -900,53 +942,103 @@ export async function executeFinalize(
 
   finalAudioFiles = [...finalAudioFiles, ...audioFilesJson];
 
-  // Deduplicate files by filename so re-uploading doesn't create duplicate chapters.
+  // Deduplicate files by relative key (folder + filename) so re-uploading
+  // doesn't create duplicate chapters AND same-named tracks in different
+  // subfolders (multi-disc books) stay distinct rows.
   // Merge rule: newest path/size wins, but a zero-duration re-upload must NOT
   // clobber a known-good per-track duration (that erases the only ground truth
-  // and forces size-based estimation on next play).
+  // and forces size-based estimation on next play). A structured re-upload of
+  // a previously flat book rebinds by unique basename instead of doubling.
+  const mergeWithDurationPreserved = (prev: any, next: any): any => {
+    const prevDur = parseTrackDuration(prev) ?? 0;
+    const nextDur = parseTrackDuration(next) ?? 0;
+    if (nextDur > 0) return next;
+    if (prevDur > 0) {
+      // Keep proven duration, adopt fresh storage location.
+      return {
+        ...next,
+        duration: prevDur,
+        metadata: { ...next.metadata, duration: prevDur },
+      };
+    }
+    return next;
+  };
   const uniqueFilesMap = new Map<string, any>();
+  const basenameIndex = new Map<string, string[]>();
+  // Keys that predate this upload: basename-rebind below may ONLY target
+  // these. Rebinding within the incoming batch itself would collapse genuine
+  // multi-disc tracks (Disc 1 vs Disc 2 sharing basenames).
+  const preexistingKeys = new Set(
+    (existingItem?.audio_files ?? []).map((af: any) =>
+      String(af.metadata?.relPath || af.metadata?.filename || "")
+        .toLowerCase()
+    ).filter(Boolean),
+  );
+  // A pre-existing row absorbs at most ONE basename rebind: a second
+  // same-basename file (e.g. Disc 2 after Disc 1 rebound) stays separate
+  // instead of piling onto the same row.
+  const consumedRebinds = new Set<string>();
+  const indexBasename = (base: string, key: string): void => {
+    if (!base) return;
+    const list = basenameIndex.get(base) ?? [];
+    if (!list.includes(key)) list.push(key);
+    basenameIndex.set(base, list);
+  };
   for (const af of finalAudioFiles) {
-    const key = af.metadata?.filename;
-    if (!key) continue;
+    const relKey = String(
+      af.metadata?.relPath || af.metadata?.filename || "",
+    );
+    if (!relKey) continue;
+    const key = relKey.toLowerCase();
+    const base = String(af.metadata?.filename || "").toLowerCase();
     const prev = uniqueFilesMap.get(key);
     if (!prev) {
-      uniqueFilesMap.set(key, af);
-      continue;
-    }
-    const prevDur = parseTrackDuration(prev) ?? 0;
-    const nextDur = parseTrackDuration(af) ?? 0;
-    if (nextDur > 0) {
-      uniqueFilesMap.set(key, af);
-    } else if (prevDur > 0) {
-      // Keep proven duration, adopt fresh storage location.
-      uniqueFilesMap.set(key, {
-        ...af,
-        duration: prevDur,
-        metadata: { ...af.metadata, duration: prevDur },
-      });
+      // No exact-key hit: a structured re-upload of a previously flat book
+      // carries the same basenames under new folders. Rebind by basename ONLY
+      // when it identifies exactly one PRE-EXISTING row (otherwise keep
+      // separate — ambiguity must never collapse rows).
+      const candidates = (basenameIndex.get(base) ?? []).filter((k) =>
+        uniqueFilesMap.has(k) && preexistingKeys.has(k) &&
+        !consumedRebinds.has(k)
+      );
+      if (base && candidates.length === 1) {
+        const target = candidates[0];
+        consumedRebinds.add(target);
+        uniqueFilesMap.set(
+          target,
+          mergeWithDurationPreserved(uniqueFilesMap.get(target), af),
+        );
+      } else {
+        uniqueFilesMap.set(key, af);
+      }
     } else {
-      uniqueFilesMap.set(key, af);
+      uniqueFilesMap.set(key, mergeWithDurationPreserved(prev, af));
     }
+    // Always index the incoming key: a later same-basename file must see a
+    // crowded index and stay separate instead of piling onto one row.
+    indexBasename(base, key);
   }
   let deduplicatedFiles = Array.from(uniqueFilesMap.values());
 
-  // --- SEQUENCE SORTING: fast natural sort (deterministic, no AI needed) ---
-  const filenames = deduplicatedFiles.map((af: any) =>
-    af.metadata?.filename || af.metadata?.relPath || ""
+  // --- SEQUENCE SORTING: fast natural sort on relative keys (deterministic,
+  // no AI needed). Folder-aware so Disc 1 tracks sort before Disc 2; flat
+  // batches sort exactly as before (relKey == basename).
+  const sortKeys = deduplicatedFiles.map((af: any) =>
+    String(af.metadata?.relPath || af.metadata?.filename || "")
   ).filter(Boolean);
 
-  if (filenames.length > 1) {
-    const sortedFilenames = naturalSortFilenames(filenames);
-    const filenameOrderMap = new Map<string, number>();
-    sortedFilenames.forEach((name: string, index: number) =>
-      filenameOrderMap.set(name, index)
+  if (sortKeys.length > 1) {
+    const sortedKeys = naturalSortFilenames(sortKeys);
+    const keyOrderMap = new Map<string, number>();
+    sortedKeys.forEach((name: string, index: number) =>
+      keyOrderMap.set(name, index)
     );
 
     deduplicatedFiles.sort((a: any, b: any) => {
-      const nameA = a.metadata?.filename || a.metadata?.relPath || "";
-      const nameB = b.metadata?.filename || b.metadata?.relPath || "";
-      const orderA = filenameOrderMap.get(nameA) ?? 999;
-      const orderB = filenameOrderMap.get(nameB) ?? 999;
+      const keyA = String(a.metadata?.relPath || a.metadata?.filename || "");
+      const keyB = String(b.metadata?.relPath || b.metadata?.filename || "");
+      const orderA = keyOrderMap.get(keyA) ?? 999;
+      const orderB = keyOrderMap.get(keyB) ?? 999;
       return orderA - orderB;
     });
   }
@@ -1200,6 +1292,20 @@ export async function executeFinalize(
   const finalizeWarnings = analyzeItemWarnings(
     deduplicatedFiles as Array<Record<string, unknown>>,
   );
+  // Multi-folder batches that passed the gate (no basename collisions, e.g.
+  // multi-disc books) still deserve visibility — one item spanning folders is
+  // unusual enough to confirm rather than assume.
+  const batchFolders = batchVerdict.groups
+    .map((g) => g.folder)
+    .filter((f) => f.length > 0);
+  if (!batchVerdict.isMultiWork && batchFolders.length > 1) {
+    finalizeWarnings.push({
+      code: "MULTI_FOLDER_BATCH",
+      detail: `one book spans ${batchFolders.length} subfolders (${
+        batchFolders.slice(0, 5).join(" | ")
+      })`,
+    });
+  }
   if (finalizeWarnings.length > 0) {
     console.warn(
       `[upload-finalize] warnings for ${libraryItemId}:`,
@@ -1217,6 +1323,7 @@ export async function executeFinalize(
       durationSource: summedDuration > 0
         ? "sum(track_durations)"
         : "unknown(0)",
+      ...(batchFolders.length > 0 ? { folders: batchFolders } : {}),
       ...(finalizeWarnings.length > 0 ? { warnings: finalizeWarnings } : {}),
     },
   };

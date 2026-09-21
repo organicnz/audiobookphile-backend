@@ -466,7 +466,29 @@ export class PlaybackService {
       );
     }
 
-    // Sign remaining tracks locally using the winning prefix (pure local HMAC-SHA256, 0 network requests)
+    // Sign remaining tracks locally using the winning prefix (pure local HMAC-SHA256, 0 network requests).
+    // Folder-aware: structured keys (`bookId/Disc 2/Track 1.mp3`) keep each
+    // track inside its OWN recorded subfolder instead of track 0's folder —
+    // otherwise multi-disc books presign every disc at Disc 1's path.
+    const stripScheme = (p: string): string =>
+      p.replace(/^[a-z0-9-_]+:\/\//i, "").replace(/^\/+/, "");
+    const folderAwareTarget = (track: {
+      storagePath: string;
+      filename: string;
+    }): string | null => {
+      if (!winningPrefix) return null;
+      const winKey = stripScheme(winningPrefix);
+      const winRoot = winKey.split("/")[0];
+      const recKey = stripScheme(track.storagePath);
+      if (!recKey.includes("/") || !winRoot) return null;
+      if (recKey.split("/")[0] !== winRoot) return null;
+      const schemePrefix = winningPrefix.slice(
+        0,
+        winningPrefix.length - winKey.length,
+      );
+      const recDir = recKey.slice(0, recKey.lastIndexOf("/") + 1);
+      return `${schemePrefix}${recDir}${track.filename}`;
+    };
     await Promise.all(
       preparedTracks.map(async (track, idx) => {
         if (track.finalSignedUrl || track.isMissing) {
@@ -477,7 +499,7 @@ export class PlaybackService {
           (!track.storagePath.includes("://") && track.storagePath.length > 0);
 
         const targetPath = winningPrefix
-          ? `${winningPrefix}${track.filename}`
+          ? (folderAwareTarget(track) ?? `${winningPrefix}${track.filename}`)
           : (!isTrackLegacy && track.storagePath
             ? track.storagePath
             : `${libraryItemId}/${track.filename}`);
