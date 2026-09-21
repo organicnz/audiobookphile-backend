@@ -69,7 +69,7 @@ Deno.test("splitDecider: Dark Psychology shape resolves split with per-folder pl
   ];
   const groups = groupEntriesByFolder(entries(rel));
   assertEquals(groups.length, 2);
-  assertEquals(findCrossFolderCollisions(entries(rel), groups), [
+  assertEquals(findCrossFolderCollisions(entries(rel)), [
     "chapter 1.mp3",
     "chapter 2.mp3",
     "chapter 3.mp3",

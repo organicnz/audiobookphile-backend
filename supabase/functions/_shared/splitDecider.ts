@@ -112,9 +112,7 @@ export function groupEntriesByFolder(entries: SplitEntry[]): SplitGroup[] {
  */
 export function findCrossFolderCollisions(
   entries: SplitEntry[],
-  groups: SplitGroup[],
 ): string[] {
-  void groups;
   const holders = new Map<string, Set<string>>();
   const folderOf = new Map<number, string>();
   for (const g of groupEntriesByFolder(entries)) {
@@ -154,7 +152,7 @@ export function decideSplit(entries: SplitEntry[]): SplitDecision {
   if (groups.length > MAX_SPLIT_GROUPS) {
     return { action: "review", reasons: ["TOO_MANY_GROUPS"], plan: [] };
   }
-  const collisions = findCrossFolderCollisions(entries, groups);
+  const collisions = findCrossFolderCollisions(entries);
   if (collisions.length === 0) {
     // Distinct folders, distinct names: possibly an omnibus, possibly distinct
     // works — a naming judgment call, not a corruption certainty. LLM/human.

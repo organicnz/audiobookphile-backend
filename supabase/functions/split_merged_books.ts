@@ -30,12 +30,12 @@
 
 import { createClient } from "npm:@supabase/supabase-js@2.44.0";
 import { Sentry } from "./_shared/sentry.ts";
+import { applySplitPlan } from "./_shared/splitApply.ts";
 import {
   decideSplit,
   deriveRelKey,
   type SplitEntry,
 } from "./_shared/splitDecider.ts";
-import { parseTrackDuration } from "./_shared/invariants.ts";
 import {
   significantTokens,
   titlesLikelySameWork,
@@ -98,17 +98,6 @@ function entryIdentity(
     md.filename ?? e.filename ?? relKey.split("/").pop() ?? "",
   );
   return { relKey, basename };
-}
-
-function entryDuration(e: Record<string, unknown>): number {
-  return parseTrackDuration(
-    e as { duration?: unknown; metadata?: { duration?: unknown } | null },
-  ) ?? 0;
-}
-
-function entrySize(e: Record<string, unknown>): number {
-  const md = (e.metadata ?? {}) as Record<string, unknown>;
-  return Number(e.size ?? md.size ?? 0) || 0;
 }
 
 /** 2–3 capitalized words ("Deborah Weiss") — folder names that ARE authors. */
@@ -308,122 +297,47 @@ async function main() {
     }
 
     // Largest group stays in place (stable id); flat strays ride along.
+    // applySplitPlan writes siblings FIRST and shrinks the kept item LAST so
+    // a mid-split failure strands nothing: the source row stays whole.
     const planIdx = decision.plan
-      .map((g, i) => ({ ...g, attr: attributions[i], planPos: i }))
+      .map((g, i) => ({ ...g, attr: attributions[i] }))
       .sort((a, b) => b.trackCount - a.trackCount);
     const plannedIdxSets = decision.plan.map((g) => new Set(g.entryIndexes));
     const isPlanned = (i: number) => plannedIdxSets.some((s) => s.has(i));
     const keptExtra = analyzed.map((_, i) => i).filter((i) => !isPlanned(i));
 
-    const reindexed = (indexes: number[]) =>
-      indexes.map((srcIdx, pos) => ({
-        ...analyzed[srcIdx].raw,
-        index: pos + 1,
-      }));
-    const groupDuration = (indexes: number[]) =>
-      Math.round(
-        indexes.reduce((s, i) => s + entryDuration(analyzed[i].raw), 0),
-      );
-    const groupSize = (indexes: number[]) =>
-      indexes.reduce((s, i) => s + entrySize(analyzed[i].raw), 0);
-    const librarySubset = (indexes: number[]) => {
-      const inos = new Set(
-        indexes.map((i) =>
-          String((analyzed[i].raw as Record<string, unknown>).ino ?? "")
-        ),
-      );
-      const libFiles = Array.isArray(item.library_files)
-        ? item.library_files
-        : [];
-      return (libFiles as Record<string, unknown>[]).filter((lf) =>
-        inos.has(String(lf.ino ?? ""))
-      );
-    };
-
-    const createdIds: string[] = [];
-    for (let k = 0; k < planIdx.length; k++) {
-      const g = planIdx[k];
-      const indexes = k === 0
-        ? [...g.entryIndexes, ...keptExtra]
-        : g.entryIndexes;
-      const files = reindexed(indexes);
-      const payload = {
-        audio_files: files as never,
-        library_files: librarySubset(indexes) as never,
-        duration: groupDuration(indexes),
-        size: groupSize(indexes),
-      };
-      if (k === 0) {
-        const { error: upErr } = await supabase.from("library_items")
-          .update(payload).eq("id", item.id);
-        if (upErr) {
-          console.error(`      kept update failed: ${upErr.message}`);
-          continue;
-        }
-        report.keptId = item.id;
-        console.log(
-          `      kept [${item.id}] "${title}" ← ${indexes.length} tracks`,
-        );
-      } else {
-        const newId = crypto.randomUUID();
-        const newTitle = g.attr.title || `${title} — ${g.folder}`;
-        const { error: insErr } = await supabase.from("library_items").insert({
-          id: newId,
-          library_id: item.library_id,
-          media_type: item.media_type || "book",
-          media_id: newId,
-          path: `${item.library_id}/${newTitle}`,
-          rel_path: newTitle,
-          title: newTitle,
-          author_names_first_last: g.attr.author || null,
-          ...payload,
-          is_missing: false,
-        });
-        if (insErr) {
-          console.error(
-            `      insert failed for "${newTitle}": ${insErr.message}`,
-          );
-          continue;
-        }
-        // Link author (mirrors upload-finalize author handling).
-        const authorName = String(g.attr.author || "").trim();
-        if (authorName) {
-          await supabase.from("authors").upsert(
-            {
-              id: crypto.randomUUID(),
-              name: authorName,
-              library_id: item.library_id,
-            },
-            { onConflict: "library_id, name", ignoreDuplicates: true },
-          );
-          const { data: existingAuthor } = await supabase.from("authors")
-            .select("id")
-            .eq("name", authorName).eq("library_id", item.library_id)
-            .maybeSingle();
-          if (existingAuthor?.id) {
-            await supabase.from("book_authors").upsert(
-              { library_item_id: newId, author_id: existingAuthor.id },
-              {
-                onConflict: "library_item_id, author_id",
-                ignoreDuplicates: true,
-              },
-            );
-          }
-        }
-        await supabase.from("library_item_split_audit").insert({
-          source_item_id: item.id,
-          created_item_id: newId,
-          folder: g.folder,
-          track_count: indexes.length,
-          decided_by: g.attr.source,
-        });
-        createdIds.push(newId);
-        console.log(
-          `      + [${newId}] "${newTitle}" ← ${indexes.length} tracks`,
-        );
-      }
+    const outcome = await applySplitPlan(
+      supabase,
+      item,
+      analyzed.map((a) => ({ raw: a.raw })),
+      planIdx,
+      keptExtra,
+    );
+    if (!outcome.applied) {
+      console.error(`      FAILED [${item.id}]: ${outcome.error}`);
+      reports.push({
+        ...report,
+        decision: "split_failed",
+        reasons: [...report.reasons, String(outcome.error)],
+        createdIds: outcome.createdIds,
+      });
+      continue;
     }
-    report.createdIds = createdIds;
+    report.keptId = outcome.keptId;
+    report.createdIds = outcome.createdIds;
+    for (const [pos, id] of outcome.createdIds.entries()) {
+      const g = planIdx[pos + 1];
+      console.log(
+        `      + [${id}] "${
+          g.attr.title || `${title} — ${g.folder}`
+        }" ← ${g.entryIndexes.length} tracks`,
+      );
+    }
+    console.log(
+      `      kept [${item.id}] "${title}" ← ${
+        planIdx[0].entryIndexes.length + keptExtra.length
+      } tracks`,
+    );
     reports.push(report);
     split++;
   }
