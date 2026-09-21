@@ -9,6 +9,10 @@ import {
   refreshStorageIndex,
 } from "../../_shared/intelligentStorageResolver.ts";
 import { StorageRouter, tierToPrefix } from "../../_shared/storage-router.ts";
+import {
+  MAX_ITEM_DURATION_S,
+  parseTrackDuration,
+} from "../../_shared/invariants.ts";
 
 export const adminRouter = createOpenApiRouter();
 
@@ -205,7 +209,7 @@ adminRouter.openapi(reconcileStorageRoute, async (c) => {
     let query = adminSupabase
       .from("library_items")
       .select(
-        "id, title, author_names_first_last, rel_path, path, audio_files, is_missing",
+        "id, title, author_names_first_last, rel_path, path, audio_files, is_missing, duration",
       )
       .not("title", "like", "PW %");
 
@@ -232,6 +236,36 @@ adminRouter.openapi(reconcileStorageRoute, async (c) => {
     > = [];
     const missing: Array<{ id: string; title: string; tracks: number }> = [];
     const alreadyValid: Array<{ id: string; title: string }> = [];
+    const durationHealed: Array<
+      { id: string; title: string; oldDuration: number; newDuration: number }
+    > = [];
+
+    // 10x pro: duration ground truth lives in audio_files, not the item cell.
+    // Whenever the stored total drifts >1s from SUM(tracks), heal it here so
+    // reconcile-storage also repairs Dark Psychology-class 78h lies.
+    const healDurationIfDrifted = async (
+      book: any,
+      files: any[],
+    ): Promise<void> => {
+      const sum = files.reduce(
+        (s: number, f: any) => s + (parseTrackDuration(f) ?? 0),
+        0,
+      );
+      if (!(sum > 0) || sum > MAX_ITEM_DURATION_S) return;
+      const rounded = Math.round(sum);
+      const stored = Number(book.duration) || 0;
+      if (stored === 0 || Math.abs(stored - rounded) <= 1) return;
+      durationHealed.push({
+        id: book.id,
+        title: book.title || "Untitled",
+        oldDuration: stored,
+        newDuration: rounded,
+      });
+      if (!dryRun) {
+        await adminSupabase.from("library_items").update({ duration: rounded })
+          .eq("id", book.id);
+      }
+    };
 
     const router = new StorageRouter(adminSupabase);
 
@@ -276,6 +310,7 @@ adminRouter.openapi(reconcileStorageRoute, async (c) => {
               .update({ is_missing: false })
               .eq("id", book.id);
           }
+          await healDurationIfDrifted(book, rawAudioFiles);
           alreadyValid.push({ id: book.id, title: book.title || "Untitled" });
           continue;
         }
@@ -406,10 +441,34 @@ adminRouter.openapi(reconcileStorageRoute, async (c) => {
         });
 
         if (!dryRun) {
-          await adminSupabase.from("library_items").update({
+          const durationSum = updatedAudioFiles.reduce(
+            (s: number, f: any) => s + (parseTrackDuration(f) ?? 0),
+            0,
+          );
+          const patch: Record<string, unknown> = {
             audio_files: updatedAudioFiles,
             is_missing: false,
-          }).eq("id", book.id);
+          };
+          if (
+            durationSum > 0 && durationSum <= MAX_ITEM_DURATION_S &&
+            Math.abs(
+                Number((book as any).duration || 0) - Math.round(durationSum),
+              ) > 1
+          ) {
+            patch.duration = Math.round(durationSum);
+            durationHealed.push({
+              id: book.id,
+              title: book.title || "Untitled",
+              oldDuration: Number((book as any).duration) || 0,
+              newDuration: Math.round(durationSum),
+            });
+          }
+          await adminSupabase.from("library_items").update(patch).eq(
+            "id",
+            book.id,
+          );
+        } else {
+          await healDurationIfDrifted(book, rawAudioFiles);
         }
 
         reconciled.push({
@@ -473,6 +532,8 @@ adminRouter.openapi(reconcileStorageRoute, async (c) => {
       reconciledCount: reconciled.length,
       missingCount: missing.length,
       cleanedTestItemsCount: cleanedTestCount,
+      durationHealedCount: durationHealed.length,
+      durationHealed,
       reconciled,
       missing,
     }, 200);

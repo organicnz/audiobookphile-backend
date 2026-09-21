@@ -9,7 +9,11 @@ import {
   matchExistingBookWithZAI,
 } from "../../_shared/zai.ts";
 import { fetchBookMetadata } from "../../_shared/coverFetch.ts";
-import { analyzeItemWarnings } from "../../_shared/invariants.ts";
+import {
+  analyzeItemWarnings,
+  MAX_ITEM_DURATION_S,
+  parseTrackDuration,
+} from "../../_shared/invariants.ts";
 import { ensureBookAIInsights } from "../aiService.ts";
 import { createOpenApiRouter, z } from "../_shared/openapi.ts";
 import { assertStorageQuota } from "../../_shared/storage-quota.ts";
@@ -45,6 +49,15 @@ const SyncResultSchema = z.object({
   success: z.boolean(),
   updated: z.number().optional(),
   processed: z.number().optional(),
+  healedMismatches: z.number().optional(),
+  healed: z.array(
+    z.object({
+      id: z.string(),
+      oldDuration: z.number(),
+      newDuration: z.number(),
+    }),
+  ).optional(),
+  warnings: z.record(z.string(), z.unknown()).optional(),
   message: z.string().optional(),
   error: z.string().optional(),
 });
@@ -1118,39 +1131,80 @@ async function handleSyncDurations(
   }
   const supabase = c.get("supabase");
   try {
+    // 10x pro: self-heal ALL duration drift, not just null/0.
+    // Dark Psychology class of bug: stored 281072s vs real 72115s sum —
+    // the old `duration.eq.0` filter never touched it. Now we compare every
+    // item's stored total against SUM(track durations) and fix >1s drift.
     const { data: items, error } = await supabase
       .from("library_items")
-      .select("id, audio_files")
-      .or("duration.is.null,duration.eq.0");
+      .select("id, audio_files, duration");
 
     if (error) throw error;
 
     let updatedCount = 0;
+    let healedMismatchCount = 0;
     const warningsByItem: Record<
       string,
       ReturnType<typeof analyzeItemWarnings>
     > = {};
+    const healed: Array<
+      { id: string; oldDuration: number; newDuration: number }
+    > = [];
     for (const item of items || []) {
-      const files = (item.audio_files as { duration?: number }[]) || [];
+      let rawFiles = (item as any).audio_files;
+      if (typeof rawFiles === "string") {
+        try {
+          rawFiles = JSON.parse(rawFiles);
+        } catch {
+          rawFiles = [];
+        }
+      }
+      const files = (Array.isArray(rawFiles) ? rawFiles : []) as Array<
+        Record<string, unknown>
+      >;
       const totalDuration = files.reduce(
-        (acc, f) => acc + (f.duration || 0),
+        (acc, f) => acc + (parseTrackDuration(f) ?? 0),
         0,
       );
-      if (totalDuration > 0) {
+      if (!(totalDuration > 0) || totalDuration > MAX_ITEM_DURATION_S) {
+        // Unknown (all zero) or insane sum — never invent a total from it.
+        // Warnings still surface giant/stowaway signals for triage.
+        const itemWarnings = analyzeItemWarnings(files);
+        if (itemWarnings.length > 0) {
+          warningsByItem[(item as any).id] = itemWarnings;
+        }
+        continue;
+      }
+      const rounded = Math.round(totalDuration);
+      const stored = Number((item as any).duration) || 0;
+      const needsFix = stored === 0 || stored === null ||
+        Math.abs(stored - rounded) > 1;
+      if (needsFix) {
         await supabase
           .from("library_items")
-          .update({ duration: Math.round(totalDuration) })
-          .eq("id", item.id);
+          .update({ duration: rounded })
+          .eq("id", (item as any).id);
         updatedCount++;
+        if (stored !== 0 && stored !== null) {
+          healedMismatchCount++;
+          healed.push({
+            id: (item as any).id,
+            oldDuration: stored,
+            newDuration: rounded,
+          });
+          console.warn(
+            `[sync-durations] HEALED ${
+              (item as any).id
+            }: ${stored}s -> ${rounded}s`,
+          );
+        }
 
-        const itemWarnings = analyzeItemWarnings(
-          files as Array<Record<string, unknown>>,
-        );
+        const itemWarnings = analyzeItemWarnings(files);
         if (itemWarnings.length > 0) {
-          warningsByItem[item.id] = itemWarnings;
+          warningsByItem[(item as any).id] = itemWarnings;
           for (const w of itemWarnings) {
             console.warn(
-              `[sync-durations] ${item.id}: ${w.code} — ${w.detail}`,
+              `[sync-durations] ${(item as any).id}: ${w.code} — ${w.detail}`,
             );
           }
         }
@@ -1160,8 +1214,11 @@ async function handleSyncDurations(
     return c.json({
       success: true,
       updated: updatedCount,
+      healedMismatches: healedMismatchCount,
+      healed,
       warnings: warningsByItem,
-      message: `Updated duration for ${updatedCount} items`,
+      message:
+        `Updated duration for ${updatedCount} items (${healedMismatchCount} mismatches healed)`,
     }, 200);
   } catch (e: unknown) {
     return c.json({

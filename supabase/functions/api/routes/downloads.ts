@@ -4,7 +4,12 @@ import { getConfiguredTiers } from "../../_shared/b2-config.ts";
 import { requireAdminRole } from "../_shared/auth.ts";
 import { presignUpload } from "../../_shared/uploadPresign.ts";
 import { assertStorageQuota } from "../../_shared/storage-quota.ts";
-import { analyzeItemWarnings } from "../../_shared/invariants.ts";
+import {
+  analyzeItemWarnings,
+  MAX_ITEM_DURATION_S,
+  MAX_SINGLE_TRACK_DURATION_S,
+  parseTrackDuration,
+} from "../../_shared/invariants.ts";
 import { Context } from "hono";
 import { Variables } from "../_shared/types.ts";
 import { getErrorMessage } from "../_shared/errors.ts";
@@ -38,6 +43,11 @@ const UploadFinalizeSchema = z.object({
     size: z.number().min(0, "Size must be non-negative"),
     name: z.string().max(512).optional(),
     type: z.string().max(512).optional(),
+    // Optional client-probed duration (seconds). Browser can read this via
+    // HTMLAudioElement.preloaded metadata before finalize; backend sanitizes
+    // with invariants (positive, finite, <=24h/track) and sums for item total.
+    // Absent/zero means "unknown" — never infer from stale DB totals.
+    duration: z.number().min(0).max(MAX_SINGLE_TRACK_DURATION_S).optional(),
   })).min(1, "At least one file is required").optional(),
   overwrite: z.boolean().optional(),
 });
@@ -310,7 +320,7 @@ downloadsRouter.openapi(downloadItemRoute, async (c) => {
     return c.json({ error: "No audio files found for this item" }, 404);
   }
 
-  const totalBookDuration = Number((item as any)?.duration) || 0;
+  const rawBookDuration = Number((item as any)?.duration) || 0;
 
   let totalFilesSize = 0;
   const sortedAudioFiles = [...audioFilesList]
@@ -336,6 +346,26 @@ downloadsRouter.openapi(downloadItemRoute, async (c) => {
   const needsDurationEstimation = sortedAudioFiles.some((af) =>
     af.duration === 0
   );
+
+  // Same bogus-total guard as playbackService: never prorate a stored total
+  // >40h or >3x/<1/3x away from the size estimate.
+  const sizeEstimateTotal = totalFilesSize > 0 ? totalFilesSize / 12000 : 0;
+  let totalBookDuration = rawBookDuration > 0 &&
+      rawBookDuration <= MAX_ITEM_DURATION_S
+    ? rawBookDuration
+    : 0;
+  if (
+    totalBookDuration > 0 && sizeEstimateTotal > 60 &&
+    (totalBookDuration > sizeEstimateTotal * 3 ||
+      totalBookDuration < sizeEstimateTotal / 3)
+  ) {
+    console.warn(
+      `[DownloadsRoute] Rejecting implausible stored duration ${rawBookDuration}s (size estimate ~${
+        Math.round(sizeEstimateTotal)
+      }s)`,
+    );
+    totalBookDuration = 0;
+  }
 
   // Storage provider
   const storage = new StorageRouter(supabase);
@@ -503,8 +533,8 @@ downloadsRouter.openapi(downloadItemRoute, async (c) => {
     libraryItemId,
     title: String(item?.title || "Unknown Title"),
     author: authorName,
-    duration: totalBookDuration ||
-      tracks.reduce((acc, t) => acc + t.duration, 0),
+    duration: tracks.reduce((acc, t) => acc + t.duration, 0) ||
+      totalBookDuration,
     totalSize: totalFilesSize,
     tracks: tracks,
   };
@@ -814,15 +844,25 @@ export async function executeFinalize(
 
   let baseIndex = 0;
   let finalAudioFiles: any[] = [];
-  let currentDuration = 0;
   if (existingItem) {
     finalAudioFiles = existingItem.audio_files || [];
     baseIndex = finalAudioFiles.reduce(
       (max: number, af: any) => Math.max(max, af.index || 0),
       0,
     );
-    currentDuration = existingItem.duration || 0;
+    // NOTE: deliberately NOT carrying existingItem.duration forward.
+    // The item total is recomputed below from merged per-track durations.
+    // Carrying the old total is how the Dark Psychology 281072s (~78h) lie
+    // survived re-uploads: new tracks arrive with duration 0 and playback
+    // prorated the stale total across them. Unknown stays 0, never stale.
   }
+
+  const sanitizeClientDuration = (v: unknown): number => {
+    const n = typeof v === "string" ? Number(v) : v;
+    if (typeof n !== "number" || !Number.isFinite(n) || n <= 0) return 0;
+    if (n > MAX_SINGLE_TRACK_DURATION_S) return 0;
+    return n;
+  };
 
   const audioFilesJson = validFiles.map((file: any, i: number) => {
     const extRaw = file.name.split(".").pop()?.toLowerCase() ?? "";
@@ -832,11 +872,12 @@ export async function executeFinalize(
       ext: extRaw,
       mimeType: file.type,
     });
+    const probedDuration = sanitizeClientDuration(file.duration);
 
     return {
       index: baseIndex + i + 1,
       ino: crypto.randomUUID(),
-      duration: 0,
+      duration: probedDuration,
       codec,
       metadata: {
         filename: file.name,
@@ -844,7 +885,7 @@ export async function executeFinalize(
         path: file.storagePath,
         relPath: file.name,
         size: file.size,
-        duration: 0,
+        duration: probedDuration,
         codec,
         mtimeMs: Date.now(),
         ctimeMs: Date.now(),
@@ -859,11 +900,32 @@ export async function executeFinalize(
 
   finalAudioFiles = [...finalAudioFiles, ...audioFilesJson];
 
-  // Deduplicate files by filename so re-uploading doesn't create duplicate chapters
+  // Deduplicate files by filename so re-uploading doesn't create duplicate chapters.
+  // Merge rule: newest path/size wins, but a zero-duration re-upload must NOT
+  // clobber a known-good per-track duration (that erases the only ground truth
+  // and forces size-based estimation on next play).
   const uniqueFilesMap = new Map<string, any>();
   for (const af of finalAudioFiles) {
-    if (af.metadata?.filename) {
-      uniqueFilesMap.set(af.metadata.filename, af);
+    const key = af.metadata?.filename;
+    if (!key) continue;
+    const prev = uniqueFilesMap.get(key);
+    if (!prev) {
+      uniqueFilesMap.set(key, af);
+      continue;
+    }
+    const prevDur = parseTrackDuration(prev) ?? 0;
+    const nextDur = parseTrackDuration(af) ?? 0;
+    if (nextDur > 0) {
+      uniqueFilesMap.set(key, af);
+    } else if (prevDur > 0) {
+      // Keep proven duration, adopt fresh storage location.
+      uniqueFilesMap.set(key, {
+        ...af,
+        duration: prevDur,
+        metadata: { ...af.metadata, duration: prevDur },
+      });
+    } else {
+      uniqueFilesMap.set(key, af);
     }
   }
   let deduplicatedFiles = Array.from(uniqueFilesMap.values());
@@ -891,13 +953,26 @@ export async function executeFinalize(
 
   deduplicatedFiles.forEach((af: any, idx: number) => (af.index = idx + 1));
 
+  // 10x pro: item duration is ALWAYS derived from merged per-track ground
+  // truth. 0 = unknown (playback falls back to size estimate). Never carry a
+  // stale total — a bogus 78h total must not survive a re-upload, and a fresh
+  // upload with zero probed durations must not invent one.
+  const summedDuration = deduplicatedFiles.reduce(
+    (sum: number, af: any) => sum + (parseTrackDuration(af) ?? 0),
+    0,
+  );
+  const recomputedDuration = summedDuration > 0 &&
+      summedDuration <= MAX_ITEM_DURATION_S
+    ? Math.round(summedDuration)
+    : 0;
+
   if (existingItem) {
     // Update the existing record (files merged into its existing audio_files)
     const { error: bookError } = await supabase
       .from("library_items")
       .update({
         audio_files: deduplicatedFiles,
-        duration: currentDuration,
+        duration: recomputedDuration,
         title: title || existingItem.title,
       })
       .eq("id", libraryItemId);
@@ -928,7 +1003,7 @@ export async function executeFinalize(
       rel_path: title,
       title,
       audio_files: deduplicatedFiles,
-      duration: currentDuration,
+      duration: recomputedDuration,
       size: totalSize,
       is_missing: false,
       last_storage_check: new Date().toISOString(),
@@ -1138,6 +1213,10 @@ export async function executeFinalize(
       success: true,
       libraryItemId,
       bookId,
+      duration: recomputedDuration,
+      durationSource: summedDuration > 0
+        ? "sum(track_durations)"
+        : "unknown(0)",
       ...(finalizeWarnings.length > 0 ? { warnings: finalizeWarnings } : {}),
     },
   };

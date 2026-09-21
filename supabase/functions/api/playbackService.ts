@@ -2,6 +2,7 @@ import { SupabaseClient } from "npm:@supabase/supabase-js@2.44.0";
 import { Database } from "../../../src/types/supabase.ts";
 import { StorageRouter } from "../_shared/storage-router.ts";
 import { getConfiguredTiers } from "../_shared/b2-config.ts";
+import { MAX_ITEM_DURATION_S } from "../_shared/invariants.ts";
 import { resolveBookStorage } from "../_shared/intelligentStorageResolver.ts";
 import {
   bulkUpsertMediaProgress,
@@ -151,8 +152,6 @@ export class PlaybackService {
       throw new Error("No audio files found for this item");
     }
 
-    const totalBookDuration = Number((item as any).duration) || 0;
-
     let totalFilesSize = 0;
     const sortedAudioFiles = [...audioFilesList]
       .map((af, idx) => {
@@ -194,6 +193,29 @@ export class PlaybackService {
     const needsDurationEstimation = sortedAudioFiles.some((af) =>
       af.duration === 0
     );
+
+    // 10x pro: never prorate a bogus stored total (Dark Psychology 281072s).
+    // A stored total >40h is impossible; a total >3x or <1/3x away from the
+    // size-based estimate (96kbps ≈ 12000 B/s) is a legacy lie. In both cases
+    // fall back to per-file size estimates so one bad DB cell can't poison
+    // every track offset and break scrubbing past 25%.
+    const rawTotal = Number((item as any).duration) || 0;
+    const sizeEstimateTotal = totalFilesSize > 0 ? totalFilesSize / 12000 : 0;
+    let effectiveBookDuration = rawTotal > 0 && rawTotal <= MAX_ITEM_DURATION_S
+      ? rawTotal
+      : 0;
+    if (
+      effectiveBookDuration > 0 && sizeEstimateTotal > 60 &&
+      (effectiveBookDuration > sizeEstimateTotal * 3 ||
+        effectiveBookDuration < sizeEstimateTotal / 3)
+    ) {
+      console.warn(
+        `[PlaybackService] Rejecting implausible stored duration ${rawTotal}s for item ${libraryItemId} (size estimate ~${
+          Math.round(sizeEstimateTotal)
+        }s); using size-based fallback`,
+      );
+      effectiveBookDuration = 0;
+    }
 
     // Get Storage Provider
     const storage = new StorageRouter(supabase);
@@ -281,10 +303,10 @@ export class PlaybackService {
 
       let duration = af.duration;
       if (needsDurationEstimation && duration === 0) {
-        if (totalBookDuration > 0 && af.size > 0 && totalFilesSize > 0) {
-          duration = (af.size / totalFilesSize) * totalBookDuration;
-        } else if (totalBookDuration > 0) {
-          duration = totalBookDuration / sortedAudioFiles.length;
+        if (effectiveBookDuration > 0 && af.size > 0 && totalFilesSize > 0) {
+          duration = (af.size / totalFilesSize) * effectiveBookDuration;
+        } else if (effectiveBookDuration > 0) {
+          duration = effectiveBookDuration / sortedAudioFiles.length;
         } else {
           duration = af.size / 12000;
         }

@@ -9,6 +9,7 @@ import {
   prettifyFilenameTitle,
   sanitizeDisplayTitle,
 } from "../_shared/titleAuthorParser.ts";
+import { MAX_ITEM_DURATION_S } from "../_shared/invariants.ts";
 
 type LibraryRow = Database["public"]["Tables"]["libraries"]["Row"];
 type LibraryFolderRow = Database["public"]["Tables"]["library_folders"]["Row"];
@@ -218,7 +219,7 @@ export function mapBookForMobile(
     ? (bookRecord.audio_files as AudioFile[]) || []
     : [];
 
-  const totalBookDuration =
+  const rawTotalDuration =
     Number(bookRecord.duration || Number(item.duration)) || 0;
   let totalFilesSize = 0;
   const mappedFiles = audioFilesList.map((af) => {
@@ -227,6 +228,19 @@ export function mapBookForMobile(
     totalFilesSize += size;
     return { af, meta, size };
   });
+  // Guard: never prorate a bogus stored total (see playbackService — same rule).
+  const sizeEstimateTotal = totalFilesSize > 0 ? totalFilesSize / 12000 : 0;
+  let totalBookDuration = rawTotalDuration > 0 &&
+      rawTotalDuration <= MAX_ITEM_DURATION_S
+    ? rawTotalDuration
+    : 0;
+  if (
+    totalBookDuration > 0 && sizeEstimateTotal > 60 &&
+    (totalBookDuration > sizeEstimateTotal * 3 ||
+      totalBookDuration < sizeEstimateTotal / 3)
+  ) {
+    totalBookDuration = 0;
+  }
   const needsDurationEstimation = mappedFiles.some((m) =>
     (Number(m.af.duration) || Number(m.meta.duration) || 0) === 0
   );
