@@ -134,6 +134,29 @@ jobs:
           if-no-files-found: warn
           retention-days: 30
 
+      - name: Run Merged-Books Split Scanner (report-only)
+        id: split_scan
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          ZAI_API_KEY: ${{ secrets.ZAI_API_KEY }}
+        run: |
+          cd supabase/functions
+          deno run --allow-all split_merged_books.ts --json "$RUNNER_TEMP/split_report.json" 2>&1 | tee split_output.txt
+          SPLITS=$(grep -oE "split=[0-9]+" split_output.txt | grep -oE "[0-9]+" || echo 0)
+          echo "split_count=$SPLITS" >> "$GITHUB_OUTPUT"
+          echo "Items decided for split: $SPLITS (report-only; --apply is manual dispatch)"
+
+      - name: Upload Split Report Artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: library-split-report-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/split_report.json
+          if-no-files-found: warn
+          retention-days: 30
+
   error-remediation:
     name: Sentry Error Remediation & PR Generator
     runs-on: [self-hosted, macOS]
