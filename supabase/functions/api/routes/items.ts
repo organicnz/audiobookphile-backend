@@ -588,6 +588,112 @@ itemsRouter.openapi(itemDetailRoute, async (c) => {
   );
 });
 
+const deleteItemRoute = {
+  method: "delete" as const,
+  path: "/:id",
+  tags: ["items"],
+  request: {
+    params: z.object({ id: z.string() }),
+  },
+  responses: {
+    200: {
+      description:
+        "Item deleted (dependents removed; storage only on hardDelete)",
+      content: {
+        "application/json": {
+          schema: z.object({
+            success: z.boolean(),
+            deletedId: z.string().optional(),
+            removedFiles: z.number().optional(),
+            filesRetained: z.number().optional(),
+            warnings: z.array(z.string()).optional(),
+          }),
+        },
+      },
+    },
+    400: {
+      description: "Invalid item id",
+      content: { "application/json": { schema: ServerErrorSchema } },
+    },
+    401: {
+      description: "Unauthorized",
+      content: { "application/json": { schema: ServerErrorSchema } },
+    },
+    403: {
+      description: "Admin role required",
+      content: { "application/json": { schema: ForbiddenSchema } },
+    },
+    404: {
+      description: "Item not found",
+      content: { "application/json": { schema: ServerErrorSchema } },
+    },
+    500: {
+      description: "Delete failed",
+      content: { "application/json": { schema: ServerErrorSchema } },
+    },
+  },
+};
+
+itemsRouter.openapi(deleteItemRoute, async (c) => {
+  const user = c.get("user");
+  if (!user) return c.json({ error: "Unauthorized" }, 401);
+  const supabaseUrl = c.get("supabaseUrl");
+  const serviceRoleKey = c.get("serviceRoleKey");
+
+  let isAdmin = false;
+  try {
+    isAdmin = requireAdminRole(user);
+  } catch {
+    isAdmin = false;
+  }
+  if (!isAdmin) {
+    return c.json({ error: "Forbidden: Admin access required" }, 403);
+  }
+
+  const { id: itemId } = c.req.valid("param");
+  const hardDelete = new URL(c.req.url).searchParams.get("hardDelete") === "1";
+
+  try {
+    const { deleteLibraryItem } = await import("../../_shared/itemDelete.ts");
+    const adminClient = createClient(supabaseUrl, serviceRoleKey);
+    const outcome = await deleteLibraryItem(adminClient, itemId, {
+      isAdmin: true,
+      hardDelete,
+      storageRouter: new StorageRouter(adminClient),
+    });
+    if (!outcome.deleted) {
+      return c.json(
+        { error: outcome.error ?? "Delete failed", warnings: outcome.warnings },
+        outcome.status as 400 | 404 | 500,
+      );
+    }
+    console.info(
+      `[items] Deleted item ${outcome.deletedId} (hard=${
+        hardDelete ? "yes" : "no"
+      }): ` +
+        `${outcome.removedFiles} files removed, ${outcome.filesRetained} retained` +
+        (outcome.warnings.length
+          ? `, warnings: ${outcome.warnings.join("; ")}`
+          : ""),
+    );
+    return c.json(
+      {
+        success: true,
+        deletedId: outcome.deletedId,
+        removedFiles: outcome.removedFiles,
+        filesRetained: outcome.filesRetained,
+        warnings: outcome.warnings,
+      },
+      200,
+    );
+  } catch (err) {
+    // Never throw: a thrown handler trips the app error boundary. Controlled
+    // JSON keeps the dashboard on its toast path.
+    console.error(`[items] Delete crashed for ${itemId}:`, err);
+    return c.json({ error: getErrorMessage(err) || "Delete failed" }, 500);
+  }
+});
+
 itemsRouter.openapi(itemCoverRoute, async (c): Promise<Response> => {
   const supabaseUrl = c.get("supabaseUrl");
   const serviceRoleKey = c.get("serviceRoleKey");
