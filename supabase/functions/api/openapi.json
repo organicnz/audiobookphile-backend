@@ -10700,11 +10700,26 @@
         "parameters": [
           {
             "schema": {
-              "type": "string"
+              "type": "string",
+              "format": "uuid"
             },
             "required": true,
             "name": "id",
             "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "0",
+                "1"
+              ],
+              "description": "1 also removes B2 audio objects and the cover; omit for DB-only delete (files retained)"
+            },
+            "required": false,
+            "description": "1 also removes B2 audio objects and the cover; omit for DB-only delete (files retained)",
+            "name": "hardDelete",
+            "in": "query"
           }
         ],
         "responses": {
@@ -10727,6 +10742,14 @@
                     "filesRetained": {
                       "type": "number"
                     },
+                    "storageCleanup": {
+                      "type": "string",
+                      "enum": [
+                        "not_requested",
+                        "pending",
+                        "complete"
+                      ]
+                    },
                     "warnings": {
                       "type": "array",
                       "items": {
@@ -10735,7 +10758,50 @@
                     }
                   },
                   "required": [
-                    "success"
+                    "success",
+                    "storageCleanup"
+                  ]
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Item deleted; one or more storage objects are pending cleanup",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "deletedId": {
+                      "type": "string"
+                    },
+                    "removedFiles": {
+                      "type": "number"
+                    },
+                    "filesRetained": {
+                      "type": "number"
+                    },
+                    "storageCleanup": {
+                      "type": "string",
+                      "enum": [
+                        "not_requested",
+                        "pending",
+                        "complete"
+                      ]
+                    },
+                    "warnings": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "storageCleanup"
                   ]
                 }
               }
@@ -12583,11 +12649,26 @@
         "parameters": [
           {
             "schema": {
-              "type": "string"
+              "type": "string",
+              "format": "uuid"
             },
             "required": true,
             "name": "id",
             "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "0",
+                "1"
+              ],
+              "description": "1 also removes B2 audio objects and the cover; omit for DB-only delete (files retained)"
+            },
+            "required": false,
+            "description": "1 also removes B2 audio objects and the cover; omit for DB-only delete (files retained)",
+            "name": "hardDelete",
+            "in": "query"
           }
         ],
         "responses": {
@@ -12610,6 +12691,14 @@
                     "filesRetained": {
                       "type": "number"
                     },
+                    "storageCleanup": {
+                      "type": "string",
+                      "enum": [
+                        "not_requested",
+                        "pending",
+                        "complete"
+                      ]
+                    },
                     "warnings": {
                       "type": "array",
                       "items": {
@@ -12618,7 +12707,50 @@
                     }
                   },
                   "required": [
-                    "success"
+                    "success",
+                    "storageCleanup"
+                  ]
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Item deleted; one or more storage objects are pending cleanup",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "deletedId": {
+                      "type": "string"
+                    },
+                    "removedFiles": {
+                      "type": "number"
+                    },
+                    "filesRetained": {
+                      "type": "number"
+                    },
+                    "storageCleanup": {
+                      "type": "string",
+                      "enum": [
+                        "not_requested",
+                        "pending",
+                        "complete"
+                      ]
+                    },
+                    "warnings": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "storageCleanup"
                   ]
                 }
               }

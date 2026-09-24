@@ -89,6 +89,11 @@ export interface ParsedStoragePath {
   isLegacy?: boolean;
 }
 
+export interface StorageDeleteResult {
+  status: "deleted" | "absent" | "failed" | "unsupported";
+  error?: string;
+}
+
 /* -------------------------------------------------------------------------
  * StorageRouter class — main API for all storage path operations.
  * ------------------------------------------------------------------------- */
@@ -410,19 +415,52 @@ export class StorageRouter {
 
   /* -------------------------------------------------------------------------
    * deletePath — deletes an AUDIO object from its B2 tier.
-   * Audio is B2-only: supabase:// and legacy/bare paths are NOT deleted from
-   * Supabase (audio-files bucket must stay empty; covers live in "covers").
-   * Returns true when a B2 delete was issued, false when there was nothing
-   * B2-side to delete (legacy/supabase URI — DB row cleanup is enough).
+   * deletePathDetailed preserves unsupported and failed states for callers
+   * that need a durable cleanup result.
    * ------------------------------------------------------------------------- */
 
-  async deletePath(path: string): Promise<boolean> {
-    const parsed = this.parsePath(path);
-    if (!parsed || parsed.tier === "SUPABASE" || parsed.isLegacy) {
-      return false;
+  async deletePathDetailed(
+    path: string,
+    itemId?: string,
+  ): Promise<StorageDeleteResult> {
+    let parsed = this.parsePath(path);
+    if (!parsed) {
+      return { status: "unsupported", error: "Unsupported storage path" };
+    }
+    if (parsed.tier === "SUPABASE") {
+      return {
+        status: "unsupported",
+        error: "Supabase audio is not supported",
+      };
+    }
+    if (parsed.isLegacy) {
+      if (!itemId) {
+        return {
+          status: "failed",
+          error: "Item id is required to resolve a legacy storage path",
+        };
+      }
+      try {
+        const resolved = await this.resolveAndSign(path, itemId, 60);
+        parsed = this.parsePath(resolved.canonicalPath);
+        if (!parsed || parsed.tier === "SUPABASE") {
+          return {
+            status: "failed",
+            error: "Legacy path resolved to an unsupported tier",
+          };
+        }
+      } catch (error) {
+        return {
+          status: "failed",
+          error: error instanceof Error ? error.message : String(error),
+        };
+      }
     }
     if (!isTierConfigured(parsed.tier)) {
-      return false;
+      return {
+        status: "failed",
+        error: `Bucket tier ${parsed.tier} is not configured`,
+      };
     }
     try {
       const client = getB2Client(parsed.tier);
@@ -432,9 +470,17 @@ export class StorageRouter {
           Key: parsed.key,
         }),
       );
-      return true;
-    } catch {
-      return false;
+      return { status: "deleted" };
+    } catch (error) {
+      return {
+        status: "failed",
+        error: error instanceof Error ? error.message : String(error),
+      };
     }
+  }
+
+  async deletePath(path: string, itemId?: string): Promise<boolean> {
+    const result = await this.deletePathDetailed(path, itemId);
+    return result.status === "deleted" || result.status === "absent";
   }
 }

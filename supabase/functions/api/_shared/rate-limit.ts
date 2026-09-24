@@ -42,11 +42,9 @@ export async function rateLimitMiddleware(
   c: Context<{ Variables: Variables }>,
   next: Next,
 ): Promise<Response | void> {
+  if (isRateLimitExempt(c)) return next();
+
   try {
-    if (isRateLimitExempt(c)) {
-      await next();
-      return;
-    }
     const now = Date.now();
     if (buckets.size > 2000) {
       for (const [ip, b] of buckets.entries()) {
@@ -59,30 +57,32 @@ export async function rateLimitMiddleware(
     const bucket = buckets.get(key);
     if (!bucket || now >= bucket.resetAt) {
       buckets.set(key, { count: 1, resetAt: now + WINDOW_MS });
-      await next();
-      return;
-    }
-    bucket.count += 1;
-    if (bucket.count > MAX_REQUESTS) {
-      const retryAfter = Math.max(1, Math.ceil((bucket.resetAt - now) / 1000));
-      c.header("Retry-After", String(retryAfter));
-      return c.json(
-        {
-          error: {
-            code: "RATE_LIMITED",
-            message: "Too many requests, slow down",
+    } else {
+      bucket.count += 1;
+      if (bucket.count > MAX_REQUESTS) {
+        const retryAfter = Math.max(
+          1,
+          Math.ceil((bucket.resetAt - now) / 1000),
+        );
+        c.header("Retry-After", String(retryAfter));
+        return c.json(
+          {
+            error: {
+              code: "RATE_LIMITED",
+              message: "Too many requests, slow down",
+            },
+            requestId: c.get("requestId") ?? crypto.randomUUID(),
+            timestamp: new Date().toISOString(),
           },
-          requestId: c.get("requestId") ?? crypto.randomUUID(),
-          timestamp: new Date().toISOString(),
-        },
-        429,
-      );
+          429,
+        );
+      }
     }
-    await next();
   } catch {
-    // Fail open — rate limiting must never break traffic.
-    await next();
+    return next();
   }
+
+  return next();
 }
 
 /** Test-only hook: clear all buckets. */

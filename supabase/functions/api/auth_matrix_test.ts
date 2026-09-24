@@ -155,6 +155,7 @@ async function requestStatus(
 }
 
 const FORBIDDEN = new Set([401, 403]);
+const ITEM_ID = "11111111-2222-3333-4444-555555555555";
 
 function assertAccess(
   expectedForbidden: boolean,
@@ -208,6 +209,7 @@ const protectedRoutes: Array<[string, string]> = [
   ["POST", "/api/libraries/library-1/scan"],
   ["POST", "/api/libraries/library-1/smart-sort"],
   ["POST", "/api/libraries/library-1/deduplicate"],
+  ["DELETE", `/api/items/${ITEM_ID}`],
   ["DELETE", "/api/items/item-1/cover"],
   ["POST", "/api/items/item-1/cover"],
   ["PATCH", "/api/items/item-1/cover"],
@@ -243,6 +245,14 @@ Deno.test("AuthZ Matrix: admin and root reach every protected route", async () =
       assertAccess(false, status, `${role} ${method} ${path}`);
     }
   }
+});
+
+Deno.test("AuthZ Matrix: query-string bearer tokens are rejected", async () => {
+  const token = await mintToken("admin-1");
+  const response = await app.request(
+    new Request(`http://localhost/api/me?token=${encodeURIComponent(token)}`),
+  );
+  assertEquals(response.status, 401);
 });
 
 Deno.test("AuthZ Matrix: guests without tokens are rejected", async () => {

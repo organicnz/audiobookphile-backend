@@ -303,7 +303,6 @@ app.use(async (c, next) => {
       requestId: c.get("requestId"),
       method: c.req.method,
       path: c.req.path,
-      url: c.req.url,
       headers: { "x-client-info": c.req.header("x-client-info") },
       statusCode: c.res.status,
       durationMs: duration,

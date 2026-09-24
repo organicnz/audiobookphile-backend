@@ -280,8 +280,6 @@ export async function authMiddleware(
 
   if (authorizationHeader) {
     token = authorizationHeader.replace(/^Bearer\s*/i, "").trim();
-  } else if (c.req.query("token")) {
-    token = c.req.query("token")!.trim();
   }
 
   if (!token) {

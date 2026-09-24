@@ -1,231 +1,236 @@
 import { assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import { deleteLibraryItem } from "../_shared/itemDelete.ts";
+import type { StorageDeleteResult } from "../_shared/storage-router.ts";
 
 const ITEM_ID = "11111111-2222-3333-4444-555555555555";
+const ACTOR_ID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
 
-function audioFile(ino: string, path: string, duration = 60) {
+interface FakeOptions {
+  missing?: boolean;
+  rpcError?: string;
+  recordError?: string;
+  b2Status?: StorageDeleteResult["status"];
+  coverListError?: boolean;
+  coverRemoveError?: boolean;
+}
+
+function manifest() {
   return {
-    ino,
-    duration,
-    metadata: { filename: `${ino}.mp3`, path, duration },
+    b2Paths: [
+      "b2://library/book/track-01.mp3",
+      "b2://library/book/track-02.mp3",
+    ],
+    supabaseAudioPaths: ["legacy/track-03.mp3"],
+    coverPaths: [`${ITEM_ID}/cover.jpg`],
+    coverPrefixes: [ITEM_ID],
+    retainedFileCount: 4,
   };
 }
 
-interface FakeOpts {
-  item?: Record<string, unknown> | null;
-  failRowDelete?: boolean;
-  missingTables?: string[];
-  failCoverRemove?: boolean;
-  deletedStorage?: string[];
-}
-
-/** Fake supabase client: tables are name -> rows; deletes filter by column. */
-function fakeDb(opts: FakeOpts = {}): { db: any; calls: string[] } {
+function fakeDb(
+  opts: FakeOptions = {},
+): { db: any; calls: string[]; deletedB2: string[]; removed: string[] } {
   const calls: string[] = [];
-  const tables: Record<string, Record<string, unknown>[]> = {
-    library_items: opts.item === undefined
-      ? [{
-        id: ITEM_ID,
-        library_id: "lib-1",
-        title: "Doomed Book",
-        path: "lib-1/Doomed Book",
-        cover_path: `${ITEM_ID}/cover.jpg`,
-        audio_files: [
-          audioFile("a1", `lib-1/Doomed Book/a1.mp3`),
-          audioFile("a2", `lib-1/Doomed Book/a2.mp3`),
-        ],
-        library_files: [{ path: `lib-1/Doomed Book/a1.mp3` }],
-      }]
-      : (opts.item ? [opts.item] : []),
-    media_progress: [{ id: "p1", library_item_id: ITEM_ID }],
-    bookmarks: [{ id: "b1", library_item_id: ITEM_ID }],
-    user_library_items: [{ user_id: "u1", library_item_id: ITEM_ID }],
-    book_authors: [{ library_item_id: ITEM_ID, author_id: "au1" }],
-    book_series: [{ library_item_id: ITEM_ID, series_id: "s1" }],
-    collection_items: [{ collection_id: "c1", library_item_id: ITEM_ID }],
-    playlist_media_items: [{ playlist_id: "pl1", media_item_id: ITEM_ID }],
-  };
+  const deletedB2: string[] = [];
+  const removed: string[] = [];
   const db = {
-    from(table: string) {
-      const filters: { col: string; val: unknown }[] = [];
-      const api = {
-        select(_cols: string) {
-          return api;
-        },
-        eq(col: string, val: unknown) {
-          filters.push({ col, val });
-          return api;
-        },
-        async maybeSingle() {
-          calls.push(`${table}.select`);
-          if ((opts.missingTables ?? []).includes(table)) {
-            return {
-              data: null,
-              error: { code: "PGRST205", message: "table not found" },
-            };
-          }
-          const rows = (tables[table] ?? []).filter((r) =>
-            filters.every((f) => r[f.col] === f.val)
-          );
-          return { data: rows[0] ?? null, error: null };
-        },
-        delete() {
-          return {
-            eq: (col: string, val: unknown) => {
-              calls.push(`${table}.delete`);
-              if ((opts.missingTables ?? []).includes(table)) {
-                return Promise.resolve({
-                  error: { code: "PGRST205", message: "table not found" },
-                });
-              }
-              if (table === "library_items" && opts.failRowDelete) {
-                return Promise.resolve({
-                  error: { message: "violates foreign key" },
-                });
-              }
-              tables[table] = (tables[table] ?? []).filter((r) =>
-                r[col] !== val
-              );
-              return Promise.resolve({ error: null });
-            },
-          };
-        },
-      };
-      return api;
+    rpc: async (name: string, args: Record<string, unknown>) => {
+      calls.push(`${name}:${JSON.stringify(args)}`);
+      if (name === "delete_library_item_atomic") {
+        if (opts.rpcError) {
+          return { data: null, error: { message: opts.rpcError } };
+        }
+        if (opts.missing) {
+          return { data: { found: false, item_id: ITEM_ID }, error: null };
+        }
+        return {
+          data: {
+            found: true,
+            item_id: ITEM_ID,
+            audit_id: 42,
+            manifest: manifest(),
+            retained_file_count: manifest().retainedFileCount,
+          },
+          error: null,
+        };
+      }
+      if (name === "record_library_item_storage_cleanup") {
+        return {
+          data: null,
+          error: opts.recordError ? { message: opts.recordError } : null,
+        };
+      }
+      throw new Error(`Unexpected RPC ${name}`);
     },
     storage: {
-      from(bucket: string) {
-        return {
-          remove: (paths: string[]) => {
-            calls.push(`storage:${bucket}.remove`);
-            if (opts.failCoverRemove) {
-              return Promise.resolve({ error: { message: "nope" } });
-            }
-            (opts.deletedStorage ?? []).push(...paths);
-            return Promise.resolve({ error: null });
-          },
-        };
-      },
+      from: (bucket: string) => ({
+        remove: async (paths: string[]) => {
+          calls.push(`${bucket}.remove:${paths.join(",")}`);
+          if (bucket === "covers" && opts.coverRemoveError) {
+            return { error: { message: "cover remove failed" } };
+          }
+          removed.push(...paths.map((path) => `${bucket}/${path}`));
+          return { error: null };
+        },
+        list: async (prefix: string) => {
+          calls.push(`${bucket}.list:${prefix}`);
+          if (bucket === "covers" && opts.coverListError) {
+            return { data: null, error: { message: "cover list failed" } };
+          }
+          return {
+            data: bucket === "covers" ? [{ name: "cover.jpg" }] : [],
+            error: null,
+          };
+        },
+      }),
     },
   };
-  return { db, calls };
+  return { db, calls, deletedB2, removed };
 }
 
-const ROUTER = {
-  deleted: [] as string[],
-  fail: new Set<string>(),
-  deletePath: async function (p: string) {
-    ROUTER.deleted.push(p);
-    return !ROUTER.fail.has(p);
-  },
-};
+function router(
+  deletedB2: string[],
+  status: StorageDeleteResult["status"] = "deleted",
+) {
+  return {
+    deletePathDetailed: async (path: string) => {
+      deletedB2.push(path);
+      return { status };
+    },
+  };
+}
 
-Deno.test("itemDelete: non-admin is rejected before any write", async () => {
+Deno.test("itemDelete: non-admin is rejected before any RPC", async () => {
   const { db, calls } = fakeDb();
-  const res = await deleteLibraryItem(db, ITEM_ID, {
+  const result = await deleteLibraryItem(db, ITEM_ID, {
     isAdmin: false,
     hardDelete: true,
-    storageRouter: ROUTER,
+    actorId: ACTOR_ID,
   });
-  assertEquals(res.deleted, false);
-  assertEquals(res.status, 403);
+  assertEquals(result.deleted, false);
+  assertEquals(result.status, 403);
   assertEquals(calls.length, 0);
 });
 
-Deno.test("itemDelete: malformed id is a 400 with no writes", async () => {
+Deno.test("itemDelete: malformed id is rejected before any RPC", async () => {
   const { db, calls } = fakeDb();
-  const res = await deleteLibraryItem(db, "not-a-uuid", {
+  const result = await deleteLibraryItem(db, "not-a-uuid", {
     isAdmin: true,
     hardDelete: false,
+    actorId: ACTOR_ID,
   });
-  assertEquals(res.status, 400);
+  assertEquals(result.status, 400);
   assertEquals(calls.length, 0);
 });
 
-Deno.test("itemDelete: missing item is an idempotent 404", async () => {
-  const { db } = fakeDb({ item: null });
-  const res = await deleteLibraryItem(db, ITEM_ID, {
+Deno.test("itemDelete: missing item is a 404 after the atomic lookup", async () => {
+  const { db, calls } = fakeDb({ missing: true });
+  const result = await deleteLibraryItem(db, ITEM_ID, {
     isAdmin: true,
     hardDelete: false,
+    actorId: ACTOR_ID,
   });
-  assertEquals(res.deleted, false);
-  assertEquals(res.status, 404);
-});
-
-Deno.test("itemDelete: soft delete removes dependents + row, keeps files", async () => {
-  const { db, calls } = fakeDb();
-  const res = await deleteLibraryItem(db, ITEM_ID, {
-    isAdmin: true,
-    hardDelete: false,
-  });
-  assertEquals(res.deleted, true);
-  assertEquals(res.status, 200);
-  assertEquals(res.removedFiles, 0);
-  assertEquals(res.filesRetained, 3); // 2 audio + 1 library_file entries
-  assertEquals(res.warnings.length, 0);
-  // every dependent table was swept, row last
-  for (
-    const t of [
-      "media_progress",
-      "bookmarks",
-      "user_library_items",
-      "book_authors",
-      "book_series",
-      "collection_items",
-      "playlist_media_items",
-    ]
-  ) {
-    assertEquals(calls.includes(`${t}.delete`), true, t);
-  }
-  const rowIdx = calls.lastIndexOf("library_items.delete");
-  const depIdx = Math.max(
-    ...calls.filter((c) => c !== "library_items.delete").map((c) =>
-      calls.indexOf(c)
-    ),
+  assertEquals(result.deleted, false);
+  assertEquals(result.status, 404);
+  assertEquals(
+    calls.some((call) => call.startsWith("delete_library_item_atomic:")),
+    true,
   );
-  assertEquals(rowIdx > depIdx, true);
 });
 
-Deno.test("itemDelete: hard delete removes B2 objects + cover", async () => {
-  ROUTER.deleted.length = 0;
-  ROUTER.fail.clear();
-  const removed: string[] = [];
-  const { db } = fakeDb({ deletedStorage: removed });
-  const res = await deleteLibraryItem(db, ITEM_ID, {
+Deno.test("itemDelete: database-only delete is atomic and retains files", async () => {
+  const { db, calls } = fakeDb();
+  const result = await deleteLibraryItem(db, ITEM_ID, {
+    isAdmin: true,
+    hardDelete: false,
+    actorId: ACTOR_ID,
+  });
+  assertEquals(result.deleted, true);
+  assertEquals(result.status, 200);
+  assertEquals(result.storageCleanup, "not_requested");
+  assertEquals(result.removedFiles, 0);
+  assertEquals(result.filesRetained, 4);
+  assertEquals(calls.length, 1);
+  assertEquals(calls[0].includes('"p_hard_delete":false'), true);
+  assertEquals(calls[0].includes(`\"p_actor_id\":\"${ACTOR_ID}\"`), true);
+});
+
+Deno.test("itemDelete: hard delete cleans storage after the atomic database delete", async () => {
+  const { db, calls, deletedB2, removed } = fakeDb();
+  const result = await deleteLibraryItem(db, ITEM_ID, {
     isAdmin: true,
     hardDelete: true,
-    storageRouter: ROUTER,
+    actorId: ACTOR_ID,
+    storageRouter: router(deletedB2),
   });
-  assertEquals(res.deleted, true);
+  assertEquals(result.deleted, true);
+  assertEquals(result.status, 200);
+  assertEquals(result.storageCleanup, "complete");
+  assertEquals(result.removedFiles, 4);
+  assertEquals(result.filesRetained, 0);
+  assertEquals(deletedB2, manifest().b2Paths);
   assertEquals(
-    ROUTER.deleted.sort(),
-    ["lib-1/Doomed Book/a1.mp3", "lib-1/Doomed Book/a2.mp3"].sort(),
+    removed.sort(),
+    [
+      "audio-files/legacy/track-03.mp3",
+      `covers/${ITEM_ID}/cover.jpg`,
+    ].sort(),
   );
-  assertEquals(removed, [`${ITEM_ID}/cover.jpg`]);
-  assertEquals(res.removedFiles, 3);
-  assertEquals(res.filesRetained, 0);
-  assertEquals(res.warnings.length, 0);
+  assertEquals(calls[0].startsWith("delete_library_item_atomic:"), true);
+  assertEquals(
+    calls.at(-1)?.startsWith("record_library_item_storage_cleanup:"),
+    true,
+  );
 });
 
-Deno.test("itemDelete: row-delete failure is a 500, never a throw", async () => {
-  const { db } = fakeDb({ failRowDelete: true });
-  const res = await deleteLibraryItem(db, ITEM_ID, {
-    isAdmin: true,
-    hardDelete: false,
+Deno.test("itemDelete: hard delete reports pending storage cleanup truthfully", async () => {
+  const { db, calls, deletedB2 } = fakeDb({
+    b2Status: "failed",
+    coverListError: true,
   });
-  assertEquals(res.deleted, false);
-  assertEquals(res.status, 500);
-  assertEquals(typeof res.error, "string");
+  const result = await deleteLibraryItem(db, ITEM_ID, {
+    isAdmin: true,
+    hardDelete: true,
+    actorId: ACTOR_ID,
+    storageRouter: router(deletedB2, "failed"),
+  });
+  assertEquals(result.deleted, true);
+  assertEquals(result.status, 202);
+  assertEquals(result.storageCleanup, "pending");
+  assertEquals(result.filesRetained > 0, true);
+  assertEquals(result.warnings.length > 0, true);
+  assertEquals(calls.at(-1)?.includes('"p_status":"pending"'), true);
 });
 
-Deno.test("itemDelete: unknown dependent tables are skipped silently", async () => {
-  const { db } = fakeDb({
-    missingTables: ["bookmarks", "playlist_media_items"],
+Deno.test("itemDelete: atomic database failure never touches storage", async () => {
+  const { db, calls, deletedB2 } = fakeDb({
+    rpcError: "transaction rolled back",
   });
-  const res = await deleteLibraryItem(db, ITEM_ID, {
+  const result = await deleteLibraryItem(db, ITEM_ID, {
     isAdmin: true,
-    hardDelete: false,
+    hardDelete: true,
+    actorId: ACTOR_ID,
+    storageRouter: router(deletedB2),
   });
-  assertEquals(res.deleted, true);
-  assertEquals(res.warnings.length, 0);
+  assertEquals(result.deleted, false);
+  assertEquals(result.status, 500);
+  assertEquals(deletedB2.length, 0);
+  assertEquals(calls.length, 1);
+});
+
+Deno.test("itemDelete: cleanup status failure keeps the delete pending", async () => {
+  const { db, deletedB2 } = fakeDb({ recordError: "audit unavailable" });
+  const result = await deleteLibraryItem(db, ITEM_ID, {
+    isAdmin: true,
+    hardDelete: true,
+    actorId: ACTOR_ID,
+    storageRouter: router(deletedB2),
+  });
+  assertEquals(result.deleted, true);
+  assertEquals(result.status, 202);
+  assertEquals(result.storageCleanup, "pending");
+  assertEquals(
+    result.warnings.includes("storage cleanup status could not be recorded"),
+    true,
+  );
 });

@@ -593,7 +593,15 @@ const deleteItemRoute = {
   path: "/:id",
   tags: ["items"],
   request: {
-    params: z.object({ id: z.string() }),
+    params: z.object({ id: z.string().uuid() }),
+    query: z.object({
+      hardDelete: z
+        .enum(["0", "1"])
+        .optional()
+        .describe(
+          "1 also removes B2 audio objects and the cover; omit for DB-only delete (files retained)",
+        ),
+    }),
   },
   responses: {
     200: {
@@ -606,6 +614,23 @@ const deleteItemRoute = {
             deletedId: z.string().optional(),
             removedFiles: z.number().optional(),
             filesRetained: z.number().optional(),
+            storageCleanup: z.enum(["not_requested", "pending", "complete"]),
+            warnings: z.array(z.string()).optional(),
+          }),
+        },
+      },
+    },
+    202: {
+      description:
+        "Item deleted; one or more storage objects are pending cleanup",
+      content: {
+        "application/json": {
+          schema: z.object({
+            success: z.boolean(),
+            deletedId: z.string().optional(),
+            removedFiles: z.number().optional(),
+            filesRetained: z.number().optional(),
+            storageCleanup: z.enum(["not_requested", "pending", "complete"]),
             warnings: z.array(z.string()).optional(),
           }),
         },
@@ -646,19 +671,21 @@ itemsRouter.openapi(deleteItemRoute, async (c) => {
   } catch {
     isAdmin = false;
   }
-  if (!isAdmin) {
+  if (!isAdmin || user.id === "cron") {
     return c.json({ error: "Forbidden: Admin access required" }, 403);
   }
 
   const { id: itemId } = c.req.valid("param");
-  const hardDelete = new URL(c.req.url).searchParams.get("hardDelete") === "1";
+  const { hardDelete = "0" } = c.req.valid("query");
+  const hardDeleteRequested = hardDelete === "1";
 
   try {
     const { deleteLibraryItem } = await import("../../_shared/itemDelete.ts");
     const adminClient = createClient(supabaseUrl, serviceRoleKey);
     const outcome = await deleteLibraryItem(adminClient, itemId, {
       isAdmin: true,
-      hardDelete,
+      hardDelete: hardDeleteRequested,
+      actorId: user.id,
       storageRouter: new StorageRouter(adminClient),
     });
     if (!outcome.deleted) {
@@ -669,7 +696,7 @@ itemsRouter.openapi(deleteItemRoute, async (c) => {
     }
     console.info(
       `[items] Deleted item ${outcome.deletedId} (hard=${
-        hardDelete ? "yes" : "no"
+        hardDeleteRequested ? "yes" : "no"
       }): ` +
         `${outcome.removedFiles} files removed, ${outcome.filesRetained} retained` +
         (outcome.warnings.length
@@ -682,9 +709,10 @@ itemsRouter.openapi(deleteItemRoute, async (c) => {
         deletedId: outcome.deletedId,
         removedFiles: outcome.removedFiles,
         filesRetained: outcome.filesRetained,
+        storageCleanup: outcome.storageCleanup,
         warnings: outcome.warnings,
       },
-      200,
+      outcome.status as 200 | 202,
     );
   } catch (err) {
     // Never throw: a thrown handler trips the app error boundary. Controlled
