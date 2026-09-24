@@ -94,6 +94,19 @@ export interface StorageDeleteResult {
   error?: string;
 }
 
+function isMissingObjectError(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const candidate = error as {
+    name?: unknown;
+    Code?: unknown;
+    code?: unknown;
+    $metadata?: { httpStatusCode?: unknown };
+  };
+  const code = String(candidate.name ?? candidate.Code ?? candidate.code ?? "");
+  return code === "NotFound" || code === "NoSuchKey" ||
+    candidate.$metadata?.httpStatusCode === 404;
+}
+
 /* -------------------------------------------------------------------------
  * StorageRouter class — main API for all storage path operations.
  * ------------------------------------------------------------------------- */
@@ -215,6 +228,7 @@ export class StorageRouter {
     legacyPath: string,
     itemId: string,
     expiresIn: number,
+    options: { allowBasenameFallback?: boolean } = {},
   ): Promise<ResolvedStoragePath> {
     const filename = legacyPath.split("/").pop()!;
     const cleanLegacy = legacyPath.replace(/^\/+/, "");
@@ -223,7 +237,7 @@ export class StorageRouter {
       cleanLegacy,
       `audiobooks/${cleanLegacy}`,
       cleanLegacy.replace(/^audiobooks\//, ""),
-      filename,
+      ...(options.allowBasenameFallback === false ? [] : [filename]),
     ].filter(Boolean);
 
     const uniqueCandidates = Array.from(new Set(candidates));
@@ -440,21 +454,57 @@ export class StorageRouter {
           error: "Item id is required to resolve a legacy storage path",
         };
       }
-      try {
-        const resolved = await this.resolveAndSign(path, itemId, 60);
-        parsed = this.parsePath(resolved.canonicalPath);
-        if (!parsed || parsed.tier === "SUPABASE") {
-          return {
-            status: "failed",
-            error: "Legacy path resolved to an unsupported tier",
-          };
-        }
-      } catch (error) {
+      const legacyKey = path.replace(/^\/+/, "");
+      const traversal = /(^|\/)\.\.(\/|$)/.test(legacyKey);
+      const relativeKey = !legacyKey.includes("://") &&
+        !legacyKey.startsWith(`${itemId}/`) &&
+        !legacyKey.startsWith(`audiobooks/${itemId}/`);
+      if (
+        traversal || (!relativeKey && !legacyKey.startsWith(`${itemId}/`) &&
+          !legacyKey.startsWith(`audiobooks/${itemId}/`))
+      ) {
         return {
           status: "failed",
-          error: error instanceof Error ? error.message : String(error),
+          error: "Legacy storage path is outside the item prefix",
         };
       }
+      const ownedKey = relativeKey ? `${itemId}/${legacyKey}` : legacyKey;
+      const keys = Array.from(
+        new Set([
+          ownedKey,
+          `audiobooks/${ownedKey}`,
+        ]),
+      );
+      let attempted = false;
+      let firstError: unknown;
+      for (const tier of getConfiguredTiers()) {
+        for (const key of keys) {
+          attempted = true;
+          try {
+            const client = getB2Client(tier);
+            await client.send(
+              new DeleteObjectCommand({
+                Bucket: getConfig(tier).bucketName,
+                Key: key,
+              }),
+            );
+          } catch (error) {
+            if (!isMissingObjectError(error)) firstError ??= error;
+          }
+        }
+      }
+      if (firstError) {
+        return {
+          status: "failed",
+          error: firstError instanceof Error
+            ? firstError.message
+            : String(firstError),
+        };
+      }
+      return attempted ? { status: "deleted" } : {
+        status: "failed",
+        error: "No B2 tier is configured for legacy storage cleanup",
+      };
     }
     if (!isTierConfigured(parsed.tier)) {
       return {
@@ -472,6 +522,7 @@ export class StorageRouter {
       );
       return { status: "deleted" };
     } catch (error) {
+      if (isMissingObjectError(error)) return { status: "absent" };
       return {
         status: "failed",
         error: error instanceof Error ? error.message : String(error),

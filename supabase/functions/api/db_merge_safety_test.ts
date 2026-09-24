@@ -23,6 +23,14 @@ const MIG_3 = new URL(
   "../../migrations/20260826120000_merge_overload_disambig.sql",
   import.meta.url,
 );
+const MIG_4 = new URL(
+  "../../migrations/20260924064104_harden_library_item_deletion.sql",
+  import.meta.url,
+);
+const MIG_5 = new URL(
+  "../../migrations/20260924153656_harden_item_delete_retry.sql",
+  import.meta.url,
+);
 
 async function execSql(query: string): Promise<string> {
   const res = await fetch(
@@ -131,6 +139,158 @@ ROLLBACK;
     if (!out.includes("DB-MERGE-SAFETY-OK")) {
       throw new Error(
         `invariant assertions did not complete: ${out.slice(0, 500)}`,
+      );
+    }
+  },
+});
+
+Deno.test({
+  name:
+    "db item-delete: authorization, atomic manifest, and pending retry are durable",
+  ignore: !shouldRun,
+  fn: async () => {
+    const mig1 = await Deno.readTextFile(MIG_1);
+    const mig2 = await Deno.readTextFile(MIG_2);
+    const mig3 = await Deno.readTextFile(MIG_3);
+    const mig4 = await Deno.readTextFile(MIG_4);
+    const mig5 = await Deno.readTextFile(MIG_5);
+    const libraryId = crypto.randomUUID();
+    const itemId = crypto.randomUUID();
+    const retryItemId = crypto.randomUUID();
+
+    const sql = `
+BEGIN;
+${mig1}
+${mig2}
+${mig3}
+${mig4}
+${mig5}
+
+INSERT INTO public.libraries (id, name)
+VALUES ('${libraryId}', 'item-delete-test-lib');
+INSERT INTO public.library_items
+  (id, title, library_id, audio_files, cover_path)
+VALUES
+  ('${itemId}', 'Atomic delete target', '${libraryId}',
+   '[{"metadata":{"relPath":"${itemId}/track-01.mp3"}},
+     null]'::jsonb,
+   '${itemId}/cover.jpg'),
+  ('${retryItemId}', 'Pending retry target', '${libraryId}',
+   '[{"metadata":{"relPath":"${retryItemId}/track-01.mp3"}}]'::jsonb,
+   'missing');
+
+DO $test$
+DECLARE
+  v_admin uuid;
+  v_bad_actor uuid := 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+  v_result jsonb;
+  v_audit_id bigint;
+  v_status text;
+  v_mode text;
+  v_actor uuid;
+  v_unresolved integer;
+BEGIN
+  SELECT id INTO v_admin
+  FROM public.profiles
+  WHERE user_type IN ('admin', 'root')
+  LIMIT 1;
+  IF v_admin IS NULL THEN
+    RAISE EXCEPTION 'D0 FAIL: no admin profile available';
+  END IF;
+
+  BEGIN
+    PERFORM public.delete_library_item_atomic('${itemId}', true, v_bad_actor);
+    RAISE EXCEPTION 'D1 FAIL: unknown actor was accepted';
+  EXCEPTION WHEN insufficient_privilege THEN
+    NULL;
+  END;
+  IF NOT EXISTS (SELECT 1 FROM public.library_items WHERE id = '${itemId}') THEN
+    RAISE EXCEPTION 'D1 FAIL: unauthorized delete removed item';
+  END IF;
+
+  v_result := public.delete_library_item_atomic('${itemId}', false, v_admin);
+  IF v_result->>'found' IS DISTINCT FROM 'true'
+     OR v_result->>'retry' IS DISTINCT FROM 'false' THEN
+    RAISE EXCEPTION 'D2 FAIL: database delete response was malformed';
+  END IF;
+  IF EXISTS (SELECT 1 FROM public.library_items WHERE id = '${itemId}') THEN
+    RAISE EXCEPTION 'D2 FAIL: item row remains';
+  END IF;
+
+  SELECT id, delete_mode, storage_cleanup_status, deleted_by_user_id,
+         (storage_manifest->>'unresolvedStorageCount')::integer
+  INTO v_audit_id, v_mode, v_status, v_actor, v_unresolved
+  FROM public.library_item_deletion_audit
+  WHERE item_id = '${itemId}'
+  ORDER BY id DESC LIMIT 1;
+  IF v_audit_id IS NULL OR v_mode IS DISTINCT FROM 'database'
+     OR v_status IS DISTINCT FROM 'not_requested'
+     OR v_actor IS DISTINCT FROM v_admin OR v_unresolved IS DISTINCT FROM 1 THEN
+    RAISE EXCEPTION 'D2 FAIL: deletion audit is incomplete';
+  END IF;
+
+  v_result := public.delete_library_item_atomic('${retryItemId}', true, v_admin);
+  IF v_result->>'found' IS DISTINCT FROM 'true'
+     OR v_result->>'retry' IS DISTINCT FROM 'false'
+     OR v_result->>'storage_cleanup_status' IS DISTINCT FROM 'pending'
+     OR v_result->'manifest'->>'manifestVersion' IS DISTINCT FROM '1' THEN
+    RAISE EXCEPTION 'D3 FAIL: initial hard delete response was malformed';
+  END IF;
+  IF EXISTS (SELECT 1 FROM public.library_items WHERE id = '${retryItemId}') THEN
+    RAISE EXCEPTION 'D3 FAIL: hard delete item remains';
+  END IF;
+
+  v_result := public.delete_library_item_atomic('${retryItemId}', true, v_admin);
+  IF v_result->>'found' IS DISTINCT FROM 'true'
+     OR v_result->>'retry' IS DISTINCT FROM 'true'
+     OR v_result->>'storage_cleanup_status' IS DISTINCT FROM 'pending' THEN
+    RAISE EXCEPTION 'D4 FAIL: pending cleanup was not retryable';
+  END IF;
+  v_audit_id := (v_result->>'audit_id')::bigint;
+  IF v_audit_id IS NULL THEN
+    RAISE EXCEPTION 'D4 FAIL: retry has no audit id';
+  END IF;
+
+  PERFORM public.record_library_item_storage_cleanup(
+    v_audit_id, 'pending', 'fixture retry', 0, 1
+  );
+  PERFORM public.record_library_item_storage_cleanup(
+    v_audit_id, 'complete', '', 1, 0
+  );
+  SELECT storage_files_retained
+  INTO v_unresolved
+  FROM public.library_item_deletion_audit
+  WHERE id = v_audit_id;
+  IF v_unresolved IS DISTINCT FROM 0 THEN
+    RAISE EXCEPTION 'D5 FAIL: completed cleanup retained files';
+  END IF;
+
+  v_result := public.delete_library_item_atomic('${retryItemId}', true, v_admin);
+  IF v_result->>'found' IS DISTINCT FROM 'true'
+     OR v_result->>'retry' IS DISTINCT FROM 'false'
+     OR v_result->>'storage_cleanup_status' IS DISTINCT FROM 'complete'
+     OR (v_result->>'storage_files_retained')::integer <> 0 THEN
+    RAISE EXCEPTION 'D6 FAIL: completed cleanup was not idempotent';
+  END IF;
+
+  BEGIN
+    PERFORM public.record_library_item_storage_cleanup(
+      v_audit_id, 'pending', 'late writer', 0, 1
+    );
+    RAISE EXCEPTION 'D5 FAIL: completed cleanup regressed';
+  EXCEPTION WHEN invalid_parameter_value THEN
+    NULL;
+  END;
+END $test$;
+
+SELECT 'DB-ITEM-DELETE-OK' AS status;
+ROLLBACK;
+`;
+
+    const out = await execSql(sql);
+    if (!out.includes("DB-ITEM-DELETE-OK")) {
+      throw new Error(
+        `item delete assertions did not complete: ${out.slice(0, 500)}`,
       );
     }
   },

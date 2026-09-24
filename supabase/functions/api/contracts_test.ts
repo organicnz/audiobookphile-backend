@@ -78,3 +78,23 @@ Deno.test("health response includes contract results with ok shapes", async () =
   assertEquals(shapes.has("wrong-shape"), false, "no wrong shapes");
   assertEquals(shapes.has("missing"), false, "no missing endpoints");
 });
+
+Deno.test("delete item OpenAPI contract distinguishes complete and pending cleanup", async () => {
+  const spec = JSON.parse(
+    await Deno.readTextFile(new URL("./openapi.json", import.meta.url)),
+  );
+  const responses = spec.paths["/items/:id"].delete.responses;
+  const success = responses["200"].content["application/json"].schema;
+  const pending = responses["202"].content["application/json"].schema;
+  assertEquals(success.required.includes("storageCleanup"), true);
+  assertEquals(pending.required.includes("storageCleanup"), true);
+  assertEquals(
+    success.properties.storageCleanup.enum.includes("complete"),
+    true,
+  );
+  assertEquals(
+    success.properties.storageCleanup.enum.includes("pending"),
+    false,
+  );
+  assertEquals(pending.properties.storageCleanup.enum, ["pending"]);
+});

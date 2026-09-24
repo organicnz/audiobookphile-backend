@@ -845,14 +845,24 @@ export async function executeFinalize(
             if (
               storageRouter && typeof storageRouter.deletePath === "function"
             ) {
-              await Promise.all(
+              const cleanupResults = await Promise.all(
                 filePathsToDelete.map((p: string) =>
-                  storageRouter.deletePath(p).catch(() => false)
+                  storageRouter.deletePath(p, bookId).catch(() => false)
                 ),
               );
-              console.info(
-                `[upload-finalize] Cleaned up ${filePathsToDelete.length} orphaned B2 objects for ${bookId}`,
-              );
+              const cleanedCount = cleanupResults.filter(Boolean).length;
+              if (cleanedCount > 0) {
+                console.info(
+                  `[upload-finalize] Cleaned up ${cleanedCount} orphaned B2 objects for ${bookId}`,
+                );
+              }
+              if (cleanedCount !== filePathsToDelete.length) {
+                console.warn(
+                  `[upload-finalize] ${
+                    filePathsToDelete.length - cleanedCount
+                  } orphaned B2 objects could not be confirmed for ${bookId}`,
+                );
+              }
             }
           }
         } catch (e) {

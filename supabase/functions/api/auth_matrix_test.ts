@@ -90,6 +90,10 @@ globalThis.fetch = async (input: any, init?: RequestInit) => {
     return jsonResponse(Object.values(PROFILES));
   }
 
+  if (path.includes("/rest/v1/rpc/delete_library_item_atomic")) {
+    return jsonResponse({ found: false, retry: false, item_id: ITEM_ID });
+  }
+
   if (path.includes("/rest/v1/")) {
     return jsonResponse([], 200, { "content-range": "0-0/4" });
   }

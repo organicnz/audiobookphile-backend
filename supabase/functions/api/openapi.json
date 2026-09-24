@@ -10731,7 +10731,10 @@
                   "type": "object",
                   "properties": {
                     "success": {
-                      "type": "boolean"
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
                     },
                     "deletedId": {
                       "type": "string"
@@ -10746,7 +10749,6 @@
                       "type": "string",
                       "enum": [
                         "not_requested",
-                        "pending",
                         "complete"
                       ]
                     },
@@ -10759,7 +10761,11 @@
                   },
                   "required": [
                     "success",
-                    "storageCleanup"
+                    "deletedId",
+                    "removedFiles",
+                    "filesRetained",
+                    "storageCleanup",
+                    "warnings"
                   ]
                 }
               }
@@ -10773,7 +10779,10 @@
                   "type": "object",
                   "properties": {
                     "success": {
-                      "type": "boolean"
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
                     },
                     "deletedId": {
                       "type": "string"
@@ -10787,9 +10796,7 @@
                     "storageCleanup": {
                       "type": "string",
                       "enum": [
-                        "not_requested",
-                        "pending",
-                        "complete"
+                        "pending"
                       ]
                     },
                     "warnings": {
@@ -10801,7 +10808,11 @@
                   },
                   "required": [
                     "success",
-                    "storageCleanup"
+                    "deletedId",
+                    "removedFiles",
+                    "filesRetained",
+                    "storageCleanup",
+                    "warnings"
                   ]
                 }
               }
@@ -10817,27 +10828,11 @@
                     "error": {
                       "type": "string"
                     },
-                    "message": {
-                      "type": "string"
-                    },
-                    "stack": {
-                      "type": "string"
-                    },
-                    "details": {
-                      "anyOf": [
-                        {
-                          "type": "string"
-                        },
-                        {
-                          "type": "array",
-                          "items": {
-                            "nullable": true
-                          }
-                        }
-                      ]
-                    },
-                    "hint": {
-                      "type": "string"
+                    "warnings": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
                     }
                   },
                   "required": [
@@ -10855,33 +10850,40 @@
                   "type": "object",
                   "properties": {
                     "error": {
-                      "type": "string"
-                    },
-                    "message": {
-                      "type": "string"
-                    },
-                    "stack": {
-                      "type": "string"
-                    },
-                    "details": {
-                      "anyOf": [
-                        {
+                      "type": "object",
+                      "properties": {
+                        "code": {
                           "type": "string"
                         },
-                        {
+                        "message": {
+                          "type": "string"
+                        },
+                        "field": {
+                          "type": "string"
+                        },
+                        "validationErrors": {
                           "type": "array",
                           "items": {
                             "nullable": true
                           }
                         }
+                      },
+                      "required": [
+                        "code",
+                        "message"
                       ]
                     },
-                    "hint": {
+                    "requestId": {
+                      "type": "string"
+                    },
+                    "timestamp": {
                       "type": "string"
                     }
                   },
                   "required": [
-                    "error"
+                    "error",
+                    "requestId",
+                    "timestamp"
                   ]
                 }
               }
@@ -10915,31 +10917,62 @@
                     "error": {
                       "type": "string"
                     },
-                    "message": {
-                      "type": "string"
-                    },
-                    "stack": {
-                      "type": "string"
-                    },
-                    "details": {
-                      "anyOf": [
-                        {
+                    "warnings": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
                           "type": "string"
                         },
-                        {
+                        "message": {
+                          "type": "string"
+                        },
+                        "field": {
+                          "type": "string"
+                        },
+                        "validationErrors": {
                           "type": "array",
                           "items": {
                             "nullable": true
                           }
                         }
+                      },
+                      "required": [
+                        "code",
+                        "message"
                       ]
                     },
-                    "hint": {
+                    "requestId": {
+                      "type": "string"
+                    },
+                    "timestamp": {
                       "type": "string"
                     }
                   },
                   "required": [
-                    "error"
+                    "error",
+                    "requestId",
+                    "timestamp"
                   ]
                 }
               }
@@ -10955,31 +10988,62 @@
                     "error": {
                       "type": "string"
                     },
-                    "message": {
-                      "type": "string"
-                    },
-                    "stack": {
-                      "type": "string"
-                    },
-                    "details": {
-                      "anyOf": [
-                        {
+                    "warnings": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "Delete timed out",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
                           "type": "string"
                         },
-                        {
+                        "message": {
+                          "type": "string"
+                        },
+                        "field": {
+                          "type": "string"
+                        },
+                        "validationErrors": {
                           "type": "array",
                           "items": {
                             "nullable": true
                           }
                         }
+                      },
+                      "required": [
+                        "code",
+                        "message"
                       ]
                     },
-                    "hint": {
+                    "requestId": {
+                      "type": "string"
+                    },
+                    "timestamp": {
                       "type": "string"
                     }
                   },
                   "required": [
-                    "error"
+                    "error",
+                    "requestId",
+                    "timestamp"
                   ]
                 }
               }
@@ -12680,7 +12744,10 @@
                   "type": "object",
                   "properties": {
                     "success": {
-                      "type": "boolean"
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
                     },
                     "deletedId": {
                       "type": "string"
@@ -12695,7 +12762,6 @@
                       "type": "string",
                       "enum": [
                         "not_requested",
-                        "pending",
                         "complete"
                       ]
                     },
@@ -12708,7 +12774,11 @@
                   },
                   "required": [
                     "success",
-                    "storageCleanup"
+                    "deletedId",
+                    "removedFiles",
+                    "filesRetained",
+                    "storageCleanup",
+                    "warnings"
                   ]
                 }
               }
@@ -12722,7 +12792,10 @@
                   "type": "object",
                   "properties": {
                     "success": {
-                      "type": "boolean"
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
                     },
                     "deletedId": {
                       "type": "string"
@@ -12736,9 +12809,7 @@
                     "storageCleanup": {
                       "type": "string",
                       "enum": [
-                        "not_requested",
-                        "pending",
-                        "complete"
+                        "pending"
                       ]
                     },
                     "warnings": {
@@ -12750,7 +12821,11 @@
                   },
                   "required": [
                     "success",
-                    "storageCleanup"
+                    "deletedId",
+                    "removedFiles",
+                    "filesRetained",
+                    "storageCleanup",
+                    "warnings"
                   ]
                 }
               }
@@ -12766,27 +12841,11 @@
                     "error": {
                       "type": "string"
                     },
-                    "message": {
-                      "type": "string"
-                    },
-                    "stack": {
-                      "type": "string"
-                    },
-                    "details": {
-                      "anyOf": [
-                        {
-                          "type": "string"
-                        },
-                        {
-                          "type": "array",
-                          "items": {
-                            "nullable": true
-                          }
-                        }
-                      ]
-                    },
-                    "hint": {
-                      "type": "string"
+                    "warnings": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
                     }
                   },
                   "required": [
@@ -12804,33 +12863,40 @@
                   "type": "object",
                   "properties": {
                     "error": {
-                      "type": "string"
-                    },
-                    "message": {
-                      "type": "string"
-                    },
-                    "stack": {
-                      "type": "string"
-                    },
-                    "details": {
-                      "anyOf": [
-                        {
+                      "type": "object",
+                      "properties": {
+                        "code": {
                           "type": "string"
                         },
-                        {
+                        "message": {
+                          "type": "string"
+                        },
+                        "field": {
+                          "type": "string"
+                        },
+                        "validationErrors": {
                           "type": "array",
                           "items": {
                             "nullable": true
                           }
                         }
+                      },
+                      "required": [
+                        "code",
+                        "message"
                       ]
                     },
-                    "hint": {
+                    "requestId": {
+                      "type": "string"
+                    },
+                    "timestamp": {
                       "type": "string"
                     }
                   },
                   "required": [
-                    "error"
+                    "error",
+                    "requestId",
+                    "timestamp"
                   ]
                 }
               }
@@ -12864,31 +12930,62 @@
                     "error": {
                       "type": "string"
                     },
-                    "message": {
-                      "type": "string"
-                    },
-                    "stack": {
-                      "type": "string"
-                    },
-                    "details": {
-                      "anyOf": [
-                        {
+                    "warnings": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
                           "type": "string"
                         },
-                        {
+                        "message": {
+                          "type": "string"
+                        },
+                        "field": {
+                          "type": "string"
+                        },
+                        "validationErrors": {
                           "type": "array",
                           "items": {
                             "nullable": true
                           }
                         }
+                      },
+                      "required": [
+                        "code",
+                        "message"
                       ]
                     },
-                    "hint": {
+                    "requestId": {
+                      "type": "string"
+                    },
+                    "timestamp": {
                       "type": "string"
                     }
                   },
                   "required": [
-                    "error"
+                    "error",
+                    "requestId",
+                    "timestamp"
                   ]
                 }
               }
@@ -12904,31 +13001,62 @@
                     "error": {
                       "type": "string"
                     },
-                    "message": {
-                      "type": "string"
-                    },
-                    "stack": {
-                      "type": "string"
-                    },
-                    "details": {
-                      "anyOf": [
-                        {
+                    "warnings": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "Delete timed out",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
                           "type": "string"
                         },
-                        {
+                        "message": {
+                          "type": "string"
+                        },
+                        "field": {
+                          "type": "string"
+                        },
+                        "validationErrors": {
                           "type": "array",
                           "items": {
                             "nullable": true
                           }
                         }
+                      },
+                      "required": [
+                        "code",
+                        "message"
                       ]
                     },
-                    "hint": {
+                    "requestId": {
+                      "type": "string"
+                    },
+                    "timestamp": {
                       "type": "string"
                     }
                   },
                   "required": [
-                    "error"
+                    "error",
+                    "requestId",
+                    "timestamp"
                   ]
                 }
               }

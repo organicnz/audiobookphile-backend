@@ -15,7 +15,11 @@ import {
   parseTrackDuration,
 } from "../../_shared/invariants.ts";
 import { ensureBookAIInsights } from "../aiService.ts";
-import { createOpenApiRouter, z } from "../_shared/openapi.ts";
+import {
+  createOpenApiRouter,
+  ErrorEnvelopeSchema,
+  z,
+} from "../_shared/openapi.ts";
 import { assertStorageQuota } from "../../_shared/storage-quota.ts";
 import {
   FUZZY_MATCH_RATIO,
@@ -23,6 +27,7 @@ import {
   SEARCH_MATCH_THRESHOLD,
 } from "../_shared/constants.ts";
 import { getErrorMessage } from "../_shared/errors.ts";
+import { errorEnvelope } from "../_shared/http.ts";
 import { sanitizeString } from "../_shared/validation.ts";
 import { StorageRouter } from "../../_shared/storage-router.ts";
 
@@ -74,6 +79,26 @@ const ServerErrorSchema = z.object({
   hint: z.string().optional(),
 });
 const ForbiddenSchema = z.object({ error: z.string() });
+const DeleteSuccessSchema = z.object({
+  success: z.literal(true),
+  deletedId: z.string(),
+  removedFiles: z.number(),
+  filesRetained: z.number(),
+  storageCleanup: z.enum(["not_requested", "complete"]),
+  warnings: z.array(z.string()),
+});
+const DeletePendingSchema = z.object({
+  success: z.literal(true),
+  deletedId: z.string(),
+  removedFiles: z.number(),
+  filesRetained: z.number(),
+  storageCleanup: z.literal("pending"),
+  warnings: z.array(z.string()),
+});
+const DeleteHandlerErrorSchema = z.object({
+  error: z.string(),
+  warnings: z.array(z.string()).optional(),
+});
 
 const itemDetailRoute = {
   method: "get" as const,
@@ -609,14 +634,7 @@ const deleteItemRoute = {
         "Item deleted (dependents removed; storage only on hardDelete)",
       content: {
         "application/json": {
-          schema: z.object({
-            success: z.boolean(),
-            deletedId: z.string().optional(),
-            removedFiles: z.number().optional(),
-            filesRetained: z.number().optional(),
-            storageCleanup: z.enum(["not_requested", "pending", "complete"]),
-            warnings: z.array(z.string()).optional(),
-          }),
+          schema: DeleteSuccessSchema,
         },
       },
     },
@@ -625,24 +643,17 @@ const deleteItemRoute = {
         "Item deleted; one or more storage objects are pending cleanup",
       content: {
         "application/json": {
-          schema: z.object({
-            success: z.boolean(),
-            deletedId: z.string().optional(),
-            removedFiles: z.number().optional(),
-            filesRetained: z.number().optional(),
-            storageCleanup: z.enum(["not_requested", "pending", "complete"]),
-            warnings: z.array(z.string()).optional(),
-          }),
+          schema: DeletePendingSchema,
         },
       },
     },
     400: {
       description: "Invalid item id",
-      content: { "application/json": { schema: ServerErrorSchema } },
+      content: { "application/json": { schema: DeleteHandlerErrorSchema } },
     },
     401: {
       description: "Unauthorized",
-      content: { "application/json": { schema: ServerErrorSchema } },
+      content: { "application/json": { schema: ErrorEnvelopeSchema } },
     },
     403: {
       description: "Admin role required",
@@ -650,18 +661,26 @@ const deleteItemRoute = {
     },
     404: {
       description: "Item not found",
-      content: { "application/json": { schema: ServerErrorSchema } },
+      content: { "application/json": { schema: DeleteHandlerErrorSchema } },
+    },
+    429: {
+      description: "Rate limited",
+      content: { "application/json": { schema: ErrorEnvelopeSchema } },
     },
     500: {
       description: "Delete failed",
-      content: { "application/json": { schema: ServerErrorSchema } },
+      content: { "application/json": { schema: DeleteHandlerErrorSchema } },
+    },
+    504: {
+      description: "Delete timed out",
+      content: { "application/json": { schema: ErrorEnvelopeSchema } },
     },
   },
 };
 
 itemsRouter.openapi(deleteItemRoute, async (c) => {
   const user = c.get("user");
-  if (!user) return c.json({ error: "Unauthorized" }, 401);
+  if (!user) return errorEnvelope(c, "UNAUTHORIZED", "Unauthorized", 401);
   const supabaseUrl = c.get("supabaseUrl");
   const serviceRoleKey = c.get("serviceRoleKey");
 
@@ -690,7 +709,7 @@ itemsRouter.openapi(deleteItemRoute, async (c) => {
     });
     if (!outcome.deleted) {
       return c.json(
-        { error: outcome.error ?? "Delete failed", warnings: outcome.warnings },
+        { error: "Delete failed", warnings: outcome.warnings },
         outcome.status as 400 | 404 | 500,
       );
     }
@@ -703,22 +722,33 @@ itemsRouter.openapi(deleteItemRoute, async (c) => {
           ? `, warnings: ${outcome.warnings.join("; ")}`
           : ""),
     );
+    const responseBody = {
+      success: true as const,
+      deletedId: outcome.deletedId ?? itemId,
+      removedFiles: outcome.removedFiles,
+      filesRetained: outcome.filesRetained,
+      warnings: outcome.warnings,
+    };
+    if (outcome.status === 202) {
+      return c.json(
+        { ...responseBody, storageCleanup: "pending" as const },
+        202,
+      );
+    }
     return c.json(
       {
-        success: true,
-        deletedId: outcome.deletedId,
-        removedFiles: outcome.removedFiles,
-        filesRetained: outcome.filesRetained,
-        storageCleanup: outcome.storageCleanup,
-        warnings: outcome.warnings,
+        ...responseBody,
+        storageCleanup: outcome.storageCleanup === "pending"
+          ? "complete" as const
+          : outcome.storageCleanup,
       },
-      outcome.status as 200 | 202,
+      200,
     );
   } catch (err) {
     // Never throw: a thrown handler trips the app error boundary. Controlled
     // JSON keeps the dashboard on its toast path.
     console.error(`[items] Delete crashed for ${itemId}:`, err);
-    return c.json({ error: getErrorMessage(err) || "Delete failed" }, 500);
+    return c.json({ error: "Delete failed" }, 500);
   }
 });
 
@@ -1092,6 +1122,7 @@ itemsRouter.openapi(deleteAudioFileRoute, async (c): Promise<Response> => {
     try {
       await new StorageRouter(adminClient).deletePath(
         fileToDelete.metadata.path,
+        itemId,
       );
     } catch {
       // Best-effort: the DB row removal below is the source of truth.
