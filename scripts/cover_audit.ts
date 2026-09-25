@@ -214,12 +214,14 @@ async function visionRepair(
 }
 
 async function main() {
+  // Include items with NO cover, not just ones with art to verify. Previously
+  // the query filtered out cover_path = "missing", so a book that fell back to
+  // the honest placeholder was never retried — the audit could only ever
+  // second-guess existing art, never fill a gap.
   const { data: items, error } = await db
     .from("library_items")
     .select("id, title, author_names_first_last, cover_path")
-    .not("cover_path", "is", null)
-    .neq("cover_path", "")
-    .neq("cover_path", "missing");
+    .or("cover_path.is.null,cover_path.eq.,cover_path.eq.missing");
   if (error) throw new Error(error.message);
 
   console.log(`auditing ${items?.length ?? 0} covers\n`);
@@ -231,12 +233,48 @@ async function main() {
     repaired: boolean;
   }> = [];
   let mismatches = 0;
+  let gaps = 0;
+  let gapsFilled = 0;
 
   for (const it of items ?? []) {
-    if (!it.cover_path) continue;
+    const hasArt = Boolean(it.cover_path) && it.cover_path !== "missing";
+    if (!hasArt) {
+      // Gap-fill: no art to verify, so go straight to a vision-arbitrated
+      // search. Only verified-correct art is ever written.
+      console.log(
+        `GAP "${it.title}" — no cover, searching for verified art`,
+      );
+      const filled = await visionRepair(
+        db,
+        it.id,
+        String(it.title),
+        String(it.author_names_first_last ?? ""),
+      );
+      gaps += 1;
+      if (filled.ok) {
+        gapsFilled += 1;
+        console.log(`  gap-filled -> ${filled.detail.slice(0, 70)}`);
+        report.push({
+          id: it.id,
+          title: it.title,
+          verdict: "gap-filled",
+          detail: filled.detail,
+          repaired: true,
+        });
+      } else {
+        report.push({
+          id: it.id,
+          title: it.title,
+          verdict: "gap-unfilled",
+          detail: filled.detail,
+          repaired: false,
+        });
+      }
+      continue;
+    }
     // fresh signed URL per item (covers bucket)
     const { data: sig } = await db.storage.from("covers").createSignedUrl(
-      it.cover_path,
+      it.cover_path!,
       600,
     );
     if (!sig?.signedUrl) {
@@ -333,7 +371,7 @@ async function main() {
   console.log(
     `\n=== cover audit: ${report.length} audited, ${mismatches} mismatches, ${
       report.filter((r) => r.verdict === "repaired").length
-    } repaired, ${
+    } repaired, ${gapsFilled}/${gaps} gaps filled, ${
       report.filter((r) =>
         r.verdict === "unrepairable" || r.verdict === "refetch-failed"
       ).length
