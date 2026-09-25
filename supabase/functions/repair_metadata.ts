@@ -51,6 +51,14 @@ const onlyIds = idsIdx >= 0
   )
   : null;
 const coversOnly = args.includes("--covers-only");
+// --force: in --covers-only mode, re-fetch even when a cover object already
+// exists. Without it the tool can only ever repair items whose art is absent,
+// so a cover showing the WRONG book ("The Prince" on an "Art of War" item)
+// could never be corrected — the exact case this workflow exists for. Safety
+// comes from the identity gate in fetchBookMetadata, which refuses art for a
+// different work, and repairCover leaves the existing cover in place when no
+// cover is found.
+const force = args.includes("--force");
 
 function isSelected(id: string): boolean {
   if (onlyId) return id === onlyId;
@@ -257,6 +265,7 @@ async function main() {
     if (coversOnly) {
       const itemCoverPath = String(item.cover_path ?? "");
       if (
+        !force &&
         itemCoverPath && itemCoverPath !== "missing" &&
         !itemCoverPath.startsWith("/")
       ) {
@@ -264,12 +273,14 @@ async function main() {
           .list(item.id);
         if (existingData && existingData.length > 0) {
           console.log(
-            `✓ [${item.id}] "${title}" — cover already present in storage`,
+            `✓ [${item.id}] "${title}" — cover already present in storage (use --force to re-verify)`,
           );
           continue;
         }
       }
-      console.log(`🎨 [${item.id}] "${title}" — cover refetch`);
+      console.log(
+        `🎨 [${item.id}] "${title}" — cover refetch${force ? " (forced)" : ""}`,
+      );
       if (apply) {
         await repairCover(item.id, title, author);
         await new Promise((r) => setTimeout(r, 250));

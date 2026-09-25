@@ -13,6 +13,11 @@ on:
         description: "Comma-separated library_item ids to refetch covers for"
         required: true
         type: string
+      force:
+        description: "Re-fetch even when a cover object already exists (use to fix a cover showing the wrong book)"
+        required: false
+        default: false
+        type: boolean
 
 # Read-only: the repair writes through the Supabase API, not the repository.
 permissions:
@@ -42,4 +47,6 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: |
           cd supabase/functions
-          deno run --allow-all repair_metadata.ts --apply --covers-only --ids "${{ inputs.item_ids }}"
+          FORCE_FLAG=""
+          if [ "${{ inputs.force }}" = "true" ]; then FORCE_FLAG="--force"; fi
+          deno run --allow-all repair_metadata.ts --apply --covers-only $FORCE_FLAG --ids "${{ inputs.item_ids }}"
