@@ -14,6 +14,10 @@ on:
         required: true
         type: string
 
+# Read-only: the repair writes through the Supabase API, not the repository.
+permissions:
+  contents: read
+
 concurrency:
   group: repair-covers
   cancel-in-progress: false

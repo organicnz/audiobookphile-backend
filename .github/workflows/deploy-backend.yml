@@ -12,6 +12,13 @@ on:
       - 'supabase/**'
       - '.github/workflows/deploy-backend.yml'
   workflow_dispatch:
+
+# Least privilege: this workflow reads the repo and drives Supabase/Sentry via
+# their own API tokens. It never writes back to the repository, so the
+# GITHUB_TOKEN is scoped to read-only — this is the production deploy path.
+permissions:
+  contents: read
+
 concurrency:
   group: deploy-backend-${{ github.ref }}
   cancel-in-progress: false
@@ -120,7 +127,7 @@ jobs:
           . .github/scripts/step-tree.sh
           step_tree "Deploy to Supabase Production" repair \
             "checkout:Checkout Repository|cli:Setup Supabase CLI|repair:Repair Migration History|migrations:Push Database Migrations|config:Apply Auth & Email Configuration|email:Ensure Email Provider Enabled|signing:Ensure 2FA Challenge Signing Key Secret|vault:Provision Sentry Vault Secret|secrets:Ensure Edge Function Secrets|deploy:Deploy Unified Edge API Function" \
-            "checkout=${{ steps.checkout.outcome }};cli=${{ steps.cli.outcome }};repair=${{ steps.repair.outcome }}"
+            "checkout=${{ steps.checkout.outcome }};cli=${{ steps.cli.outcome }}"
           # One-time repair: commit 5db4329 deleted applied migration files
           # from the repo, but the remote project still lists those versions
           # in its migration history, so `db push --include-all` fails with
@@ -436,7 +443,7 @@ jobs:
           . .github/scripts/step-tree.sh
           step_tree "Post-Deploy Verification (Smoke & Schemathesis)" schemathesis \
             "checkout:Checkout Repository|deno:Setup Deno|hurl:Setup Hurl|python:Setup Python|schemathesis:Verify Schemathesis Install|hurl_gate:Hurl Gate (/health)|schema:Schemathesis (GET only)|smoke:Deno Smoke Test" \
-            "checkout=${{ steps.checkout.outcome }};deno=${{ steps.deno.outcome }};hurl=${{ steps.hurl.outcome }};python=${{ steps.python.outcome }};schemathesis=${{ steps.schemathesis.outcome }}"
+            "checkout=${{ steps.checkout.outcome }};deno=${{ steps.deno.outcome }};hurl=${{ steps.hurl.outcome }};python=${{ steps.python.outcome }}"
           st --version
 
       - name: Hurl Gate (/health)
