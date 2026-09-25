@@ -27,6 +27,7 @@ jobs:
   verify:
     name: Verify Deno Edge Functions
     runs-on: [self-hosted, macOS]
+    timeout-minutes: 30
 
     steps:
       - name: Checkout Repository
@@ -43,15 +44,38 @@ jobs:
 
       - name: Ensure Docker (self-hosted runner)
         run: |
-          if ! docker info >/dev/null 2>&1; then
-            echo "Docker daemon not running - starting Docker Desktop..."
+          # A wedged Docker daemon makes `docker info` block indefinitely, so the
+          # probe itself must be time-bounded — otherwise this step (and the whole
+          # production deploy behind it) hangs forever with no diagnostic.
+          docker_ready() {
+            ( docker info >/dev/null 2>&1 ) &
+            local probe=$!
+            local waited=0
+            while kill -0 "$probe" 2>/dev/null; do
+              if [ "$waited" -ge 10 ]; then
+                kill -9 "$probe" 2>/dev/null || true
+                return 1
+              fi
+              sleep 1
+              waited=$((waited + 1))
+            done
+            wait "$probe"
+          }
+
+          if ! docker_ready; then
+            echo "Docker daemon not responding - starting Docker Desktop..."
             open -a Docker || true
             for i in $(seq 1 40); do
-              docker info >/dev/null 2>&1 && break
+              docker_ready && break
               sleep 3
             done
           fi
-          docker info >/dev/null
+
+          if ! docker_ready; then
+            echo "::error::Docker daemon did not become ready in time on this self-hosted runner. Restart Docker Desktop (or the runner host) and re-run."
+            exit 1
+          fi
+          echo "Docker daemon ready."
 
       - name: TruffleHog Secret Scanner
         id: trufflehog
@@ -98,6 +122,7 @@ jobs:
     needs: verify
     if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
     runs-on: [self-hosted, macOS]
+    timeout-minutes: 30
     concurrency:
       group: deploy-backend-prod-${{ github.ref }}
       cancel-in-progress: false
@@ -369,6 +394,7 @@ jobs:
     name: Sentry Release (Backend)
     needs: deploy
     runs-on: [self-hosted, macOS]
+    timeout-minutes: 15
     steps:
       - name: Checkout Repository
         id: checkout
@@ -411,6 +437,7 @@ jobs:
     name: Post-Deploy Verification (Smoke & Schemathesis)
     needs: deploy
     runs-on: [self-hosted, macOS]
+    timeout-minutes: 30
     steps:
       - name: Checkout Repository
         id: checkout
