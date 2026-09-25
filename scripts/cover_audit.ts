@@ -92,6 +92,9 @@ async function verify(
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+/** encodeURIComponent, exposed for template literals inside collectCandidates. */
+const urllibEncode = (v: string) => encodeURIComponent(v);
+
 /**
  * Collect MULTIPLE candidate cover URLs across providers. Provider metadata
  * frequently attaches wrong art to right titles, so metadata alone cannot be
@@ -129,8 +132,21 @@ async function collectCandidates(
   } catch { /* ignore */ }
   try {
     const r = await fetch(
+      `https://openlibrary.org/search.json?title=${
+        urllibEncode(title)
+      }&limit=5`,
+    );
+    const j = await r.json();
+    for (const d of (j.docs ?? []).slice(0, 4)) {
+      if (d.cover_i) {
+        urls.push(`https://covers.openlibrary.org/b/id/${d.cover_i}-L.jpg`);
+      }
+    }
+  } catch { /* ignore */ }
+  try {
+    const r = await fetch(
       `https://www.googleapis.com/books/v1/volumes?q=${
-        encodeURIComponent(`intitle:${title} ${author}`)
+        encodeURIComponent(`intitle:${title}`)
       }&maxResults=5`,
     );
     const j = await r.json();
@@ -142,7 +158,22 @@ async function collectCandidates(
       }
     }
   } catch { /* ignore */ }
-  return [...new Set(urls)].slice(0, 8);
+  // iTunes last: for many titles it returns unrelated popular audiobooks
+  // ("Afrikawethu" for "Art of War Nicolo Machiavelli"), so its candidates are
+  // mostly noise the vision model has to burn calls rejecting.
+  try {
+    const r = await fetch(
+      `https://itunes.apple.com/search?term=${
+        encodeURIComponent(title)
+      }&media=audiobook&limit=5`,
+    );
+    const j = await r.json();
+    for (const res of (j.results ?? []).slice(0, 2)) {
+      const art = String(res.artworkUrl100 ?? "");
+      if (art) urls.push(art.replace("100x100", "600x600"));
+    }
+  } catch { /* ignore */ }
+  return [...new Set(urls)].slice(0, 12);
 }
 
 /** Vision-arbitrated repair: only upload art the model confirms matches. */
