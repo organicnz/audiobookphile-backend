@@ -36,6 +36,13 @@ export interface BookMetadata {
 export interface FetchResult {
   cover: FetchedCover | null;
   metadata: BookMetadata | null;
+  /**
+   * True when every provider attempt for every strategy failed with an
+   * exception (network reset, provider 5xx, DNS, TLS) and none returned a
+   * usable answer. This is a *transient* condition, not evidence that the work
+   * has no cover: callers must not persist a terminal "no cover" marker on it.
+   */
+  allProvidersFailed?: boolean;
 }
 
 /**
@@ -130,6 +137,11 @@ export async function fetchBookMetadata(
     fetchFromGoogleBooks,
   ];
 
+  // Tracks whether the "no cover" outcome is a real answer or just a run of
+  // transient provider errors. See allProvidersFailed on FetchResult.
+  let providerFailed = false;
+  let providerAnswered = false;
+
   for (const strategy of strategies) {
     if (!strategy.title) continue;
 
@@ -152,7 +164,12 @@ export async function fetchBookMetadata(
           }
           return result;
         }
+        // The provider answered and had nothing for this work. That is a
+        // genuine answer, so a later provider/strategy may still find one, but
+        // it is not a failure.
+        providerAnswered = true;
       } catch (err) {
+        providerFailed = true;
         console.warn(
           `[coverFetch] Provider failed for "${strategy.title}":`,
           err,
@@ -161,7 +178,14 @@ export async function fetchBookMetadata(
     }
   }
 
-  return { cover: null, metadata: null };
+  // Nothing found. Only report a transient failure when no provider ever gave
+  // us a usable answer — otherwise the caller would persist a terminal
+  // "this work has no cover" marker for what was really a network blip.
+  return {
+    cover: null,
+    metadata: null,
+    allProvidersFailed: providerFailed && !providerAnswered,
+  };
 }
 
 async function fetchFromITunes(
@@ -178,7 +202,9 @@ async function fetchFromITunes(
         signal: AbortSignal.timeout(8000),
       },
     );
-    if (!searchRes.ok) return null;
+    if (!searchRes.ok) {
+      throw new Error(`iTunes responded ${searchRes.status}`);
+    }
 
     const data = await searchRes.json();
     if (!data?.results?.length) {
@@ -223,8 +249,11 @@ async function fetchFromITunes(
     }
 
     return { cover, metadata };
-  } catch {
-    return null;
+  } catch (err) {
+    // Propagate: fetchBookMetadata already isolates each provider, and a
+    // swallowed error here is indistinguishable from "this work has no cover".
+    // That ambiguity is what let a transient blip persist a terminal "missing".
+    throw err;
   }
 }
 
@@ -240,7 +269,9 @@ async function fetchFromOpenLibrary(
       `https://openlibrary.org/search.json?${query.toString()}`,
       { signal: AbortSignal.timeout(8000) },
     );
-    if (!searchRes.ok) return null;
+    if (!searchRes.ok) {
+      throw new Error(`OpenLibrary responded ${searchRes.status}`);
+    }
 
     const data = await searchRes.json();
     const docs = data?.docs as any[];
@@ -277,8 +308,8 @@ async function fetchFromOpenLibrary(
     }
 
     return { cover, metadata };
-  } catch {
-    return null;
+  } catch (err) {
+    throw err;
   }
 }
 
@@ -296,7 +327,9 @@ async function fetchFromGoogleBooks(
         signal: AbortSignal.timeout(8000),
       },
     );
-    if (!searchRes.ok) return null;
+    if (!searchRes.ok) {
+      throw new Error(`Google Books responded ${searchRes.status}`);
+    }
 
     const data = await searchRes.json();
     const items = data?.items as any[];
@@ -344,7 +377,7 @@ async function fetchFromGoogleBooks(
     }
 
     return { cover, metadata };
-  } catch {
-    return null;
+  } catch (err) {
+    throw err;
   }
 }

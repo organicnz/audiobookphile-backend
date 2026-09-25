@@ -180,6 +180,13 @@ const itemCoverRoute = {
         "application/json": { schema: z.object({ error: z.string() }) },
       },
     },
+    503: {
+      description:
+        "Metadata providers unavailable (transient). Nothing is persisted; retry.",
+      content: {
+        "application/json": { schema: z.object({ error: z.string() }) },
+      },
+    },
   },
 };
 
@@ -827,6 +834,17 @@ itemsRouter.openapi(itemCoverRoute, async (c): Promise<Response> => {
             .from("library_items")
             .update({ cover_path: coverPath })
             .eq("id", itemId);
+        } else if (fetchRes?.allProvidersFailed) {
+          // Every provider attempt errored (network/5xx/DNS). That is not
+          // evidence the work has no cover, so the terminal "missing" sentinel
+          // must NOT be written — it is only retried with ?force=1, so doing so
+          // would strip a perfectly fetchable cover permanently. Leave the row
+          // alone and let the client retry.
+          coverPath = null;
+          return c.json(
+            { error: "Cover providers unavailable; retry later" },
+            503,
+          );
         } else {
           // Metadata fetch succeeded but no cover image — persist "missing" to
           // avoid re-fetching on every subsequent request.
@@ -846,13 +864,17 @@ itemsRouter.openapi(itemCoverRoute, async (c): Promise<Response> => {
             429,
           );
         }
-        // Any other error (network, upload failure, etc.) — persist "missing"
-        // so we don't hammer the metadata provider on every page load.
-        coverPath = "missing";
-        await adminClient
-          .from("library_items")
-          .update({ cover_path: "missing" })
-          .eq("id", itemId);
+        // Transient failures (network reset, provider 5xx, storage upload
+        // error) must NOT be persisted as "missing". That sentinel is treated
+        // everywhere as a terminal "this work has no cover" verdict and is only
+        // retried with ?force=1, so a single blip permanently strips a cover
+        // that is in fact fetchable. Leave cover_path untouched and let the
+        // client retry — same contract as the rate-limit branch above.
+        coverPath = null;
+        return c.json(
+          { error: "Cover fetch failed; retry later" },
+          503,
+        );
       }
     } else {
       // No title — can't attempt a fetch; mark missing immediately.
