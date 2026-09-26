@@ -412,6 +412,19 @@ export function mapBookForMobile(
     isInvalid: item.is_invalid ?? false,
     mediaType: item.media_type || "book",
     media: {
+      // The discriminant belongs on the media object too, not only on the
+      // parent item. The client contract declares `BookMedia.mediaType` as
+      // required and narrows on it (`isBookMedia(media) => media.mediaType ===
+      // 'book'`), but this mapper only set it on the item -- so on every shelf
+      // payload `media.mediaType` was undefined, the guard returned false, and
+      // books were misclassified as podcasts. That silently disabled every
+      // media-type-dependent affordance: the Play button (it fell through to
+      // the podcast branch, which only counts `episodes`), and the Read
+      // button, which is also gated on isBookMedia.
+      //
+      // Emitting it here makes the response match the contract the client
+      // already codes against. It costs one short string per item.
+      mediaType: item.media_type || "book",
       id: item.id,
       libraryFiles: audioFiles.map((af) => ({
         id: String(af.index),

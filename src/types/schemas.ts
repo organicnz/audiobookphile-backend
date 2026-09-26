@@ -130,6 +130,14 @@ export const BookMetadataSchema = z.object({
 });
 
 export const BookMediaSchema = z.object({
+  // The discriminant the client narrows on. `isBookMedia(media)` in the web
+  // is `media.mediaType === 'book'`, so this field is load-bearing: without it
+  // present on the media object every book is misclassified as a podcast and
+  // every media-type-dependent affordance (Play, Read) silently disappears.
+  // It was declared on MobileBookSchema (the parent) but missing here, and
+  // the mapper only ever set it on the parent -- so it never reached the client
+  // on any list payload.
+  mediaType: z.string().optional(),
   id: z.string().nullish(),
   libraryFiles: z.array(LibraryFileSchema).nullish(),
   chapters: z.array(ChapterSchema).nullish(),
@@ -139,7 +147,10 @@ export const BookMediaSchema = z.object({
   coverPath: z.string().nullish(),
   tags: z.array(z.string()).nullish(),
   audioFiles: z.array(AudioFileSchema).nullish(),
-  tracks: z.array(AudioTrackSchema).nullish(),
+  // `tracks` was removed: it was a phantom field. Nothing has ever emitted it,
+  // but the web read it in three places, each of which therefore always saw
+  // `undefined` and always evaluated false. `audioFiles` is the real per-track
+  // array; `numTracks` is the count.
   numTracks: z.number().optional(),
   ebookFile: EbookFileSchema.nullish(),
   ebookFormat: z.string().nullish(),
