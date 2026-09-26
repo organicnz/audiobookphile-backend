@@ -42,45 +42,8 @@ jobs:
         with:
           deno-version: v2.x
 
-      - name: Ensure Docker (self-hosted runner)
-        run: |
-          # A wedged Docker daemon makes `docker info` (and `open -a Docker`)
-          # block indefinitely, so every wait here must be time-bounded —
-          # otherwise this step, and the production deploy behind it, hangs
-          # forever with no diagnostic. Total budget: ~5s probe + 20s launch
-          # + 20 x (5s probe + 3s sleep) = ~4m worst case.
-          bounded() {
-            # bounded <seconds> <command...>
-            local limit=$1
-            shift
-            ( "$@" >/dev/null 2>&1 ) 2>/dev/null &
-            local child=$!
-            local waited=0
-            while kill -0 "$child" 2>/dev/null; do
-              if [ "$waited" -ge "$limit" ]; then
-                kill -9 "$child" 2>/dev/null || true
-                return 1
-              fi
-              sleep 1
-              waited=$((waited + 1))
-            done
-            wait "$child"
-          }
-
-          if ! bounded 5 docker info; then
-            echo "Docker daemon not responding - attempting to launch Docker Desktop..."
-            bounded 20 open -a Docker || echo "Could not launch Docker Desktop (continuing to probe)."
-            for _ in $(seq 1 20); do
-              bounded 5 docker info && break
-              sleep 3
-            done
-          fi
-
-          if ! bounded 5 docker info; then
-            echo "::error::Docker daemon did not become ready on this self-hosted runner within the time budget. The host's Docker daemon is wedged or Docker Desktop is not installed. Restart Docker Desktop on the runner host, then re-run this workflow."
-            exit 1
-          fi
-          echo "Docker daemon ready."
+      - name: Ensure container engine (self-hosted runner)
+        run: ./scripts/ensure-container-runtime.sh
 
       - name: TruffleHog Secret Scanner
         id: trufflehog
