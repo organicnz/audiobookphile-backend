@@ -217,6 +217,34 @@ export function getFolderSummaries(
 }
 
 /**
+ * Narrows storage folders to those that could plausibly hold `trackCount`
+ * tracks, using only local arithmetic.
+ *
+ * This is the gate that keeps reconciliation affordable. Every audiobook's
+ * tracks live in one folder, so a 343-track book cannot be sitting in a
+ * 9-file folder. Consulting the model without this check meant one LLM call per
+ * unmatched book -- the nightly reconcile made ~73 sequential model calls in a
+ * single edge invocation and died with WORKER_RESOURCE_LIMIT (HTTP 546) every
+ * night, so the storage index never actually got reconciled.
+ *
+ * The window is deliberately generous: it only has to exclude the obviously
+ * impossible, because a false negative here means a real book is never
+ * repaired. Book scans routinely miss or gain a file or two (a stray
+ * `cover.jpg`, an `.m4b` that didn't convert), so ±25% plus a small absolute
+ * cushion is the right trade.
+ */
+export function filterPlausibleFolders(
+  folders: StorageFolderSummary[],
+  trackCount: number,
+): StorageFolderSummary[] {
+  if (trackCount <= 0) return [];
+  const tolerance = Math.max(3, Math.ceil(trackCount * 0.25));
+  const min = Math.max(1, trackCount - tolerance);
+  const max = trackCount + tolerance;
+  return folders.filter((f) => f.fileCount >= min && f.fileCount <= max);
+}
+
+/**
  * AI Semantic Matcher: Uses Z.AI (GLM-4) to match an audiobook to an unindexed B2 storage folder.
  * Enforces strict titlesLikelySameWork validation to avoid false merges.
  */

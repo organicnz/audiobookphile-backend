@@ -3,6 +3,7 @@ import { requireAdminRole } from "../_shared/auth.ts";
 import { createOpenApiRouter, z } from "../_shared/openapi.ts";
 import { getStorageQuotaSnapshot } from "../../_shared/storage-quota.ts";
 import {
+  filterPlausibleFolders,
   findBestDeterministicMatch,
   getFolderSummaries,
   matchStorageFolderWithAI,
@@ -15,6 +16,15 @@ import {
 } from "../../_shared/invariants.ts";
 
 export const adminRouter = createOpenApiRouter();
+
+/**
+ * Model calls allowed per reconcile-storage invocation, and the hard ceiling a
+ * caller may request. See the budget block in the handler for why this exists:
+ * unbounded AI escalation inside a loop over the whole library reliably
+ * exceeded the edge function's resource limit.
+ */
+const DEFAULT_AI_BUDGET = 8;
+const MAX_AI_BUDGET = 25;
 
 const ForbiddenSchema = z.object({ error: z.string() });
 const ServerErrorSchema = z.object({ error: z.string() });
@@ -159,6 +169,12 @@ const reconcileStorageRoute = {
             dryRun: z.boolean().optional(),
             cleanTestData: z.boolean().optional(),
             libraryId: z.string().optional(),
+            /**
+             * Max model calls for the AI matching stage. Capped server-side
+             * (see MAX_AI_BUDGET) so a caller cannot request an unbounded run
+             * and trip the edge function's resource limit.
+             */
+            aiBudget: z.number().int().min(0).max(MAX_AI_BUDGET).optional(),
           }),
         },
       },
@@ -271,6 +287,28 @@ adminRouter.openapi(reconcileStorageRoute, async (c) => {
 
     const claimedPrefixes = new Set<string>();
 
+    // ── Model-call budget ────────────────────────────────────────────────────
+    // One edge invocation has a hard wall-clock/CPU ceiling. The AI stage is the
+    // only unbounded cost in this loop, so it gets an explicit allowance. The
+    // default is deliberately small: the deterministic stages plus the
+    // plausibility gate recover everything recoverable cheaply, and anything
+    // left is reported in `aiSkipped` so a follow-up run can continue rather
+    // than the whole job dying.
+    const aiBudget = Math.max(
+      0,
+      Math.min(
+        typeof body.aiBudget === "number" ? body.aiBudget : DEFAULT_AI_BUDGET,
+        MAX_AI_BUDGET,
+      ),
+    );
+    let aiCallsUsed = 0;
+    const aiSkipped: Array<{ id: string; title: string }> = [];
+    const aiBudgetExhausted = () => aiCallsUsed >= aiBudget;
+    const spendAiBudget = async <T>(fn: () => Promise<T>): Promise<T> => {
+      aiCallsUsed++;
+      return await fn();
+    };
+
     for (const book of books) {
       const rawAudioFiles = Array.isArray(book.audio_files)
         ? book.audio_files
@@ -365,24 +403,61 @@ adminRouter.openapi(reconcileStorageRoute, async (c) => {
         }
       }
 
-      // 4. If deterministic failed, invoke AI semantic matcher
+      // 4. If deterministic failed, invoke AI semantic matcher.
+      //
+      // Budgeted on three levels, because the nightly reconcile runs every
+      // unmatched book through this path in a single edge invocation:
+      //   1. a hard cap on total model calls per run, so the function cannot
+      //      outrun its worker budget no matter how large the library is;
+      //   2. a local arithmetic gate (file count within tolerance of the
+      //      book's track count) that eliminates folders a match is
+      //      impossible for -- no network cost at all;
+      //   3. a per-book try/catch, so one model timeout degrades to a skip
+      //      instead of aborting the whole reconciliation.
+      //
+      // Without (1) and (2) this endpoint made ~73 sequential LLM calls per
+      // run and returned HTTP 546 WORKER_RESOURCE_LIMIT, so the nightly
+      // storage index was never actually reconciled.
       if (!matchedEntry && zaiApiKey) {
-        const unclaimedFolders = availableFolders.filter(
-          (f) => !claimedPrefixes.has(`${f.tier}:::${f.prefix}`),
-        );
-        const aiFolder = await matchStorageFolderWithAI(
-          book.title || "",
-          book.author_names_first_last || "",
-          candidateFilenames,
-          unclaimedFolders,
-          zaiApiKey,
-        );
-        if (aiFolder) {
-          const inFolder = index.filter((e) =>
-            e.tier === aiFolder.tier && e.prefix === aiFolder.prefix
+        if (aiBudgetExhausted()) {
+          aiSkipped.push({ id: book.id, title: book.title || "Untitled" });
+        } else {
+          // Local plausibility gate first: a book with 343 tracks cannot be in
+          // a 9-file folder, so don't spend a model call discovering that.
+          const plausiblySized = filterPlausibleFolders(
+            availableFolders,
+            rawAudioFiles.length,
           );
-          matchedEntry = inFolder[0] || null;
-          matchedMethod = "ai_semantic";
+          const unclaimedPlausible = plausiblySized.filter(
+            (f) => !claimedPrefixes.has(`${f.tier}:::${f.prefix}`),
+          );
+          if (unclaimedPlausible.length > 0) {
+            try {
+              const aiFolder = await spendAiBudget(() =>
+                matchStorageFolderWithAI(
+                  book.title || "",
+                  book.author_names_first_last || "",
+                  candidateFilenames,
+                  unclaimedPlausible,
+                  zaiApiKey,
+                )
+              );
+              if (aiFolder) {
+                const inFolder = index.filter((e) =>
+                  e.tier === aiFolder.tier && e.prefix === aiFolder.prefix
+                );
+                matchedEntry = inFolder[0] || null;
+                matchedMethod = "ai_semantic";
+              }
+            } catch (aiErr) {
+              // One unreachable/timing-out model must not lose the other 99
+              // books' reconciliation work.
+              console.warn(
+                `[admin-reconcile-storage] AI match failed for "${book.title}":`,
+                aiErr,
+              );
+            }
+          }
         }
       }
 
@@ -536,6 +611,14 @@ adminRouter.openapi(reconcileStorageRoute, async (c) => {
       durationHealed,
       reconciled,
       missing,
+      // Surfaced so the operator can see that a green run is a *complete* run.
+      // Without this, exhausting the model budget looked identical to having
+      // nothing left to match, which is how the previous nightly failure went
+      // unnoticed as "reconciled fine".
+      aiBudget,
+      aiCallsUsed,
+      aiSkippedCount: aiSkipped.length,
+      aiSkipped: aiSkipped.slice(0, 25),
     }, 200);
   } catch (err: any) {
     console.error("[admin-reconcile-storage] Error:", err);
