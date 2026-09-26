@@ -15,10 +15,193 @@
 // being too strict would silently stop repairing real books.
 import { assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import {
+  buildStorageLookup,
   filterPlausibleFolders,
+  findBestDeterministicMatch,
+  getFolderEntries,
   getFolderSummaries,
+  isGenericTrackFilename,
   type StorageIndexEntry,
 } from "../_shared/intelligentStorageResolver.ts";
+
+/**
+ * The pre-index implementation of findBestDeterministicMatch, kept verbatim as
+ * an oracle. The indexed version replaced three linear scans with hash lookups
+ * to bring reconciliation back inside the edge function's CPU budget; this
+ * pins that the replacement is behaviour-preserving, because a silently
+ * different match would rebind a book to the wrong storage folder -- the worst
+ * failure this code can have.
+ */
+function legacyMatch(
+  filename: string,
+  index: StorageIndexEntry[],
+): StorageIndexEntry | null {
+  if (!filename) return null;
+  const clean = filename.split("/").pop() || "";
+  if (!clean) return null;
+  if (isGenericTrackFilename(clean)) return null;
+  let decoded = clean;
+  try {
+    decoded = decodeURIComponent(clean);
+  } catch { /* ignore */ }
+  const lowerClean = clean.toLowerCase();
+  const lowerDecoded = decoded.toLowerCase();
+  const exact = index.find(
+    (e) => e.filename === clean || e.filename === decoded,
+  );
+  if (exact) return exact;
+  const caseMatch = index.find((e) => {
+    const fn = e.filename.toLowerCase();
+    return fn === lowerClean || fn === lowerDecoded;
+  });
+  if (caseMatch) return caseMatch;
+  const normClean = lowerClean.replace(/[^a-z0-9]/g, "");
+  if (normClean.length >= 6) {
+    const normMatch = index.find((e) => {
+      const fnNorm = e.filename.toLowerCase().replace(/[^a-z0-9]/g, "");
+      return fnNorm === normClean;
+    });
+    if (normMatch) return normMatch;
+  }
+  return null;
+}
+
+/** Index with a deliberate mix of exact/case/punctuation collisions + noise. */
+const mixedIndex: StorageIndexEntry[] = [
+  {
+    tier: "B2",
+    prefix: "alpha",
+    key: "alpha/Chapter 01.mp3",
+    filename: "Chapter 01.mp3",
+    size: 1,
+  },
+  {
+    tier: "B2",
+    prefix: "alpha",
+    key: "alpha/Some Chapter Name.mp3",
+    filename: "Some Chapter Name.mp3",
+    size: 1,
+  },
+  {
+    tier: "B2",
+    prefix: "beta",
+    key: "beta/Disc%201%20-%20Track.mp3",
+    filename: "Disc%201%20-%20Track.mp3",
+    size: 1,
+  },
+  {
+    tier: "B2",
+    prefix: "beta",
+    key: "beta/Disc 1 - Track.mp3",
+    filename: "Disc 1 - Track.mp3",
+    size: 1,
+  },
+  {
+    tier: "B2_SECONDARY",
+    prefix: "gamma",
+    key: "gamma/The Feynman Lectures Vol II.mp3",
+    filename: "The Feynman Lectures Vol II.mp3",
+    size: 1,
+  },
+  {
+    tier: "B2_SECONDARY",
+    prefix: "gamma",
+    key: "gamma/short.mp3",
+    filename: "short.mp3",
+    size: 1,
+  },
+  {
+    tier: "B2",
+    prefix: "delta",
+    key: "delta/1.mp3",
+    filename: "1.mp3",
+    size: 1,
+  },
+  {
+    tier: "B2",
+    prefix: "delta",
+    key: "delta/2.mp3",
+    filename: "2.mp3",
+    size: 1,
+  },
+];
+
+const equivalenceProbes = [
+  "Chapter 01.mp3",
+  "chapter 01.mp3",
+  "CHAPTER 01.MP3",
+  "Some Chapter Name.mp3",
+  "Some-Chapter-Name.mp3",
+  "some_chapter_name.mp3",
+  "Disc 1 - Track.mp3",
+  "Disc%201%20-%20Track.mp3",
+  "DISC 1 TRACK.mp3",
+  "The Feynman Lectures Vol II.mp3",
+  "thefeynmanlecturesvolii.mp3",
+  "short.mp3",
+  "short",
+  "1.mp3",
+  "2.mp3",
+  "Chapter 7.mp3",
+  "does-not-exist-at-all.mp3",
+  "",
+  "/nested/path/Chapter 01.mp3",
+  "Some%20Chapter%20Name.mp3",
+];
+
+Deno.test("indexed lookup is behaviour-identical to the original linear scans", () => {
+  const lookup = buildStorageLookup(mixedIndex);
+  for (const probe of equivalenceProbes) {
+    const expected = legacyMatch(probe, mixedIndex)?.key ?? null;
+    const actual = findBestDeterministicMatch(probe, lookup)?.key ?? null;
+    assertEquals(
+      actual,
+      expected,
+      `probe "${probe}" diverged from the legacy implementation`,
+    );
+  }
+});
+
+Deno.test("indexed lookup preserves the real-world library's match decisions", () => {
+  // Same probes, run through the array overload so the lazy-build path is
+  // covered too: callers that pass a raw index must get identical results.
+  const lookup = buildStorageLookup(mixedIndex);
+  for (const probe of equivalenceProbes) {
+    assertEquals(
+      findBestDeterministicMatch(probe, mixedIndex)?.key ?? null,
+      findBestDeterministicMatch(probe, lookup)?.key ?? null,
+      `array overload diverged for "${probe}"`,
+    );
+  }
+});
+
+Deno.test("generic track names never match, indexed or not", () => {
+  const lookup = buildStorageLookup(mixedIndex);
+  // 1.mp3 and 2.mp3 exist in the index but must be refused: a bare number
+  // cannot identify a book, and matching on it is what mis-binds folders.
+  assertEquals(findBestDeterministicMatch("1.mp3", lookup), null);
+  assertEquals(findBestDeterministicMatch("2.mp3", lookup), null);
+  assertEquals(findBestDeterministicMatch("Chapter 7.mp3", lookup), null);
+});
+
+Deno.test("folder and key lookups are O(1) and exact", () => {
+  const lookup = buildStorageLookup(mixedIndex);
+  assertEquals(
+    getFolderEntries(lookup, "B2", "alpha").map((e) => e.filename),
+    ["Chapter 01.mp3", "Some Chapter Name.mp3"],
+  );
+  // Tiers are namespaced: the same prefix name on another tier must not leak.
+  assertEquals(
+    getFolderEntries(lookup, "B2_SECONDARY", "gamma").map((e) => e.filename),
+    ["The Feynman Lectures Vol II.mp3", "short.mp3"],
+  );
+  assertEquals(getFolderEntries(lookup, "B2", "nope").length, 0);
+  assertEquals(
+    lookup.byKey.get("B2:::alpha/Some Chapter Name.mp3")?.filename,
+    "Some Chapter Name.mp3",
+  );
+  assertEquals(lookup.byKey.get("B2:::missing.mp3"), undefined);
+});
 
 function folder(
   tier: StorageIndexEntry["tier"],

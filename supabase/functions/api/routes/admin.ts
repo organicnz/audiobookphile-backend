@@ -3,8 +3,10 @@ import { requireAdminRole } from "../_shared/auth.ts";
 import { createOpenApiRouter, z } from "../_shared/openapi.ts";
 import { getStorageQuotaSnapshot } from "../../_shared/storage-quota.ts";
 import {
+  buildStorageLookup,
   filterPlausibleFolders,
   findBestDeterministicMatch,
+  getFolderEntries,
   getFolderSummaries,
   matchStorageFolderWithAI,
   refreshStorageIndex,
@@ -220,6 +222,11 @@ adminRouter.openapi(reconcileStorageRoute, async (c) => {
     // 1. Index all B2 storage tiers
     const index = await refreshStorageIndex(true);
     const availableFolders = getFolderSummaries(index);
+    // Built ONCE and threaded through every match below. Previously each
+    // filename match scanned the whole index linearly, and each folder lookup
+    // filtered it again: ~3,200 filenames x 3 scans x 1,354 entries is ~13M
+    // iterations, which is what pushed this endpoint past its CPU limit.
+    const lookup = buildStorageLookup(index);
 
     // 2. Fetch books
     let query = adminSupabase
@@ -335,8 +342,8 @@ adminRouter.openapi(reconcileStorageRoute, async (c) => {
         ? router.parsePath(existingPath)
         : null;
       if (parsedExisting && parsedExisting.tier !== "SUPABASE") {
-        const foundEntry = index.find(
-          (e) => e.tier === parsedExisting.tier && e.key === parsedExisting.key,
+        const foundEntry = lookup.byKey.get(
+          `${parsedExisting.tier}:::${parsedExisting.key}`,
         );
         if (foundEntry) {
           if (foundEntry.prefix) {
@@ -361,7 +368,7 @@ adminRouter.openapi(reconcileStorageRoute, async (c) => {
 
       let matchedEntry = null;
       for (const fn of candidateFilenames) {
-        matchedEntry = findBestDeterministicMatch(fn, index);
+        matchedEntry = findBestDeterministicMatch(fn, lookup);
         if (matchedEntry) break;
       }
 
@@ -387,9 +394,7 @@ adminRouter.openapi(reconcileStorageRoute, async (c) => {
           !claimedPrefixes.has(`${f.tier}:::${f.prefix}`)
         );
         for (const cf of candidateFolders) {
-          const filesInFolder = index.filter((e) =>
-            e.tier === cf.tier && e.prefix === cf.prefix
-          );
+          const filesInFolder = getFolderEntries(lookup, cf.tier, cf.prefix);
           const matchingCount = filesInFolder.filter((f) =>
             trackFilenames.has(normPunct(f.filename))
           ).length;
@@ -443,8 +448,10 @@ adminRouter.openapi(reconcileStorageRoute, async (c) => {
                 )
               );
               if (aiFolder) {
-                const inFolder = index.filter((e) =>
-                  e.tier === aiFolder.tier && e.prefix === aiFolder.prefix
+                const inFolder = getFolderEntries(
+                  lookup,
+                  aiFolder.tier,
+                  aiFolder.prefix,
                 );
                 matchedEntry = inFolder[0] || null;
                 matchedMethod = "ai_semantic";
@@ -477,9 +484,10 @@ adminRouter.openapi(reconcileStorageRoute, async (c) => {
         }
 
         // Prepare updated audio_files with canonical paths and physical filenames
-        const inFolder = index.filter(
-          (e) =>
-            e.tier === matchedEntry.tier && e.prefix === matchedEntry.prefix,
+        const inFolder = getFolderEntries(
+          lookup,
+          matchedEntry.tier,
+          matchedEntry.prefix,
         );
         const updatedAudioFiles = rawAudioFiles.map((af: any, idx: number) => {
           const afMeta = (af.metadata as Record<string, unknown>) || {};

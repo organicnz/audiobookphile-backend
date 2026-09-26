@@ -135,12 +135,104 @@ export function isGenericTrackFilename(filename: string): boolean {
 }
 
 /**
+ * Precomputed lookup tables over a storage index.
+ *
+ * ── WHY THIS EXISTS ──
+ * `findBestDeterministicMatch` is called once per candidate filename, and
+ * reconciliation passes every audio file of every book as a candidate: ~3,200
+ * calls for a 100-book library. Each call performed up to three full linear
+ * scans of the index, and the third one lowercased and regex-stripped *every*
+ * entry's filename on every visit. That is ~13 million iterations with string
+ * allocation per reconcile, which reliably exceeded the edge function's CPU
+ * limit and returned WORKER_RESOURCE_LIMIT (HTTP 546) after ~4s -- the
+ * I/O-bound index build and book query together only take ~1.5s, so the
+ * matching loop was unambiguously the cost.
+ *
+ * All three match strategies are pure functions of the filename, so they can
+ * be hoisted into hash lookups built once per index. Semantics are preserved
+ * exactly: each map keeps the FIRST entry seen for a key, which is what
+ * `Array.prototype.find` returned, and the strategies are still tried in the
+ * same order (raw -> decoded -> case-insensitive -> punctuation-normalized).
+ */
+export interface StorageLookup {
+  byFilename: Map<string, StorageIndexEntry>;
+  byDecoded: Map<string, StorageIndexEntry>;
+  byLower: Map<string, StorageIndexEntry>;
+  byNormalized: Map<string, StorageIndexEntry>;
+  /** `tier:::key` -> the entry with that exact object key. */
+  byKey: Map<string, StorageIndexEntry>;
+  /** `tier:::prefix` -> every entry in that folder. */
+  byPrefix: Map<string, StorageIndexEntry[]>;
+}
+
+const normForLookup = (s: string): string =>
+  s.toLowerCase().replace(/[^a-z0-9]/g, "");
+
+export function buildStorageLookup(index: StorageIndexEntry[]): StorageLookup {
+  const byFilename = new Map<string, StorageIndexEntry>();
+  const byDecoded = new Map<string, StorageIndexEntry>();
+  const byLower = new Map<string, StorageIndexEntry>();
+  const byNormalized = new Map<string, StorageIndexEntry>();
+  const byKey = new Map<string, StorageIndexEntry>();
+  const byPrefix = new Map<string, StorageIndexEntry[]>();
+
+  for (const entry of index) {
+    const fn = entry.filename;
+    let decoded = fn;
+    try {
+      decoded = decodeURIComponent(fn);
+    } catch {
+      // keep the raw name; matches the original per-call behaviour
+    }
+
+    if (!byFilename.has(fn)) byFilename.set(fn, entry);
+    if (!byDecoded.has(decoded)) byDecoded.set(decoded, entry);
+    const lower = fn.toLowerCase();
+    if (!byLower.has(lower)) byLower.set(lower, entry);
+    const norm = normForLookup(fn);
+    if (norm && !byNormalized.has(norm)) byNormalized.set(norm, entry);
+
+    if (entry.key) {
+      const key = `${entry.tier}:::${entry.key}`;
+      if (!byKey.has(key)) byKey.set(key, entry);
+    }
+    if (entry.prefix) {
+      const pkey = `${entry.tier}:::${entry.prefix}`;
+      const bucket = byPrefix.get(pkey);
+      if (bucket) bucket.push(entry);
+      else byPrefix.set(pkey, [entry]);
+    }
+  }
+
+  return {
+    byFilename,
+    byDecoded,
+    byLower,
+    byNormalized,
+    byKey,
+    byPrefix,
+  };
+}
+
+/** Entries in one folder, or an empty array. O(1) instead of a full scan. */
+export function getFolderEntries(
+  lookup: StorageLookup,
+  tier: BucketTier,
+  prefix: string,
+): StorageIndexEntry[] {
+  return lookup.byPrefix.get(`${tier}:::${prefix}`) ?? [];
+}
+
+/**
  * Fast deterministic match of a filename against the cached storage index.
  * Generic names ("1.mp3", "Chapter 1.mp3") are rejected unless they match specific patterns.
+ *
+ * Pass a `StorageLookup` to make this O(1); passing a raw array still works
+ * (it builds a lookup per call) so existing callers and tests are unaffected.
  */
 export function findBestDeterministicMatch(
   filename: string,
-  index: StorageIndexEntry[],
+  index: StorageIndexEntry[] | StorageLookup,
 ): StorageIndexEntry | null {
   if (!filename) return null;
   const clean = filename.split("/").pop() || "";
@@ -161,26 +253,22 @@ export function findBestDeterministicMatch(
   const lowerClean = clean.toLowerCase();
   const lowerDecoded = decoded.toLowerCase();
 
+  const lookup = Array.isArray(index) ? buildStorageLookup(index) : index;
+
   // 1. Exact match on raw or decoded filename
-  const exact = index.find(
-    (e) => e.filename === clean || e.filename === decoded,
-  );
+  const exact = lookup.byFilename.get(clean) ??
+    lookup.byDecoded.get(decoded);
   if (exact) return exact;
 
   // 2. Case-insensitive match
-  const caseMatch = index.find((e) => {
-    const fn = e.filename.toLowerCase();
-    return fn === lowerClean || fn === lowerDecoded;
-  });
+  const caseMatch = lookup.byLower.get(lowerClean) ??
+    lookup.byLower.get(lowerDecoded);
   if (caseMatch) return caseMatch;
 
   // 3. Punctuation-normalized alphanumeric match
-  const normClean = lowerClean.replace(/[^a-z0-9]/g, "");
+  const normClean = normForLookup(lowerClean);
   if (normClean.length >= 6) {
-    const normMatch = index.find((e) => {
-      const fnNorm = e.filename.toLowerCase().replace(/[^a-z0-9]/g, "");
-      return fnNorm === normClean;
-    });
+    const normMatch = lookup.byNormalized.get(normClean);
     if (normMatch) return normMatch;
   }
 
@@ -394,7 +482,7 @@ export async function resolveBookStorage(
   item: Record<string, unknown>,
   firstTrack: { filename: string; storagePath: string },
   expiresIn = 604800,
-  options: { useAI?: boolean } = {},
+  options: { useAI?: boolean; lookup?: StorageLookup } = {},
 ): Promise<ResolvedBookStorage | null> {
   // Deterministic-first, AI-second. The AI folder matcher costs a network
   // round trip and is the slowest step in the whole resolver, so callers can
@@ -407,6 +495,10 @@ export async function resolveBookStorage(
   if (!index || index.length === 0) {
     return null;
   }
+  // Reuse a caller-supplied lookup when there is one: reconciliation resolves
+  // hundreds of filenames against the same index, and rebuilding these maps
+  // per call is exactly the work this type exists to avoid.
+  const lookup = options.lookup ?? buildStorageLookup(index);
 
   // 0. Try existing storage path if already specified on firstTrack
   const router = new StorageRouter(null);
@@ -415,9 +507,9 @@ export async function resolveBookStorage(
     : null;
   let matchedEntry: StorageIndexEntry | null = null;
   if (parsedFirst && parsedFirst.tier !== "SUPABASE") {
-    matchedEntry = index.find(
-      (e) => e.tier === parsedFirst.tier && e.key === parsedFirst.key,
-    ) || null;
+    matchedEntry =
+      lookup.byKey.get(`${parsedFirst.tier}:::${parsedFirst.key}`) ??
+        null;
   }
 
   // 1. Try deterministic match using candidate filenames
@@ -431,7 +523,7 @@ export async function resolveBookStorage(
 
   if (!matchedEntry) {
     for (const fn of candidateFilenames) {
-      matchedEntry = findBestDeterministicMatch(fn, index);
+      matchedEntry = findBestDeterministicMatch(fn, lookup);
       if (matchedEntry) break;
     }
   }
@@ -454,9 +546,10 @@ export async function resolveBookStorage(
 
       if (matchedFolder) {
         // Find matching key within that folder
-        const inFolder = index.filter(
-          (e) =>
-            e.tier === matchedFolder.tier && e.prefix === matchedFolder.prefix,
+        const inFolder = getFolderEntries(
+          lookup,
+          matchedFolder.tier,
+          matchedFolder.prefix,
         );
         matchedEntry = inFolder.find((e) =>
           findBestDeterministicMatch(firstTrack.filename, [e])
