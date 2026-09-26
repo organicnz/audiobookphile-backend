@@ -64,6 +64,22 @@ type Finding = {
 const findings: Finding[] = [];
 const add = (f: Finding) => findings.push(f);
 
+/**
+ * Whether a track filename is specific enough that finding it in B2 means the
+ * file is really there, rather than colliding with an unrelated book's
+ * generically-named track.
+ */
+function isDistinctiveFilename(name: string): boolean {
+  const base = name.replace(/\.[a-z0-9]{2,4}$/i, "").toLowerCase().trim();
+  // "chapter 7", "disc 2", "track 03", "cd 1", "07" -- these repeat across
+  // essentially every scanned book and prove nothing.
+  if (base.length < 18) return false;
+  if (/^(chapter|track|disc|disk|part|cd|pt)?[\s._-]*\d{1,3}$/.test(base)) {
+    return false;
+  }
+  return true;
+}
+
 // ---------------------------------------------------------------------------
 // Load every item. audit_only selects no embedding column to keep the payload
 // small, but DOES include audio_files -- resolving track paths is the whole
@@ -212,14 +228,27 @@ for (const it of items ?? []) {
   }
 
   // 4. latched is_missing but the audio is actually there
+  //
+  // Only *distinctive* filenames count. A naive substring/exact match on every
+  // filename reports false positives: a scanned library is full of tracks named
+  // `1.mp3`, `Chapter 1.mp3`, `Disc 2 - Track 3.mp3`, and those names collide
+  // across unrelated books in other folders. An earlier run of this check
+  // "recovered" 3 items on that basis, and the resolver then failed on all 3
+  // because the matching folder belonged to a different book entirely.
+  //
+  // A real hit must be a name long enough that a collision is not coincidental
+  // and not a bare chapter/disc/part number.
   if (b2Indexed && it.is_missing && files.length > 0) {
     let reachable = 0;
+    let distinctiveTotal = 0;
     for (const f of files) {
       const fn = String(f?.metadata?.filename ?? f?.filename ?? "")
         .split("/")
         .pop()!
         .toLowerCase();
-      if (fn && b2ByFilename.has(fn)) reachable += 1;
+      if (!isDistinctiveFilename(fn)) continue;
+      distinctiveTotal += 1;
+      if (b2ByFilename.has(fn)) reachable += 1;
     }
     if (reachable > 0) {
       add({
@@ -228,7 +257,7 @@ for (const it of items ?? []) {
         itemId: it.id,
         title,
         detail:
-          `is_missing=true but ${reachable}/${files.length} filenames exist in B2: the flag latched and hides Play`,
+          `is_missing=true but ${reachable}/${distinctiveTotal} distinctive filenames exist in B2: the flag latched and hides Play`,
       });
     }
   }
