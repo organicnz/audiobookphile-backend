@@ -120,6 +120,7 @@ export interface FixtureItem {
 export async function seedItem(opts: {
   title: string;
   tracks: { filename: string; path: string; duration?: number }[];
+  isMissing?: boolean;
 }): Promise<FixtureItem> {
   const id = crypto.randomUUID();
   const audio_files = opts.tracks.map((t, i) => ({
@@ -139,6 +140,7 @@ export async function seedItem(opts: {
     created_at: new Date().toISOString(),
     audio_files,
     library_files: [],
+    ...(opts.isMissing === undefined ? {} : { is_missing: opts.isMissing }),
   });
   if (error) throw new Error(`seedItem: ${error.message}`);
   return { id };

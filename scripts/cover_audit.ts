@@ -92,88 +92,169 @@ async function verify(
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-/** encodeURIComponent, exposed for template literals inside collectCandidates. */
 const urllibEncode = (v: string) => encodeURIComponent(v);
 
 /**
- * Collect MULTIPLE candidate cover URLs across providers. Provider metadata
- * frequently attaches wrong art to right titles, so metadata alone cannot be
- * trusted - every candidate is vision-verified before use.
+ * Search-friendly title variants.
+ *
+ * Library titles are scanner output and carry a lot of noise that every
+ * provider's structured search handles badly. Real examples from the
+ * production library:
+ *
+ *   "Brain Droppings (Humor)"  -> "Brain Droppings"
+ *   "Amit Goswami Quantum Physics Consciousness Creativity Healing" (author
+ *     name run into the title) -> needs the author stripped out
+ *
+ * OpenLibrary's `title=`/`author=` parameters returned *zero* docs for most of
+ * these because the parenthetical is treated as a literal title token. The
+ * free-text `q=` parameter does not, so variants are searched through `q=`
+ * while the untouched title is still what the vision model verifies against.
  */
+function titleVariants(title: string, author: string): string[] {
+  const out: string[] = [];
+  const push = (v: string) => {
+    const t = v.replace(/\s+/g, " ").trim();
+    if (t.length >= 3 && !out.includes(t)) out.push(t);
+  };
+
+  push(title);
+  // Drop parentheticals/brackets: "Brain Droppings (Humor)" -> "Brain Droppings"
+  const deParen = title.replace(/\s*[\(\[][^\)\]]*[\)\]]/g, " ").replace(
+    /\s+/g,
+    " ",
+  )
+    .trim();
+  push(deParen);
+  // Scanner prefixes like "Author - Title" or "Author Title" (author run on)
+  if (author) {
+    const bareAuthor = author.split(",")[0].trim();
+    if (
+      bareAuthor && deParen.toLowerCase().startsWith(bareAuthor.toLowerCase())
+    ) {
+      push(deParen.slice(bareAuthor.length).replace(/^[\s\-_:]+/, "").trim());
+    }
+  }
+  // Trailing volume/edition noise: "The Feynman Lectures on Physics, Vol. 2"
+  push(
+    deParen.replace(
+      /[,;]?\s*\b(vol|volume|part|pt|book|unabridged|abridged|audiobook|edition|ed)\b\.?\s*[\w\d.]*$/gi,
+      "",
+    ).trim(),
+  );
+
+  return out;
+}
+
+/** Proven, working providers. Google Books is deliberately absent -- see collectCandidates. */
 async function collectCandidates(
   title: string,
   author: string,
 ): Promise<string[]> {
   const urls: string[] = [];
+  const add = (u: string) => {
+    if (u && !urls.includes(u)) urls.push(u);
+  };
+  const variants = titleVariants(title, author);
+  const primary = variants[0] ?? title;
+  const alt = variants[1] ?? primary;
+
+  // --- OpenLibrary, free-text `q=` ------------------------------------------
+  // `q=` is the only parameter that survives noisy titles; the structured
+  // `title=`/`author=` pair returned nothing for this library.
+  for (
+    const q of [
+      author ? `${primary} ${author}` : primary,
+      primary,
+      alt !== primary && author ? `${alt} ${author}` : null,
+    ].filter(Boolean) as string[]
+  ) {
+    try {
+      const r = await fetch(
+        `https://openlibrary.org/search.json?q=${urllibEncode(q)}&limit=6`,
+      );
+      const j = await r.json();
+      for (const d of (j.docs ?? []).slice(0, 4)) {
+        if (d.cover_i) {
+          add(`https://covers.openlibrary.org/b/id/${d.cover_i}-L.jpg`);
+        }
+      }
+    } catch { /* provider down: fall through to the next one */ }
+  }
+
+  // --- iTunes, entity=audiobook ---------------------------------------------
+  // Audiobook results carry the work's name in `collectionName`; `trackName`
+  // is the *chapter*, which is why reading it produced nonsense matches.
+  // `entity=audiobook` is also the correct parameter -- `media=audiobook` is
+  // not a valid iTunes Search entity.
+  for (
+    const q of [
+      author ? `${primary} ${author}` : primary,
+      primary,
+    ]
+  ) {
+    try {
+      const r = await fetch(
+        `https://itunes.apple.com/search?term=${
+          urllibEncode(q)
+        }&entity=audiobook&limit=8`,
+      );
+      const j = await r.json();
+      for (const res of (j.results ?? []).slice(0, 5)) {
+        const art = String(res.artworkUrl100 ?? "");
+        if (art) add(art.replace("100x100", "600x600"));
+      }
+    } catch { /* ignore */ }
+  }
+
+  // --- Wikipedia (for public-domain / classical works) -----------------------
+  // Scanned libraries are full of titles with no commercial audiobook listing
+  // (e.g. "Royal Irish Academy, Vol. 17"); the encyclopaedia article is often
+  // the only place with usable art.
   try {
     const r = await fetch(
-      `https://itunes.apple.com/search?term=${
-        encodeURIComponent(`${title} ${author}`)
-      }&limit=5`,
+      `https://en.wikipedia.org/w/api.php?action=query&format=json&redirects=1` +
+        `&generator=search&gsrsearch=${urllibEncode(primary)}` +
+        `&gsrnamespace=0&gsrlimit=3&prop=pageimages&piprop=thumbnail&pithumbsize=600` +
+        `&origin=*`,
     );
     const j = await r.json();
-    for (const res of (j.results ?? []).slice(0, 3)) {
-      const art = String(res.artworkUrl100 ?? "");
-      if (art) urls.push(art.replace("100x100", "600x600"));
+    for (
+      const p of Object.values<{ thumbnail?: { source?: string } }>(
+        j?.query?.pages ?? {},
+      )
+    ) {
+      const t = p?.thumbnail?.source;
+      if (t) add(String(t).replace(/^\/\//, "https://"));
     }
   } catch { /* ignore */ }
+
+  // --- Internet Archive ------------------------------------------------------
+  // The only source that resolved "Сумерки богов" and the BBC Classics
+  // collection. Note its /services/img endpoint returns the *first* page
+  // image of a scan, so for multi-volume runs the volume number in the
+  // artwork can differ from the requested one -- the vision check is what
+  // catches that, and it did (a "Vol. 17" item was offered a "Volume III"
+  // title page and correctly rejected).
   try {
     const r = await fetch(
-      `https://openlibrary.org/search.json?title=${
-        encodeURIComponent(title)
-      }&author=${encodeURIComponent(author)}&limit=3`,
+      `https://archive.org/advancedsearch.php?q=${
+        urllibEncode(author ? `${primary} AND ${author}` : primary)
+      }&fl%5B%5D=identifier&rows=5&page=1&output=json`,
     );
     const j = await r.json();
-    for (const d of (j.docs ?? []).slice(0, 2)) {
-      if (d.cover_i) {
-        urls.push(`https://covers.openlibrary.org/b/id/${d.cover_i}-L.jpg`);
+    for (const d of (j?.response?.docs ?? []).slice(0, 4)) {
+      if (d?.identifier) {
+        add(`https://archive.org/services/img/${d.identifier}`);
       }
     }
   } catch { /* ignore */ }
-  try {
-    const r = await fetch(
-      `https://openlibrary.org/search.json?title=${
-        urllibEncode(title)
-      }&limit=5`,
-    );
-    const j = await r.json();
-    for (const d of (j.docs ?? []).slice(0, 4)) {
-      if (d.cover_i) {
-        urls.push(`https://covers.openlibrary.org/b/id/${d.cover_i}-L.jpg`);
-      }
-    }
-  } catch { /* ignore */ }
-  try {
-    const r = await fetch(
-      `https://www.googleapis.com/books/v1/volumes?q=${
-        encodeURIComponent(`intitle:${title}`)
-      }&maxResults=5`,
-    );
-    const j = await r.json();
-    for (const v of (j.items ?? []).slice(0, 3)) {
-      const img = v?.volumeInfo?.imageLinks?.thumbnail ??
-        v?.volumeInfo?.imageLinks?.smallThumbnail;
-      if (img) {
-        urls.push(img.replace("http://", "https://").replace("&edge=curl", ""));
-      }
-    }
-  } catch { /* ignore */ }
-  // iTunes last: for many titles it returns unrelated popular audiobooks
-  // ("Afrikawethu" for "Art of War Nicolo Machiavelli"), so its candidates are
-  // mostly noise the vision model has to burn calls rejecting.
-  try {
-    const r = await fetch(
-      `https://itunes.apple.com/search?term=${
-        encodeURIComponent(title)
-      }&media=audiobook&limit=5`,
-    );
-    const j = await r.json();
-    for (const res of (j.results ?? []).slice(0, 2)) {
-      const art = String(res.artworkUrl100 ?? "");
-      if (art) urls.push(art.replace("100x100", "600x600"));
-    }
-  } catch { /* ignore */ }
-  return [...new Set(urls)].slice(0, 12);
+
+  // Google Books is intentionally NOT queried. This project is permanently
+  // HTTP 429 (quota exhausted) on books.googleapis.com, so the call only ever
+  // burned a round trip; it contributed zero candidates across the full
+  // library audit.
+
+  return urls.slice(0, 24);
 }
 
 /** Vision-arbitrated repair: only upload art the model confirms matches. */
@@ -184,9 +265,24 @@ async function visionRepair(
   author: string,
 ): Promise<{ ok: boolean; detail: string }> {
   const candidates = await collectCandidates(title, author);
+  // A vision *rejection* ("this is a different book") and a vision *failure*
+  // (HTTP 500 / timeout / unparseable) both used to collapse into
+  // `if (!v) continue`, so a provider outage made every item look like
+  // "no correct art exists" and the audit reported a healthy library while
+  // silently fixing nothing. They are now counted separately, because the
+  // operator response is completely different: keep retrying vs. accept it.
+  let rejected = 0;
+  let errored = 0;
   for (const url of candidates) {
     const v = await verify(title, author, url);
-    if (!v || !v.match || v.confidence < 0.6) continue;
+    if (!v) {
+      errored += 1;
+      continue;
+    }
+    if (!v.match || v.confidence < 0.6) {
+      rejected += 1;
+      continue;
+    }
     const buf = await fetch(url).then((r) => r.arrayBuffer());
     const bytes = new Uint8Array(buf);
     if (bytes.byteLength < 2000) continue; // skip OL 1px placeholders
@@ -197,6 +293,8 @@ async function visionRepair(
       contentType: ext === "png" ? "image/png" : "image/jpeg",
     });
     if (!up.error) {
+      // cover_path change also bumps updated_at via trigger, which is the
+      // web client's cover cache-buster.
       await db.from("library_items").update({ cover_path: path }).eq(
         "id",
         itemId,
@@ -209,7 +307,8 @@ async function visionRepair(
   }
   return {
     ok: false,
-    detail: `${candidates.length} candidates, none verified`,
+    detail: `${candidates.length} candidates (${rejected} vision-rejected` +
+      `${errored ? `, ${errored} vision-ERRORED` : ""}) — none verified`,
   };
 }
 

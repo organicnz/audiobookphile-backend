@@ -366,7 +366,15 @@ export async function resolveBookStorage(
   item: Record<string, unknown>,
   firstTrack: { filename: string; storagePath: string },
   expiresIn = 604800,
+  options: { useAI?: boolean } = {},
 ): Promise<ResolvedBookStorage | null> {
+  // Deterministic-first, AI-second. The AI folder matcher costs a network
+  // round trip and is the slowest step in the whole resolver, so callers can
+  // run the cheap filename pass on a short budget and only escalate to the
+  // model once that has failed. Matching was previously all-or-nothing behind
+  // a single 3.5s race in playbackService, which reliably killed the AI stage
+  // before it could ever answer.
+  const useAI = options.useAI ?? true;
   const index = await refreshStorageIndex();
   if (!index || index.length === 0) {
     return null;
@@ -403,7 +411,7 @@ export async function resolveBookStorage(
   let matchedBy: "deterministic" | "ai_semantic" = "deterministic";
 
   // 2. If deterministic fails, invoke AI semantic matcher
-  if (!matchedEntry) {
+  if (!matchedEntry && useAI) {
     const zaiApiKey = Deno.env.get("ZAI_API_KEY") ??
       Deno.env.get("ZHIPU_API_KEY") ?? "";
     if (zaiApiKey) {

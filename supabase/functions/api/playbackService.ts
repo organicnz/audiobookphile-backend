@@ -348,6 +348,24 @@ export class PlaybackService {
 
     let winningPrefix: string | null = null;
 
+    /**
+     * Adopts a resolver hit onto the prepared track list, so the local
+     * prefix-fan-out below presigns the remaining tracks the same way a
+     * direct probe would have.
+     */
+    const applyResolverMatch = (
+      match: Awaited<ReturnType<typeof resolveBookStorage>>,
+    ) => {
+      if (!match) return;
+      firstTrack.isMissing = false;
+      firstTrack.finalSignedUrl = match.signedUrl;
+      firstTrack.resolvedCanonicalPath = match.canonicalPath;
+      winningPrefix = match.winningPrefix;
+      console.info(
+        `[PlaybackService] Resolver recovered playback for "${item.title}" (${match.matchedBy}) -> ${match.winningPrefix}`,
+      );
+    };
+
     if (isFirstLegacy) {
       try {
         const resolved = await storage.resolveAndSign(
@@ -425,31 +443,57 @@ export class PlaybackService {
       }
     }
 
-    // If standard probes failed, attempt intelligent multi-tier AI/index resolution
+    // If standard probes failed, attempt intelligent multi-tier AI/index resolution.
+    //
+    // The `!item.is_missing` guard that used to sit here made the resolver
+    // unreachable for exactly the items that need it. `is_missing` is set the
+    // first time an item fails to resolve, and the fast-fail below throws
+    // before the is_missing reset can run, so the flag latched true forever:
+    // first attempt -> 404 + is_missing=true -> every later attempt skipped
+    // the only code path that could have recovered the item -> permanent 404.
+    // The resolver is now always eligible; it is what makes the flag
+    // self-healing.
     if (
       !winningPrefix &&
-      !preparedTracks.some((t) => t.finalSignedUrl && !t.isMissing) &&
-      !item.is_missing
+      !preparedTracks.some((t) => t.finalSignedUrl && !t.isMissing)
     ) {
+      // Deterministic pass first: it reuses the resolver's 1h-cached object
+      // index and costs at most one HeadObject, so it fits a short budget.
+      // Only if that finds nothing do we pay for the model call.
       try {
-        const intelligentMatch = await Promise.race([
-          resolveBookStorage(item, firstTrack),
-          new Promise<null>((resolve) => setTimeout(() => resolve(null), 3500)),
-        ]);
-        if (intelligentMatch) {
-          firstTrack.isMissing = false;
-          firstTrack.finalSignedUrl = intelligentMatch.signedUrl;
-          firstTrack.resolvedCanonicalPath = intelligentMatch.canonicalPath;
-          winningPrefix = intelligentMatch.winningPrefix;
-          console.info(
-            `[PlaybackService] Intelligent resolver recovered playback for "${item.title}" (${intelligentMatch.matchedBy}) -> ${winningPrefix}`,
+        const deterministicMatch = await resolveBookStorage(
+          item,
+          firstTrack,
+          604800,
+          { useAI: false },
+        );
+        if (deterministicMatch) {
+          applyResolverMatch(deterministicMatch);
+        }
+      } catch (detErr) {
+        console.warn(
+          `[PlaybackService] Deterministic resolver error for item ${libraryItemId}:`,
+          detErr,
+        );
+      }
+
+      if (!winningPrefix) {
+        try {
+          const intelligentMatch = await resolveBookStorage(
+            item,
+            firstTrack,
+            604800,
+            { useAI: true },
+          );
+          if (intelligentMatch) {
+            applyResolverMatch(intelligentMatch);
+          }
+        } catch (intelErr) {
+          console.warn(
+            `[PlaybackService] Intelligent resolver error for item ${libraryItemId}:`,
+            intelErr,
           );
         }
-      } catch (intelErr) {
-        console.warn(
-          `[PlaybackService] Intelligent resolver error for item ${libraryItemId}:`,
-          intelErr,
-        );
       }
     }
 

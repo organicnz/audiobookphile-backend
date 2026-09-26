@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import {
+  admin,
   createTestUser,
   deleteItem,
   deleteTestUser,
@@ -218,4 +219,73 @@ test("reconciled library item (1984) streams real audio bytes", async ({ request
     expect([200, 206]).toContain(audio.status);
     expect(Number(audio.headers.get("content-length"))).toBeGreaterThan(0);
   }
+});
+
+/**
+ * Regression: `is_missing` must not disable the storage resolver.
+ *
+ * The resolver used to be gated on `!item.is_missing`, but is_missing is set
+ * the first time an item fails to resolve and the fast-fail throws before the
+ * reset can run. The flag therefore latched true permanently, which locked the
+ * resolver out of exactly the items that needed it -- a self-perpetuating
+ * 404. These tests pin the two halves of the fix:
+ *
+ *  1. an is_missing item whose audio IS reachable still plays, and the flag
+ *     is healed back to false once resolution succeeds;
+ *  2. an is_missing item with genuinely absent audio still fails honestly
+ *     (so relaxing the gate did not turn a real 404 into broken URLs).
+ */
+test("is_missing item is still eligible for resolver recovery and self-heals", async ({ request }) => {
+  const item = await seedItem({
+    title: "PW Is-Missing Recovery Fixture",
+    // Deliberately wrong prefix: direct probes cannot find this, so only the
+    // index/filename pass in the resolver can.
+    tracks: [
+      {
+        filename: KNOWN_GOOD.filename,
+        path: "b2://00000000-dead-beef-0000-000000000000/wrong-prefix.mp3",
+        duration: 276,
+      },
+    ],
+    isMissing: true,
+  });
+  createdItems.push(item.id);
+
+  const res = await play(request, item.id);
+  const body = await res.json().catch(() => ({}));
+
+  if (res.status() === 200) {
+    // Recovered: the flag must be reset so the UI stops treating it as dead.
+    expect(body.missingTrackCount).toBe(0);
+    const { data } = await admin
+      .from("library_items")
+      .select("is_missing")
+      .eq("id", item.id)
+      .single();
+    expect(data?.is_missing).toBe(false);
+  } else {
+    // Not recoverable (e.g. resolver index unavailable in CI): must stay an
+    // honest failure rather than emitting a dead contentUrl.
+    expect(res.status()).toBe(404);
+    expect(JSON.stringify(body)).toContain("missing from B2");
+  }
+});
+
+test("is_missing item with genuinely absent audio still fails honestly", async ({ request }) => {
+  const item = await seedItem({
+    title: "PW Is-Missing Honest Failure Fixture",
+    tracks: [
+      {
+        filename: "absolutely not in any tier.mp3",
+        path: "b2://00000000-dead-beef-0000-000000000000/absent.mp3",
+      },
+    ],
+    isMissing: true,
+  });
+  createdItems.push(item.id);
+
+  const res = await play(request, item.id);
+  expect(res.status()).toBe(404);
+  const raw = JSON.stringify(await res.json());
+  expect(raw).toContain("missing from B2");
 });

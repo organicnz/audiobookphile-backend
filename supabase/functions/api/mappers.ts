@@ -430,7 +430,13 @@ export function mapBookForMobile(
       ),
       tags: (bookRecord.tags as string[]) || [],
       audioFiles: audioFiles,
-      numTracks: audioFiles.length,
+      // Detail mode knows the real array. List mode omits audio_files from
+      // the projection (see LIST_ITEM_SELECT) and reads the trigger-
+      // maintained num_tracks counter instead, so shelves can still report
+      // playability. Fall back to the counter whenever the array is absent.
+      numTracks: includeFiles
+        ? audioFiles.length
+        : (Number((bookRecord as { num_tracks?: unknown }).num_tracks) || 0),
       ebookFile: bookRecord.ebook_file
         ? (bookRecord.ebook_file as EbookFileModel)
         : null,

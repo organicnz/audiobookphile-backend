@@ -27,6 +27,11 @@ export type LibraryWithFolders = LibraryRow & {
  * endpoints select only the columns the UI renders and leave per-file data
  * to the detail endpoint (/api/items/:id). Keeps a 100-book shelf ~20x
  * smaller and skips the pgvector embedding column entirely.
+ *
+ * num_tracks is included deliberately: it is a trigger-maintained int4
+ * summarising audio_files, so shelves can answer "is this book playable?"
+ * without paying for the array it summarises. Without it every list-mode
+ * item mapped to numTracks: 0 and the UI hid Play for playable books.
  * ========================================================================= */
 
 export const LIST_ITEM_SELECT =
@@ -34,6 +39,7 @@ export const LIST_ITEM_SELECT =
   "author_names_first_last, narrators, genres, tags, published_year, " +
   "published_date, publisher, description, isbn, asin, language, explicit, " +
   "abridged, cover_path, duration, size, is_file, is_missing, is_invalid, " +
+  "num_tracks, " +
   "mtime, ctime, birthtime, created_at, updated_at, media_type, " +
   "book_authors(authors(*)), book_series(series(*))";
 

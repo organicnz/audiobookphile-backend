@@ -1,0 +1,88 @@
+name: Library Consistency Review
+
+# Recurring, read-only sweep of the library for the inconsistencies that make
+# it look healthy in the database while behaving badly in the app: covers that
+# point at objects which no longer exist, an is_missing flag that latched on
+# after a transient failure, track counters that drifted, durations that
+# disagree with their own track list.
+#
+# Reports only. It never writes, and it never fails the run, so a noisy audit
+# cannot block a deploy. Findings are printed in the job summary; the on-demand
+# repair workflows (repair-covers.yml) act on them.
+#
+# ZAI_API_KEY is not needed here: the vision-based cover check already runs on
+# its own schedule in daily-compat.yml. This job is the cheap, deterministic
+# half of the review.
+
+on:
+  schedule:
+    # Twice a week, off the hour and off the daily cron peaks.
+    - cron: "17 5 * * 1,4"
+  workflow_dispatch:
+    inputs:
+      run_storage_checks:
+        description: "Include the B2 object index (slower, needs tier credentials)"
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: library-review
+  cancel-in-progress: false
+
+jobs:
+  review:
+    name: Consistency Audit
+    runs-on: [self-hosted, macOS]
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Run library consistency audit
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          B2_KEY_ID: ${{ secrets.B2_KEY_ID }}
+          B2_APP_KEY: ${{ secrets.B2_APP_KEY }}
+          B2_BUCKET_NAME: ${{ secrets.B2_BUCKET_NAME }}
+          B2_ENDPOINT: ${{ secrets.B2_ENDPOINT }}
+          B2_REGION: ${{ secrets.B2_REGION }}
+          B2_SECONDARY_KEY_ID: ${{ secrets.B2_SECONDARY_KEY_ID }}
+          B2_SECONDARY_APP_KEY: ${{ secrets.B2_SECONDARY_APP_KEY }}
+          B2_SECONDARY_BUCKET_NAME: ${{ secrets.B2_SECONDARY_BUCKET_NAME }}
+          B2_SECONDARY_ENDPOINT: ${{ secrets.B2_SECONDARY_ENDPOINT }}
+          B2_SECONDARY_REGION: ${{ secrets.B2_SECONDARY_REGION }}
+        run: |
+          if [ -z "$SUPABASE_URL" ] || [ -z "$SUPABASE_SERVICE_ROLE_KEY" ]; then
+            echo "::error::Missing Supabase credentials; cannot audit."
+            exit 1
+          fi
+          set -o pipefail
+          deno run --allow-all scripts/library_review.ts 2>&1 | tee review.log
+
+      - name: Publish findings to the run summary
+        if: always()
+        run: |
+          {
+            echo "## Library consistency review"
+            echo
+            echo '```'
+            # Skip the download/noise preamble; keep the report itself.
+            sed -n '/^auditing /,$p' review.log || cat review.log
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Archive report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: library-review
+          path: review.log
+          retention-days: 30
