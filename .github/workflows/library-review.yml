@@ -49,6 +49,11 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          # Every configured tier must be wired here. An unwired tier is
+          # silently skipped by isTierConfigured(), so a partial list makes the
+          # audit report "no audio in storage" for books whose files live in an
+          # unscanned bucket. Code name B2_QUINTET reads the B2_QUINTA_*
+          # env prefix (see _shared/b2-config.ts).
           B2_KEY_ID: ${{ secrets.B2_KEY_ID }}
           B2_APP_KEY: ${{ secrets.B2_APP_KEY }}
           B2_BUCKET_NAME: ${{ secrets.B2_BUCKET_NAME }}
@@ -59,13 +64,67 @@ jobs:
           B2_SECONDARY_BUCKET_NAME: ${{ secrets.B2_SECONDARY_BUCKET_NAME }}
           B2_SECONDARY_ENDPOINT: ${{ secrets.B2_SECONDARY_ENDPOINT }}
           B2_SECONDARY_REGION: ${{ secrets.B2_SECONDARY_REGION }}
+          B2_TERTIARY_KEY_ID: ${{ secrets.B2_TERTIARY_KEY_ID }}
+          B2_TERTIARY_APP_KEY: ${{ secrets.B2_TERTIARY_APP_KEY }}
+          B2_TERTIARY_BUCKET_NAME: ${{ secrets.B2_TERTIARY_BUCKET_NAME }}
+          B2_TERTIARY_ENDPOINT: ${{ secrets.B2_TERTIARY_ENDPOINT }}
+          B2_TERTIARY_REGION: ${{ secrets.B2_TERTIARY_REGION }}
+          B2_QUARTET_KEY_ID: ${{ secrets.B2_QUARTET_KEY_ID }}
+          B2_QUARTET_APP_KEY: ${{ secrets.B2_QUARTET_APP_KEY }}
+          B2_QUARTET_BUCKET_NAME: ${{ secrets.B2_QUARTET_BUCKET_NAME }}
+          B2_QUARTET_ENDPOINT: ${{ secrets.B2_QUARTET_ENDPOINT }}
+          B2_QUARTET_REGION: ${{ secrets.B2_QUARTET_REGION }}
+          B2_QUINTA_KEY_ID: ${{ secrets.B2_QUINTA_KEY_ID }}
+          B2_QUINTA_APP_KEY: ${{ secrets.B2_QUINTA_APP_KEY }}
+          B2_QUINTA_BUCKET_NAME: ${{ secrets.B2_QUINTA_BUCKET_NAME }}
+          B2_QUINTA_ENDPOINT: ${{ secrets.B2_QUINTA_ENDPOINT }}
+          B2_QUINTA_REGION: ${{ secrets.B2_QUINTA_REGION }}
         run: |
           if [ -z "$SUPABASE_URL" ] || [ -z "$SUPABASE_SERVICE_ROLE_KEY" ]; then
             echo "::error::Missing Supabase credentials; cannot audit."
             exit 1
           fi
+          # Honour the dispatch input. On a schedule `inputs` is empty, which
+          # is not "false", so the default (scan storage) applies.
+          if [ "${{ inputs.run_storage_checks }}" = "false" ]; then
+            echo "run_storage_checks=false: auditing the database only."
+            unset B2_KEY_ID B2_APP_KEY B2_BUCKET_NAME \
+                  B2_SECONDARY_KEY_ID B2_SECONDARY_APP_KEY B2_SECONDARY_BUCKET_NAME \
+                  B2_TERTIARY_KEY_ID B2_TERTIARY_APP_KEY B2_TERTIARY_BUCKET_NAME \
+                  B2_QUARTET_KEY_ID B2_QUARTET_APP_KEY B2_QUARTET_BUCKET_NAME \
+                  B2_QUINTA_KEY_ID B2_QUINTA_APP_KEY B2_QUINTA_BUCKET_NAME
+          fi
           set -o pipefail
           deno run --allow-all scripts/library_review.ts 2>&1 | tee review.log
+
+      - name: Verify storage tiers were actually scanned
+        if: always()
+        env:
+          RUN_STORAGE_CHECKS: ${{ inputs.run_storage_checks }}
+          B2_KEY_ID: ${{ secrets.B2_KEY_ID }}
+          B2_SECONDARY_KEY_ID: ${{ secrets.B2_SECONDARY_KEY_ID }}
+          B2_TERTIARY_KEY_ID: ${{ secrets.B2_TERTIARY_KEY_ID }}
+          B2_QUARTET_KEY_ID: ${{ secrets.B2_QUARTET_KEY_ID }}
+          B2_QUINTA_KEY_ID: ${{ secrets.B2_QUINTA_KEY_ID }}
+        run: |
+          # A credential-less tier is skipped without warning, so an audit that
+          # silently scanned zero buckets still looks like a clean pass. Say so
+          # loudly instead: "no storage evidence" and "storage not scanned" are
+          # very different findings.
+          if [ -z "$B2_KEY_ID" ] && [ -z "$B2_SECONDARY_KEY_ID" ] && \
+             [ -z "$B2_TERTIARY_KEY_ID" ] && [ -z "$B2_QUARTET_KEY_ID" ] && \
+             [ -z "$B2_QUINTA_KEY_ID" ]; then
+            {
+              echo "## Storage checks skipped"
+              echo
+              echo "No B2 tier credentials are configured, so this run could not check"
+              echo "storage at all. Any 'no audio found' finding below is unverified."
+              echo
+              echo 'Add the B2_* / B2_<TIER>_* repository secrets, or re-run with'
+              echo 'run_storage_checks=false to record that intent.'
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::warning::No B2 tier credentials configured; storage was not scanned"
+          fi
 
       - name: Publish findings to the run summary
         if: always()
