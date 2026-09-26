@@ -151,6 +151,10 @@ const similarItemsRoute = {
       description: "Similar items ordered by relevance",
       content: { "application/json": { schema: SimilarItemsSchema } },
     },
+    404: {
+      description: "The item these would be similar to no longer exists",
+      content: { "application/json": { schema: ServerErrorSchema } },
+    },
     500: {
       description: "Query failure",
       content: { "application/json": { schema: ServerErrorSchema } },
@@ -537,11 +541,37 @@ itemsRouter.openapi(similarItemsRoute, async (c) => {
   const { id: itemId } = c.req.valid("param");
 
   try {
+    // The similarity RPC is text/embedding based and keyed on a query string,
+    // not on an item id: the only `match_library_items*` function in the schema
+    // is `match_library_items_hybrid(query_text, match_threshold, match_count,
+    // target_library_id)`. This route used to call a `match_library_items`
+    // that never existed, so every item page logged a 500 and rendered an
+    // empty "Similar to this" shelf.
+    const { data: source, error: sourceErr } = await supabase
+      .from("library_items")
+      .select("title, library_id")
+      .eq("id", itemId)
+      .maybeSingle();
+
+    if (sourceErr) {
+      console.error(
+        "[items] Failed to load source item for similar:",
+        sourceErr,
+      );
+      return c.json({ error: "Failed to fetch similar items" }, 500);
+    }
+    if (!source) {
+      return c.json({ error: "Item not found" }, 404);
+    }
+
     const { data, error } = await (supabase as unknown as Record<string, any>)
-      .rpc("match_library_items", {
-        item_id: itemId,
+      .rpc("match_library_items_hybrid", {
+        query_text: source.title,
         match_threshold: SEARCH_MATCH_THRESHOLD,
-        match_count: SEARCH_MATCH_COUNT,
+        // +1 because the source item matches itself and must be filtered out
+        // below; asking for exactly match_count would return count-1 results.
+        match_count: SEARCH_MATCH_COUNT + 1,
+        target_library_id: source.library_id,
       });
 
     if (error) {
@@ -549,30 +579,46 @@ itemsRouter.openapi(similarItemsRoute, async (c) => {
       return c.json({ error: "Failed to fetch similar items" }, 500);
     }
 
-    if (!data || data.length === 0) {
+    // Relevance order is the RPC's ranking, so it is preserved explicitly
+    // rather than left to whatever order Postgres returns an `in (...)` query.
+    const ids = ((data as { id: string }[]) || [])
+      .map((d) => d.id)
+      .filter((id) => id !== itemId)
+      .slice(0, SEARCH_MATCH_COUNT);
+
+    if (ids.length === 0) {
       return c.json({ similarItems: [] }, 200);
     }
 
-    const ids = ((data as { id: string }[]) || []).map((d) => d.id);
-
     const { data: items, error: itemsErr } = await supabase.from(
       "library_items",
-    ).select("*").in("id", ids);
+    ).select(
+      "*, book_authors(authors(*)), book_series(series(*))",
+    ).in("id", ids);
 
     if (itemsErr) {
       console.error("[items] Failed to fetch similar items details:", itemsErr);
       return c.json({ error: "Failed to fetch similar items details" }, 500);
     }
 
-    const sortedItems = items?.sort((a: any, b: any) => {
-      const indexA = ids.indexOf(a.id);
-      const indexB = ids.indexOf(b.id);
-      return indexA - indexB;
-    }) || [];
+    const byId = new Map((items || []).map((i) => [i.id, i]));
+    const ordered = ids
+      .map((id) => byId.get(id))
+      .filter((i): i is NonNullable<typeof i> => Boolean(i));
 
-    return c.json({ similarItems: sortedItems } as any, 200);
-  } catch (err: any) {
-    console.error("[items] similar items failed:", err);
+    // Run every item through the shared mobile mapper rather than returning raw
+    // `library_items` rows. The shelf renders these with BookMediaCard /
+    // PodcastMediaCard, which branch on `mediaType` and read nested
+    // `media.coverPath`; raw rows have neither, so the cards silently
+    // misrender. Same response shape as every other item endpoint.
+    const similarItems = ordered.map((item) =>
+      mapBookForMobile(item as unknown as LibraryItemWithBooks)
+    );
+
+    c.header("Cache-Control", "private, max-age=300");
+    return c.json({ similarItems } as any, 200);
+  } catch (err) {
+    console.error("[items] similar-items failed:", err);
     return c.json({ error: "Internal server error" }, 500);
   }
 });
