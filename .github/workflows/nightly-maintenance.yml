@@ -51,6 +51,7 @@ jobs:
     timeout-minutes: 15
     steps:
       - name: Trigger Storage Reconciliation
+        id: reconcile
         env:
           SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
@@ -65,7 +66,7 @@ jobs:
           response=$(curl -s -w "\n%{http_code}" -X POST "https://${SUPABASE_PROJECT_ID}.supabase.co/functions/v1/api/admin/reconcile-storage" \
             -H "Authorization: Bearer $KEY" \
             -H "Content-Type: application/json" \
-            -d '{"dryRun": false, "cleanTestData": true}')
+            -d '{"dryRun": false, "cleanTestData": true, "aiBudget": 8}')
           http_code=$(echo "$response" | tail -n1)
           body=$(echo "$response" | sed '$d')
           echo "Status: $http_code"
@@ -74,6 +75,32 @@ jobs:
             echo "::error::Storage reconciliation failed with status $http_code"
             exit 1
           fi
+
+          # The AI matching stage is budgeted so the function fits its worker
+          # limit, which means a run can now legitimately stop early. A
+          # truncated run must not be indistinguishable from a complete one --
+          # that is exactly how the previous nightly failure (HTTP 546 every
+          # night) went unnoticed. Warn loudly when work was deferred.
+          skipped=$(echo "$body" | grep -o '"aiSkippedCount":[0-9]*' | cut -d: -f2)
+          skipped="${skipped:-0}"
+          if [ "$skipped" -gt 0 ]; then
+            echo "::warning::${skipped} item(s) skipped AI matching: the model-call budget was exhausted. Deterministic reconciliation still completed for everything else. Re-run to continue, or raise aiBudget if the library grows."
+          fi
+          echo "body=$body" >> "$GITHUB_OUTPUT"
+
+      # Write a compact summary so a green run is actually inspectable.
+      - name: Summarise reconciliation
+        if: always()
+        run: |
+          {
+            echo "### Storage reconciliation"
+            echo
+            echo '```json'
+            echo "${RECONCILE_BODY:-not captured}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+        env:
+          RECONCILE_BODY: ${{ steps.reconcile.outputs.body }}
 
   storage-quota:
     name: Storage Quota & Capacity Check
